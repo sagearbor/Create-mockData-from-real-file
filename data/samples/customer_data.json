@@ -1,0 +1,124 @@
+{
+  "customers": [
+    {
+      "customer_id": "C001",
+      "first_name": "John",
+      "last_name": "Smith",
+      "email": "john.smith@email.com",
+      "phone": "555-0101",
+      "date_of_birth": "1985-03-15",
+      "registration_date": "2023-01-15",
+      "address": {
+        "street": "123 Main St",
+        "city": "New York",
+        "state": "NY",
+        "zip": "10001",
+        "country": "USA"
+      },
+      "preferences": {
+        "newsletter": true,
+        "sms_notifications": false,
+        "preferred_contact": "email"
+      },
+      "loyalty_points": 1250,
+      "lifetime_value": 5499.95,
+      "status": "Active"
+    },
+    {
+      "customer_id": "C002",
+      "first_name": "Jane",
+      "last_name": "Doe",
+      "email": "jane.doe@email.com",
+      "phone": "555-0102",
+      "date_of_birth": "1990-07-22",
+      "registration_date": "2023-02-20",
+      "address": {
+        "street": "456 Oak Ave",
+        "city": "Los Angeles",
+        "state": "CA",
+        "zip": "90001",
+        "country": "USA"
+      },
+      "preferences": {
+        "newsletter": true,
+        "sms_notifications": true,
+        "preferred_contact": "phone"
+      },
+      "loyalty_points": 850,
+      "lifetime_value": 3299.97,
+      "status": "Active"
+    },
+    {
+      "customer_id": "C003",
+      "first_name": "Bob",
+      "last_name": "Johnson",
+      "email": "bob.johnson@email.com",
+      "phone": "555-0103",
+      "date_of_birth": "1978-11-30",
+      "registration_date": "2023-03-10",
+      "address": {
+        "street": "789 Pine Rd",
+        "city": "Chicago",
+        "state": "IL",
+        "zip": "60601",
+        "country": "USA"
+      },
+      "preferences": {
+        "newsletter": false,
+        "sms_notifications": false,
+        "preferred_contact": "email"
+      },
+      "loyalty_points": 450,
+      "lifetime_value": 1899.98,
+      "status": "Inactive"
+    },
+    {
+      "customer_id": "C004",
+      "first_name": "Alice",
+      "last_name": "Brown",
+      "email": "alice.brown@email.com",
+      "phone": "555-0104",
+      "date_of_birth": "1992-05-18",
+      "registration_date": "2023-04-05",
+      "address": {
+        "street": "321 Elm St",
+        "city": "Houston",
+        "state": "TX",
+        "zip": "77001",
+        "country": "USA"
+      },
+      "preferences": {
+        "newsletter": true,
+        "sms_notifications": true,
+        "preferred_contact": "both"
+      },
+      "loyalty_points": 2100,
+      "lifetime_value": 7599.94,
+      "status": "Premium"
+    },
+    {
+      "customer_id": "C005",
+      "first_name": "Charlie",
+      "last_name": "Wilson",
+      "email": "charlie.wilson@email.com",
+      "phone": "555-0105",
+      "date_of_birth": "1988-09-25",
+      "registration_date": "2023-05-12",
+      "address": {
+        "street": "654 Maple Dr",
+        "city": "Phoenix",
+        "state": "AZ",
+        "zip": "85001",
+        "country": "USA"
+      },
+      "preferences": {
+        "newsletter": false,
+        "sms_notifications": true,
+        "preferred_contact": "phone"
+      },
+      "loyalty_points": 320,
+      "lifetime_value": 1299.99,
+      "status": "Active"
+    }
+  ]
+}

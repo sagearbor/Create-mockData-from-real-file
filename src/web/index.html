@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BYOD Synthetic Data Generator</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 BYOD Synthetic Data Generator</h1>
+            <p class="tagline">Generate privacy-safe synthetic data that preserves statistical properties</p>
+        </header>
+
+        <main>
+            <!-- Upload Section -->
+            <section class="upload-section">
+                <h2>Upload Your Data</h2>
+                <div class="upload-area" id="uploadArea">
+                    <svg class="upload-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <p>Drag & drop your file here or click to browse</p>
+                    <p class="file-types">Supported: CSV, JSON, Excel, Parquet, TSV</p>
+                    <input type="file" id="fileInput" accept=".csv,.json,.xlsx,.xls,.parquet,.tsv,.txt" hidden>
+                </div>
+                
+                <div id="fileInfo" class="file-info" style="display: none;">
+                    <h3>File Loaded:</h3>
+                    <p id="fileName"></p>
+                    <div id="fileStats"></div>
+                </div>
+            </section>
+
+            <!-- Configuration Section -->
+            <section class="config-section" id="configSection" style="display: none;">
+                <h2>Generation Settings</h2>
+                
+                <div class="form-group">
+                    <label for="numRows">Number of Rows to Generate:</label>
+                    <input type="number" id="numRows" min="1" max="1000000" placeholder="Leave empty to match original">
+                </div>
+
+                <div class="form-group">
+                    <label for="matchThreshold">
+                        Match Strictness: <span id="thresholdValue">80%</span>
+                    </label>
+                    <input type="range" id="matchThreshold" min="0" max="100" value="80">
+                    <div class="threshold-labels">
+                        <span>Loose Match</span>
+                        <span>Exact Match</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="outputFormat">Output Format:</label>
+                    <select id="outputFormat">
+                        <option value="csv">CSV</option>
+                        <option value="json">JSON</option>
+                        <option value="excel">Excel</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="useCache" checked>
+                        Use cached generation (faster)
+                    </label>
+                </div>
+
+                <div class="button-group">
+                    <button id="extractMetadataBtn" class="btn btn-secondary">
+                        Extract Metadata Only
+                    </button>
+                    <button id="generateBtn" class="btn btn-primary">
+                        Generate Synthetic Data
+                    </button>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <h2>Results</h2>
+                <div id="resultsContent"></div>
+                <div class="button-group">
+                    <button id="downloadBtn" class="btn btn-primary" style="display: none;">
+                        Download Synthetic Data
+                    </button>
+                    <button id="resetBtn" class="btn btn-secondary">
+                        Generate Another Dataset
+                    </button>
+                </div>
+            </section>
+
+            <!-- Metadata Display -->
+            <section class="metadata-section" id="metadataSection" style="display: none;">
+                <h2>Extracted Metadata</h2>
+                <div id="metadataContent"></div>
+            </section>
+
+            <!-- Demo Mode -->
+            <section class="demo-section">
+                <h2>Try Demo Datasets</h2>
+                <div class="demo-buttons">
+                    <button class="demo-btn" data-demo="sales">Sales Data</button>
+                    <button class="demo-btn" data-demo="customer">Customer Records</button>
+                    <button class="demo-btn" data-demo="medical">Medical Records (PHI)</button>
+                    <button class="demo-btn" data-demo="financial">Financial Transactions</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Loading Overlay -->
+        <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+            <div class="spinner"></div>
+            <p id="loadingMessage">Processing...</p>
+        </div>
+
+        <!-- Error Modal -->
+        <div id="errorModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <h3>Error</h3>
+                <p id="errorMessage"></p>
+                <button onclick="closeError()" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 // BYOD Synthetic Data Generator - Frontend Application
 
+// Use the current origin (works with any port)
 const API_BASE = window.location.origin;
 let currentFile = null;
 let currentMetadata = null;
@@ -101,7 +102,7 @@ function processFile(file) {
 
 // API calls
 async function generateSyntheticData() {
-    if (!currentFile) {
+    if (!currentFile && !window.currentEditedData) {
         showError('Please upload a file first');
         return;
     }
@@ -109,7 +110,15 @@ async function generateSyntheticData() {
     showLoading('Generating synthetic data...');
     
     const formData = new FormData();
-    formData.append('file', currentFile);
+    
+    // If data was edited, send the edited version as CSV
+    if (window.currentEditedData) {
+        const csv = convertToCSV(window.currentEditedData);
+        formData.append('edited_data', csv);
+    } else {
+        formData.append('file', currentFile);
+    }
+    
     formData.append('num_rows', numRows.value || '');
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
@@ -143,7 +152,8 @@ async function generateSyntheticData() {
         }
         
     } catch (error) {
-        showError(error.message);
+        const errorMsg = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+        showError(errorMsg || 'An unexpected error occurred');
     } finally {
         hideLoading();
     }
@@ -176,7 +186,8 @@ async function extractMetadata() {
         displayMetadata(data.metadata);
         
     } catch (error) {
-        showError(error.message);
+        const errorMsg = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+        showError(errorMsg || 'An unexpected error occurred');
     } finally {
         hideLoading();
     }
@@ -355,7 +366,11 @@ function hideLoading() {
 }
 
 function showError(message) {
-    errorMessage.textContent = message;
+    // Handle both string and object messages
+    const displayMessage = typeof message === 'object' 
+        ? (message.message || JSON.stringify(message))
+        : (message || 'An unexpected error occurred');
+    errorMessage.textContent = displayMessage;
     errorModal.style.display = 'flex';
 }
 
@@ -377,6 +392,21 @@ function reset() {
     thresholdValue.textContent = '80%';
     outputFormat.value = 'csv';
     useCache.checked = true;
+}
+
+// Helper function to convert data to CSV (if not defined in data-editor.js)
+if (typeof convertToCSV === 'undefined') {
+    window.convertToCSV = function(data) {
+        if (!data || data.length === 0) return '';
+        
+        const headers = Object.keys(data[0]);
+        const csv = [
+            headers.join(','),
+            ...data.map(row => headers.map(h => `"${row[h] || ''}"`).join(','))
+        ].join('\n');
+        
+        return csv;
+    }
 }
 
 // Initialize on load

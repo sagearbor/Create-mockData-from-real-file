@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Data Editor</title>
+</head>
+<body>
+    <h1>Data Editor Test Instructions</h1>
+    
+    <h2>✅ New Features Added:</h2>
+    <ol>
+        <li><strong>Data Preview & Editor</strong>
+            <ul>
+                <li>When you upload a file, it now shows in an editable table</li>
+                <li>Click any cell to edit it directly</li>
+                <li>Changes are highlighted in yellow</li>
+            </ul>
+        </li>
+        
+        <li><strong>Data Manipulation Tools</strong>
+            <ul>
+                <li>➕ Add Row - Add new rows to your data</li>
+                <li>➕ Add Column - Add new columns</li>
+                <li>🗑️ Delete Row - Select rows and delete them</li>
+                <li>🗑️ Delete Column - Remove entire columns</li>
+                <li>🎲 Randomize Values - Randomize selected cells</li>
+                <li>↺ Reset - Restore original data</li>
+            </ul>
+        </li>
+        
+        <li><strong>Experimental Features</strong>
+            <ul>
+                <li>💥 Corrupt Random Data - Introduces errors into 10% of cells</li>
+                <li>📋 Duplicate Random Rows - Creates duplicates of 20% of rows</li>
+                <li>❓ Add Random Nulls - Makes 15% of cells null</li>
+                <li>🔀 Scramble Column - Shuffles values within a column</li>
+                <li>📈 Generate Outliers - Creates extreme values in 5% of rows</li>
+            </ul>
+        </li>
+        
+        <li><strong>View Generated Data</strong>
+            <ul>
+                <li>After generation, click "👁️ View Synthetic Data" to see results</li>
+                <li>Generated data is shown in a table</li>
+                <li>Can download the synthetic data</li>
+            </ul>
+        </li>
+    </ol>
+    
+    <h2>🧪 How to Test:</h2>
+    <ol>
+        <li>Start the server: <code>python3 main.py</code></li>
+        <li>Open browser: <code>http://localhost:8201</code></li>
+        <li>Click "🏥 Medical Records (PHI)" demo button</li>
+        <li>The data will appear in an editable table</li>
+        <li>Try editing cells by clicking on them</li>
+        <li>Click "💥 Corrupt Random Data" to mess up the data</li>
+        <li>Click "🚀 Generate Synthetic Data"</li>
+        <li>The synthetic data will be based on your edited/corrupted version!</li>
+    </ol>
+    
+    <h2>💡 Cool Things to Try:</h2>
+    <ul>
+        <li>Edit patient names to be "XXXXX" and see if synthetic data protects privacy</li>
+        <li>Add outliers (huge numbers) and see how it affects generation</li>
+        <li>Duplicate rows to create data imbalance</li>
+        <li>Scramble a column to break correlations</li>
+        <li>Add nulls and see how the generator handles missing data</li>
+    </ul>
+    
+    <h2>🔗 Quick Access:</h2>
+    <p><a href="http://localhost:8201" target="_blank">Open Application →</a></p>
+    
+</body>
+</html>

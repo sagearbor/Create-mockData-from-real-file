@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     generator_version: str = Field(default="1.0", env="GENERATOR_VERSION")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     environment: str = Field(default="local", env="ENVIRONMENT")
-    app_port: int = Field(default=8000, env="APP_PORT")
+    app_port: int = Field(default=8201, env="APP_PORT")
     app_host: str = Field(default="0.0.0.0", env="APP_HOST")
     
     # Local Storage Settings
@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "allow"
         
     def is_local_mode(self) -> bool:
         """Check if running in local mode."""

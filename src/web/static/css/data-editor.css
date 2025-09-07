@@ -1,0 +1,360 @@
+/* Data Editor Styles */
+
+.data-editor-section {
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.editor-controls {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.btn-small {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.btn-danger {
+    background: #ef4444;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+}
+
+.btn-warning {
+    background: #f59e0b;
+}
+
+.btn-warning:hover {
+    background: #d97706;
+}
+
+.data-stats {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    font-size: 0.9rem;
+}
+
+.data-stats span {
+    color: #64748b;
+}
+
+.data-stats strong {
+    color: #1e293b;
+    font-weight: 600;
+}
+
+.table-container {
+    overflow: auto;
+    max-height: 500px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    background: white;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.data-table thead {
+    position: sticky;
+    top: 0;
+    background: #f1f5f9;
+    z-index: 10;
+}
+
+.data-table th {
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    color: #475569;
+    border-bottom: 2px solid #e2e8f0;
+    white-space: nowrap;
+    position: relative;
+}
+
+.data-table th.selected {
+    background: #dbeafe;
+}
+
+.column-actions {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none;
+}
+
+.data-table th:hover .column-actions {
+    display: block;
+}
+
+.col-delete-btn {
+    background: none;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 0.75rem;
+}
+
+.data-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.data-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.data-table tbody tr.selected {
+    background: #dbeafe;
+}
+
+.data-table td.editing {
+    padding: 0;
+}
+
+.data-table input[type="text"] {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid #3b82f6;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    outline: none;
+}
+
+.cell-editable {
+    cursor: pointer;
+    position: relative;
+}
+
+.cell-editable:hover {
+    background: #f0f9ff;
+}
+
+.cell-null {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+.row-number {
+    background: #f8fafc;
+    color: #94a3b8;
+    font-weight: 500;
+    text-align: center;
+    user-select: none;
+    cursor: pointer;
+}
+
+.row-number:hover {
+    background: #e2e8f0;
+}
+
+.row-number.selected {
+    background: #3b82f6;
+    color: white;
+}
+
+.editor-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+/* Experimental Section */
+.experimental-section {
+    background: #fef3c7;
+    border: 2px dashed #f59e0b;
+}
+
+.experiment-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.experiment-btn {
+    padding: 1rem;
+    border: 1px solid #fed7aa;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.experiment-btn:hover {
+    background: #fff7ed;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+/* Synthetic Data Viewer */
+.synthetic-viewer-section {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+}
+
+.synthetic-viewer-section .table-container {
+    max-height: 400px;
+}
+
+/* Context Menu */
+.context-menu {
+    position: absolute;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 0.5rem 0;
+    z-index: 1000;
+    display: none;
+}
+
+.context-menu.show {
+    display: block;
+}
+
+.context-menu-item {
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background 0.2s;
+}
+
+.context-menu-item:hover {
+    background: #f1f5f9;
+}
+
+.context-menu-divider {
+    height: 1px;
+    background: #e2e8f0;
+    margin: 0.25rem 0;
+}
+
+/* Add Column Modal */
+.add-column-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    z-index: 1001;
+    display: none;
+}
+
+.add-column-modal.show {
+    display: block;
+}
+
+.add-column-modal h3 {
+    margin-bottom: 1rem;
+}
+
+.add-column-modal input {
+    width: 100%;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+}
+
+.add-column-modal .button-group {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+}
+
+/* Data manipulation highlights */
+.cell-modified {
+    background: #fef3c7 !important;
+    font-weight: 600;
+}
+
+.cell-corrupted {
+    background: #fee2e2 !important;
+    color: #dc2626;
+}
+
+.cell-outlier {
+    background: #ddd6fe !important;
+    color: #7c3aed;
+    font-weight: bold;
+}
+
+.row-duplicated {
+    background: #ccfbf1 !important;
+}
+
+/* Loading state for cells */
+.cell-loading {
+    position: relative;
+    opacity: 0.5;
+}
+
+.cell-loading::after {
+    content: "...";
+    position: absolute;
+    right: 2px;
+    animation: dots 1.5s infinite;
+}
+
+@keyframes dots {
+    0%, 20% {
+        content: ".";
+    }
+    40% {
+        content: "..";
+    }
+    60%, 100% {
+        content: "...";
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .editor-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .editor-controls {
+        width: 100%;
+    }
+    
+    .data-stats {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .table-container {
+        max-height: 300px;
+    }
+}

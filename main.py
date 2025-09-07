@@ -14,6 +14,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTa
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 import pandas as pd
 import uvicorn
 
@@ -23,22 +24,6 @@ from src.core.synthetic_generator import SyntheticDataGenerator
 from src.core.cache_manager import CacheManager
 from src.utils.config import settings
 from src.utils.logger import logger
-
-# Initialize FastAPI app
-app = FastAPI(
-    title="BYOD Synthetic Data Generator",
-    description="Generate privacy-safe synthetic data that preserves statistical properties",
-    version="1.0.0"
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Initialize components
 data_loader = DataLoader()
@@ -74,10 +59,10 @@ def initialize_openai_client():
         synthetic_generator = SyntheticDataGenerator()
         return False
 
-# Initialize on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan."""
+    # Startup
     logger.info("Starting BYOD Synthetic Data Generator")
     initialize_openai_client()
     
@@ -88,6 +73,28 @@ async def startup_event():
     static_dir = Path(__file__).parent / "src" / "web" / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down BYOD Synthetic Data Generator")
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(
+    title="BYOD Synthetic Data Generator",
+    description="Generate privacy-safe synthetic data that preserves statistical properties",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
@@ -219,6 +226,7 @@ async def extract_metadata(file: UploadFile = File(...)):
 async def generate_synthetic_data(
     file: Optional[UploadFile] = File(None),
     metadata_json: Optional[str] = Form(None),
+    edited_data: Optional[str] = Form(None),
     num_rows: Optional[int] = Form(None),
     match_threshold: float = Form(0.8),
     output_format: str = Form("csv"),
@@ -236,8 +244,13 @@ async def generate_synthetic_data(
         use_cache: Whether to use cached generation scripts
     """
     try:
-        # Get metadata either from file or JSON
-        if file:
+        # Get metadata from edited data, file, or JSON
+        if edited_data:
+            # Parse edited CSV data
+            import io
+            df = pd.read_csv(io.StringIO(edited_data))
+            metadata = metadata_extractor.extract(df)
+        elif file:
             content = await file.read()
             df = data_loader.load_from_bytes(content, file.filename)
             metadata = metadata_extractor.extract(df)
@@ -410,11 +423,15 @@ async def clear_cache(older_than_days: Optional[int] = None):
 
 # Main entry point
 if __name__ == "__main__":
+    import os
+    # Get port from environment or settings
+    port = int(os.environ.get("APP_PORT", settings.app_port))
+    
     # Run the application
     uvicorn.run(
         "main:app",
         host=settings.app_host,
-        port=settings.app_port,
-        reload=settings.environment == "local",
+        port=port,
+        reload=False,  # Disable reload to avoid port conflicts
         log_level=settings.log_level.lower()
     )

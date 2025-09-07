@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BYOD Synthetic Data Generator</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/data-editor.css">
 </head>
 <body>
     <div class="container">
@@ -32,6 +33,39 @@
                     <h3>File Loaded:</h3>
                     <p id="fileName"></p>
                     <div id="fileStats"></div>
+                </div>
+            </section>
+
+            <!-- Data Editor Section -->
+            <section class="data-editor-section" id="dataEditorSection" style="display: none;">
+                <div class="editor-header">
+                    <h2>📝 Data Preview & Editor</h2>
+                    <div class="editor-controls">
+                        <button id="addRowBtn" class="btn btn-small">➕ Add Row</button>
+                        <button id="addColBtn" class="btn btn-small">➕ Add Column</button>
+                        <button id="deleteRowBtn" class="btn btn-small btn-danger">🗑️ Delete Row</button>
+                        <button id="deleteColBtn" class="btn btn-small btn-danger">🗑️ Delete Column</button>
+                        <button id="randomizeBtn" class="btn btn-small btn-warning">🎲 Randomize Values</button>
+                        <button id="resetDataBtn" class="btn btn-small btn-secondary">↺ Reset</button>
+                    </div>
+                </div>
+                
+                <div class="data-stats" id="dataStats">
+                    <span>Rows: <strong id="rowCount">0</strong></span>
+                    <span>Columns: <strong id="colCount">0</strong></span>
+                    <span>Cells: <strong id="cellCount">0</strong></span>
+                </div>
+
+                <div class="table-container" id="tableContainer">
+                    <table id="dataTable" class="data-table">
+                        <thead id="tableHead"></thead>
+                        <tbody id="tableBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="editor-actions">
+                    <button id="saveChangesBtn" class="btn btn-primary">💾 Save Changes</button>
+                    <button id="discardChangesBtn" class="btn btn-secondary">❌ Discard Changes</button>
                 </div>
             </section>
 
@@ -73,10 +107,10 @@
 
                 <div class="button-group">
                     <button id="extractMetadataBtn" class="btn btn-secondary">
-                        Extract Metadata Only
+                        📊 Extract Metadata Only
                     </button>
                     <button id="generateBtn" class="btn btn-primary">
-                        Generate Synthetic Data
+                        🚀 Generate Synthetic Data
                     </button>
                 </div>
             </section>
@@ -87,10 +121,32 @@
                 <div id="resultsContent"></div>
                 <div class="button-group">
                     <button id="downloadBtn" class="btn btn-primary" style="display: none;">
-                        Download Synthetic Data
+                        ⬇️ Download Synthetic Data
+                    </button>
+                    <button id="viewSyntheticBtn" class="btn btn-secondary" style="display: none;">
+                        👁️ View Synthetic Data
                     </button>
                     <button id="resetBtn" class="btn btn-secondary">
-                        Generate Another Dataset
+                        🔄 Generate Another Dataset
+                    </button>
+                </div>
+            </section>
+
+            <!-- Synthetic Data Viewer -->
+            <section class="synthetic-viewer-section" id="syntheticViewerSection" style="display: none;">
+                <h2>🎯 Generated Synthetic Data</h2>
+                <div class="table-container">
+                    <table id="syntheticTable" class="data-table">
+                        <thead id="syntheticHead"></thead>
+                        <tbody id="syntheticBody"></tbody>
+                    </table>
+                </div>
+                <div class="button-group">
+                    <button id="downloadSyntheticBtn" class="btn btn-primary">
+                        ⬇️ Download This Data
+                    </button>
+                    <button id="regenerateBtn" class="btn btn-secondary">
+                        🔄 Regenerate
                     </button>
                 </div>
             </section>
@@ -105,10 +161,22 @@
             <section class="demo-section">
                 <h2>Try Demo Datasets</h2>
                 <div class="demo-buttons">
-                    <button class="demo-btn" data-demo="sales">Sales Data</button>
-                    <button class="demo-btn" data-demo="customer">Customer Records</button>
-                    <button class="demo-btn" data-demo="medical">Medical Records (PHI)</button>
-                    <button class="demo-btn" data-demo="financial">Financial Transactions</button>
+                    <button class="demo-btn" data-demo="sales">💰 Sales Data</button>
+                    <button class="demo-btn" data-demo="customer">👥 Customer Records</button>
+                    <button class="demo-btn" data-demo="medical">🏥 Medical Records (PHI)</button>
+                    <button class="demo-btn" data-demo="financial">💳 Financial Transactions</button>
+                </div>
+            </section>
+
+            <!-- Experimental Features -->
+            <section class="experimental-section">
+                <h2>🧪 Experimental Features</h2>
+                <div class="experiment-buttons">
+                    <button id="corruptDataBtn" class="experiment-btn">💥 Corrupt Random Data</button>
+                    <button id="duplicateRowsBtn" class="experiment-btn">📋 Duplicate Random Rows</button>
+                    <button id="addNullsBtn" class="experiment-btn">❓ Add Random Nulls</button>
+                    <button id="scrambleColBtn" class="experiment-btn">🔀 Scramble Column</button>
+                    <button id="generateOutliersBtn" class="experiment-btn">📈 Generate Outliers</button>
                 </div>
             </section>
         </main>
@@ -130,5 +198,6 @@
     </div>
 
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/data-editor.js"></script>
 </body>
 </html>

@@ -99,17 +99,33 @@ class MetadataExtractor:
         if len(clean_series) == 0:
             return {"type": "numeric", "all_null": True}
         
+        # Calculate stats with proper handling for small samples
+        try:
+            std_val = float(clean_series.std()) if len(clean_series) > 1 else 0.0
+        except:
+            std_val = 0.0
+            
+        try:
+            skew_val = float(clean_series.skew()) if len(clean_series) > 2 else 0.0
+        except:
+            skew_val = 0.0
+            
+        try:
+            kurt_val = float(clean_series.kurtosis()) if len(clean_series) > 3 else 0.0
+        except:
+            kurt_val = 0.0
+        
         stats = {
             "type": "numeric",
             "mean": float(clean_series.mean()),
             "median": float(clean_series.median()),
-            "std": float(clean_series.std()) if len(clean_series) > 1 else 0.0,
+            "std": std_val,
             "min": float(clean_series.min()),
             "max": float(clean_series.max()),
             "q25": float(clean_series.quantile(0.25)),
             "q75": float(clean_series.quantile(0.75)),
-            "skewness": float(clean_series.skew()) if len(clean_series) > 2 else 0.0,
-            "kurtosis": float(clean_series.kurtosis()) if len(clean_series) > 3 else 0.0,
+            "skewness": skew_val,
+            "kurtosis": kurt_val,
             "is_integer": bool(pd.api.types.is_integer_dtype(series) or 
                               (clean_series == clean_series.astype(int)).all()),
             "has_negative": bool((clean_series < 0).any()),
@@ -259,23 +275,31 @@ class MetadataExtractor:
         
         # Numeric correlations
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        if len(numeric_cols) > 1:
-            corr_matrix = df[numeric_cols].corr()
+        if len(numeric_cols) > 1 and len(df) > 2:  # Need at least 3 rows for meaningful correlation
+            try:
+                corr_matrix = df[numeric_cols].corr()
+            except Exception as e:
+                self.logger.warning(f"Could not calculate correlations: {e}")
+                corr_matrix = pd.DataFrame()
             
             # Find strong correlations (> 0.5 or < -0.5)
             strong_corr = []
-            for i in range(len(numeric_cols)):
-                for j in range(i+1, len(numeric_cols)):
-                    corr_value = corr_matrix.iloc[i, j]
-                    if abs(corr_value) > 0.5:
-                        strong_corr.append({
-                            "column1": numeric_cols[i],
-                            "column2": numeric_cols[j],
-                            "correlation": float(corr_value)
-                        })
-            
-            correlations["numeric_correlations"]["strong_correlations"] = strong_corr
-            correlations["numeric_correlations"]["correlation_matrix"] = corr_matrix.to_dict()
+            if not corr_matrix.empty:
+                for i in range(len(numeric_cols)):
+                    for j in range(i+1, len(numeric_cols)):
+                        corr_value = corr_matrix.iloc[i, j]
+                        if pd.notna(corr_value) and abs(corr_value) > 0.5:
+                            strong_corr.append({
+                                "column1": numeric_cols[i],
+                                "column2": numeric_cols[j],
+                                "correlation": float(corr_value)
+                            })
+                
+                correlations["numeric_correlations"]["strong_correlations"] = strong_corr
+                correlations["numeric_correlations"]["correlation_matrix"] = corr_matrix.to_dict()
+            else:
+                correlations["numeric_correlations"]["strong_correlations"] = []
+                correlations["numeric_correlations"]["correlation_matrix"] = {}
         
         # Categorical associations (using Cramér's V for categorical variables)
         categorical_cols = df.select_dtypes(include=['object']).columns.tolist()

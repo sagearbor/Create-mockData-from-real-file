@@ -247,7 +247,6 @@ async def generate_synthetic_data(
         # Get metadata from edited data, file, or JSON
         if edited_data:
             # Parse edited CSV data
-            import io
             df = pd.read_csv(io.StringIO(edited_data))
             metadata = metadata_extractor.extract(df)
         elif file:

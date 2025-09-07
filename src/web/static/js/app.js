@@ -1,7 +1,22 @@
 // BYOD Synthetic Data Generator - Frontend Application
 
-// Use the current origin (works with any port)
-const API_BASE = window.location.origin;
+// Dynamically determine API base URL
+// Handle both localhost and 127.0.0.1 scenarios
+// If served from the FastAPI server, use relative paths
+// If opened as file:// or from different port, use same hostname format
+const API_BASE = (() => {
+    // If served from same origin (FastAPI at port 8201), use relative paths
+    if (window.location.port === '8201') {
+        return window.location.origin;
+    }
+    // If file:// protocol, use 127.0.0.1
+    if (window.location.protocol === 'file:') {
+        return 'http://127.0.0.1:8201';
+    }
+    // If served from different port (like VS Code preview), match the hostname format
+    const hostname = window.location.hostname || '127.0.0.1';
+    return `http://${hostname}:8201`;
+})();
 let currentFile = null;
 let currentMetadata = null;
 
@@ -115,14 +130,34 @@ async function generateSyntheticData() {
     if (window.currentEditedData) {
         const csv = convertToCSV(window.currentEditedData);
         formData.append('edited_data', csv);
-    } else {
+        console.log('Sending edited CSV data');
+    } else if (currentFile) {
         formData.append('file', currentFile);
+        console.log('Sending file:', currentFile.name, 'size:', currentFile.size);
+    } else {
+        console.error('No file or edited data available!');
+        showError('No file selected');
+        hideLoading();
+        return;
     }
     
-    formData.append('num_rows', numRows.value || '');
+    // Debug: log form data
+    // Only append num_rows if it has a value
+    if (numRows.value && numRows.value.trim() !== '') {
+        formData.append('num_rows', numRows.value);
+    }
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
+    
+    console.log('FormData being sent:');
+    for (let [key, value] of formData.entries()) {
+        if (key === 'file') {
+            console.log(`  ${key}: File(${value.name}, ${value.size} bytes)`);
+        } else {
+            console.log(`  ${key}:`, value);
+        }
+    }
     
     try {
         const response = await fetch(`${API_BASE}/generate`, {
@@ -131,27 +166,53 @@ async function generateSyntheticData() {
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Generation failed');
+            let errorMessage = 'Generation failed';
+            try {
+                const error = await response.json();
+                // Handle FastAPI validation errors (422)
+                if (error.detail) {
+                    if (Array.isArray(error.detail)) {
+                        // Validation errors come as array
+                        const validationErrors = error.detail.map(err => 
+                            `${err.loc ? err.loc.join(' → ') : 'Field'}: ${err.msg}`
+                        ).join('\n');
+                        errorMessage = `Validation Error:\n${validationErrors}`;
+                    } else {
+                        errorMessage = error.detail;
+                    }
+                } else if (error.message) {
+                    errorMessage = error.message;
+                }
+            } catch (e) {
+                // If response is not JSON, use status text
+                errorMessage = `Error ${response.status}: ${response.statusText || 'Request failed'}`;
+            }
+            throw new Error(errorMessage);
         }
         
         // Handle different response types
         const contentType = response.headers.get('content-type');
         
-        if (contentType.includes('application/json')) {
+        if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
             displayResults(data);
-        } else {
-            // File download
+        } else if (contentType && (contentType.includes('text/csv') || contentType.includes('application/vnd.openxmlformats'))) {
+            // File download (CSV or Excel)
             const blob = await response.blob();
             downloadFile(blob, `synthetic_data.${outputFormat.value}`);
             displayResults({
                 status: 'success',
                 message: 'Synthetic data generated successfully!'
             });
+        } else {
+            // Unexpected content type
+            throw new Error(`Unexpected response type: ${contentType || 'unknown'}`);
         }
         
     } catch (error) {
+        console.error('Generate error:', error);
+        console.error('API_BASE:', API_BASE);
+        console.error('Full URL:', `${API_BASE}/generate`);
         const errorMsg = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
         showError(errorMsg || 'An unexpected error occurred');
     } finally {
@@ -177,8 +238,15 @@ async function extractMetadata() {
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Metadata extraction failed');
+            let errorMessage = 'Metadata extraction failed';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || error.message || errorMessage;
+            } catch (e) {
+                // If response is not JSON, use status text
+                errorMessage = `Error ${response.status}: ${response.statusText || 'Request failed'}`;
+            }
+            throw new Error(errorMessage);
         }
         
         const data = await response.json();
@@ -367,9 +435,28 @@ function hideLoading() {
 
 function showError(message) {
     // Handle both string and object messages
-    const displayMessage = typeof message === 'object' 
-        ? (message.message || JSON.stringify(message))
-        : (message || 'An unexpected error occurred');
+    let displayMessage = 'An unexpected error occurred';
+    
+    if (typeof message === 'string') {
+        displayMessage = message;
+    } else if (typeof message === 'object' && message !== null) {
+        // Try to extract meaningful error message from object
+        if (message.message) {
+            displayMessage = message.message;
+        } else if (message.detail) {
+            displayMessage = message.detail;
+        } else if (message.error) {
+            displayMessage = message.error;
+        } else {
+            // Last resort - stringify the object
+            try {
+                displayMessage = JSON.stringify(message, null, 2);
+            } catch (e) {
+                displayMessage = String(message);
+            }
+        }
+    }
+    
     errorMessage.textContent = displayMessage;
     errorModal.style.display = 'flex';
 }

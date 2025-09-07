@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Generate</title>
+</head>
+<body>
+    <h1>Test Generate Endpoint</h1>
+    <button id="testBtn">Test Generate</button>
+    <pre id="output"></pre>
+    
+    <script>
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            const output = document.getElementById('output');
+            output.textContent = 'Testing...';
+            
+            try {
+                // Create test CSV data
+                const csvData = "name,age,city\nJohn,25,NYC\nJane,30,LA";
+                const file = new File([csvData], "test.csv", { type: "text/csv" });
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('num_rows', '5');
+                formData.append('match_threshold', '0.8');
+                formData.append('output_format', 'json');
+                formData.append('use_cache', 'false');
+                
+                const response = await fetch('http://127.0.0.1:8201/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const responseText = await response.text();
+                output.textContent = `Status: ${response.status}\n`;
+                output.textContent += `Headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2)}\n`;
+                output.textContent += `Body: ${responseText}`;
+                
+                if (response.ok) {
+                    const data = JSON.parse(responseText);
+                    output.textContent += '\n\nParsed data:\n' + JSON.stringify(data, null, 2);
+                }
+            } catch (error) {
+                output.textContent = `Error: ${error.message}\n${error.stack}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Documentation
+*.md
+!README.md
+!CLAUDE.md
+docs/
+*.rtf
+
+# Testing
+tests/
+test_*.py
+*_test.py
+coverage.xml
+*.cover
+
+# Logs
+logs/
+*.log
+
+# Cache and temporary files
+cache/
+tmp/
+temp/
+*.tmp
+
+# CI/CD
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml
+jenkins/
+
+# Docker files (we don't want to copy these into the container)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Tools directory (contains Claude-specific container)
+tools/
+
+# Claude specific
+claude/
+
+# Misc
+*.bak
+*.orig
+.backup/

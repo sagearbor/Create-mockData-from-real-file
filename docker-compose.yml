@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  byod-synthetic-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: byod-synthetic-generator:latest
+    container_name: byod-synthetic-generator
+    ports:
+      - "8000:8000"
+    environment:
+      # Azure OpenAI Configuration
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
+      - AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=${AZURE_OPENAI_CHAT_DEPLOYMENT_NAME}
+      - AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=${AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME}
+
+      # Azure Storage Configuration (optional for local dev)
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
+      - AZURE_STORAGE_CONTAINER_NAME=${AZURE_STORAGE_CONTAINER_NAME:-synthetic-data}
+
+      # Azure Cosmos DB Configuration (optional for local dev)
+      - COSMOS_ENDPOINT=${COSMOS_ENDPOINT:-}
+      - COSMOS_KEY=${COSMOS_KEY:-}
+      - COSMOS_DATABASE_NAME=${COSMOS_DATABASE_NAME:-synthetic-data-db}
+      - COSMOS_CONTAINER_NAME=${COSMOS_CONTAINER_NAME:-program-catalog}
+
+      # Azure Cognitive Search Configuration (optional for local dev)
+      - AZURE_SEARCH_ENDPOINT=${AZURE_SEARCH_ENDPOINT:-}
+      - AZURE_SEARCH_KEY=${AZURE_SEARCH_KEY:-}
+      - AZURE_SEARCH_INDEX_NAME=${AZURE_SEARCH_INDEX_NAME:-synthetic-data-index}
+
+      # Azure Key Vault Configuration (optional)
+      - AZURE_KEY_VAULT_URL=${AZURE_KEY_VAULT_URL:-}
+
+      # Application Settings
+      - APP_ENV=${APP_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - MAX_UPLOAD_SIZE_MB=${MAX_UPLOAD_SIZE_MB:-100}
+      - ALLOWED_EXTENSIONS=${ALLOWED_EXTENSIONS:-csv,json,xlsx}
+
+    volumes:
+      # Mount local data directory for development
+      - ./data:/app/data
+      - ./cache:/app/cache
+      - ./logs:/app/logs
+      # Mount source code for development (hot reload)
+      - ./src:/app/src
+      - ./static:/app/static
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - byod-network
+
+  # Optional: Add local development database (if not using Azure Cosmos DB)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: byod-postgres
+  #   environment:
+  #     - POSTGRES_USER=byod_user
+  #     - POSTGRES_PASSWORD=byod_password
+  #     - POSTGRES_DB=byod_synthetic_db
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - byod-network
+
+  # Optional: Add Redis for caching (if not using Azure Cache)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: byod-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - byod-network
+
+networks:
+  byod-network:
+    driver: bridge
+
+volumes:
+  # postgres_data:
+  # redis_data:

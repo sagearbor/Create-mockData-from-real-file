@@ -227,24 +227,92 @@ class DataLoader:
     
     def _standardize_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Standardize DataFrame format.
-        
+        Standardize DataFrame format and detect date columns.
+
         Args:
             df: Input DataFrame
-            
+
         Returns:
-            Standardized DataFrame
+            Standardized DataFrame with proper dtypes
         """
         # Remove completely empty columns
         df = df.dropna(axis=1, how='all')
-        
+
         # Reset index to ensure consistent indexing
         df = df.reset_index(drop=True)
-        
+
         # Convert column names to strings
         df.columns = df.columns.astype(str)
-        
+
+        # Attempt to detect and convert date columns
+        df = self._detect_and_convert_dates(df)
+
         # Log basic statistics
         self.logger.info(f"DataFrame standardized - Shape: {df.shape}, Columns: {list(df.columns)[:5]}{'...' if len(df.columns) > 5 else ''}")
-        
+
+        return df
+
+    def _detect_and_convert_dates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Detect and convert potential date columns to datetime dtype.
+
+        Args:
+            df: Input DataFrame
+
+        Returns:
+            DataFrame with detected date columns converted to datetime
+        """
+        date_patterns = [
+            r'^\d{4}-\d{2}-\d{2}$',  # YYYY-MM-DD
+            r'^\d{2}/\d{2}/\d{4}$',  # MM/DD/YYYY or DD/MM/YYYY
+            r'^\d{2}-\d{2}-\d{4}$',  # MM-DD-YYYY or DD-MM-YYYY
+            r'^\d{4}/\d{2}/\d{2}$',  # YYYY/MM/DD
+            r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$',  # YYYY-MM-DD HH:MM:SS
+            r'^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}$',  # MM/DD/YYYY HH:MM:SS
+        ]
+
+        date_keywords = ['date', 'time', 'datetime', 'timestamp', 'created', 'updated',
+                        'modified', 'dob', 'birth', 'start', 'end', 'when', 'day']
+
+        for col in df.columns:
+            # Skip if already datetime
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                continue
+
+            # Skip numeric columns
+            if pd.api.types.is_numeric_dtype(df[col]):
+                continue
+
+            # Check if column name suggests date/time
+            col_lower = col.lower()
+            name_suggests_date = any(keyword in col_lower for keyword in date_keywords)
+
+            # For string columns, check if values match date patterns
+            if pd.api.types.is_object_dtype(df[col]):
+                # Sample non-null values
+                sample = df[col].dropna().head(10).astype(str)
+                if len(sample) > 0:
+                    # Check if values match date patterns
+                    matches_pattern = False
+                    for pattern in date_patterns:
+                        if sample.str.match(pattern).mean() > 0.8:  # 80% of sample matches
+                            matches_pattern = True
+                            break
+
+                    # Try to convert if name suggests date or pattern matches
+                    if name_suggests_date or matches_pattern:
+                        try:
+                            # Try multiple date formats
+                            converted = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
+
+                            # Check if conversion was successful for majority of non-null values
+                            non_null_original = df[col].notna().sum()
+                            non_null_converted = converted.notna().sum()
+
+                            if non_null_converted >= non_null_original * 0.8:  # 80% successful conversion
+                                df[col] = converted
+                                self.logger.info(f"Converted column '{col}' to datetime")
+                        except Exception as e:
+                            self.logger.debug(f"Could not convert column '{col}' to datetime: {e}")
+
         return df

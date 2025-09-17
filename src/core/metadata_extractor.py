@@ -7,14 +7,21 @@ import json
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from src.utils.logger import logger
+from src.core.clinical_reference import ClinicalReferenceLibrary
 
 
 class MetadataExtractor:
     """Extract statistical and structural metadata from pandas DataFrames."""
     
-    def __init__(self):
-        """Initialize the MetadataExtractor."""
+    def __init__(self, use_clinical_reference: bool = True):
+        """
+        Initialize the MetadataExtractor.
+
+        Args:
+            use_clinical_reference: Whether to use clinical reference library for medical data
+        """
         self.logger = logger
+        self.clinical_reference = ClinicalReferenceLibrary() if use_clinical_reference else None
         
     def extract(self, df: pd.DataFrame, sample_size: int = 1000) -> Dict[str, Any]:
         """
@@ -38,7 +45,11 @@ class MetadataExtractor:
             "metadata_version": "1.0",
             "extraction_timestamp": datetime.now().isoformat()
         }
-        
+
+        # Enhance with clinical context if available
+        if self.clinical_reference:
+            metadata = self.clinical_reference.enhance_metadata_with_clinical_context(metadata)
+
         self.logger.info("Metadata extraction complete")
         return metadata
     

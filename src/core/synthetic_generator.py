@@ -121,7 +121,10 @@ class SyntheticDataGenerator:
         4. Use appropriate distributions for numeric data
         5. Maintain correlations between columns where specified
         6. Generate realistic patterns for string data
-        7. Return ONLY the Python code, no explanations or markdown formatting
+        7. When clinical_context or suggested_values are provided, use those specific values
+        8. For medical columns (medications, lab tests, etc.), use the suggested clinical values
+        9. For date columns marked as datetime type, generate proper datetime objects
+        10. Return ONLY the Python code, no explanations or markdown formatting
         """
     
     def _construct_generation_prompt(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> str:

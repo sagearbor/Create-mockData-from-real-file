@@ -60,13 +60,19 @@ You should see:
 
 ## 📊 Features
 
+### ✅ Production Ready
 - **Privacy-First**: LLM never sees actual data values, only statistical metadata
 - **Multiple Formats**: Supports CSV, JSON, Excel, Parquet, TSV
-- **Statistical Preservation**: Maintains distributions, correlations, and patterns
-- **Intelligent Caching**: Reuses generation scripts for similar datasets
-- **Web Interface**: User-friendly drag-and-drop interface
+- **Web Interface**: User-friendly drag-and-drop interface with About page
+- **Multi-File Generation**: Generate 1-20 files at once with ZIP download
 - **REST API**: Programmatic access for automation
 - **Local-First**: Works without cloud services
+
+### 🚧 In Development
+- **Statistical Preservation**: Basic distributions maintained (advanced correlations coming)
+- **Intelligent Caching**: Metadata hashing implemented (vector similarity pending)
+- **Clinical Data Support**: Domain-specific value generation planned
+- **Data Dictionary Upload**: Constraint validation feature planned
 
 ## 🖥️ Using the Web Interface
 
@@ -75,20 +81,29 @@ You should see:
 3. Adjust generation settings:
    - **Number of rows**: How many synthetic records to generate
    - **Match strictness**: How closely to match statistical properties (70-85% recommended)
+   - **Number of files**: Generate 1-20 synthetic files at once
 4. Click "Generate Synthetic Data"
-5. Download your synthetic dataset
+5. Download your synthetic dataset (single file or ZIP for multiple)
 
 ## 🔌 API Usage
 
 ### Generate synthetic data via API
 
 ```bash
+# Single file generation
 curl -X POST "http://localhost:8201/generate" \
   -F "file=@your_data.csv" \
   -F "num_rows=1000" \
   -F "match_threshold=0.8" \
   -F "output_format=csv" \
   --output synthetic_data.csv
+
+# Multiple file generation (returns ZIP)
+curl -X POST "http://localhost:8201/generate" \
+  -F "file=@your_data.csv" \
+  -F "file_count=5" \
+  -F "output_format=csv" \
+  --output synthetic_data.zip
 ```
 
 ### Extract metadata only
@@ -210,10 +225,17 @@ See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for detailed instructio
 
 ## 📚 Documentation
 
-- [User Guide](docs/USER_GUIDE.md) - Detailed usage instructions
-- [API Documentation](docs/API_DOCUMENTATION.md) - Complete API reference
-- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) - Production deployment
-- [Task List](TASK_LIST.md) - Development roadmap
+- [Architecture Overview](docs/architecture-diagram.md) - System design and data flow
+- [Developer Task List](developer_tasklist.md) - Active development tasks
+- [Completed Tasks](archived/developer_tasklist_ARCHIVED.md) - Finished work archive
+- [About Page](http://localhost:8201/about) - Interactive architecture diagram and FAQ
+
+## ⚠️ Known Limitations
+
+- **Date Detection**: Some date formats (e.g., 2024-01-10) may not be automatically detected
+- **Domain Knowledge**: Columns like "medication" get random values, not real drug names
+- **Large Files**: Memory-based processing (streaming support planned)
+- **Complex Relationships**: Multi-column correlations not fully preserved yet
 
 ## 🛠️ Troubleshooting
 
@@ -257,6 +279,21 @@ This project is proprietary and confidential.
 - **Interactive Docs**: `http://localhost:8201/docs`
 - **Web Interface**: `http://localhost:8201`
 
+## 🏗️ Current Development Status
+
+### Recently Completed (September 2025)
+- ✅ Multi-file generation with ZIP download
+- ✅ About page with architecture documentation
+- ✅ Privacy documentation and FAQ
+
+### Active Development
+- 🔧 Fixing date type detection for medical data
+- 🔧 Adding clinical reference data library
+- 🔧 Implementing data dictionary validation
+- 🔧 Enhancing LLM column understanding
+
+See [developer_tasklist.md](developer_tasklist.md) for detailed development plans.
+
 ---
 
-**Note**: This tool ensures that sensitive data never leaves your environment. Only statistical metadata is used for generation, making it safe for PHI, PII, and other confidential information.
+**Privacy Note**: Your uploaded file is processed in memory only and never saved to disk. Only statistical metadata (no actual values) is sent to the LLM for code generation, making it safe for PHI, PII, and other confidential information.

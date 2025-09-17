@@ -5,36 +5,62 @@
 ```mermaid
 graph TB
     subgraph "User Space"
-        A[Upload Data File<br/>CSV/JSON/Excel] --> B[Data Loader]
+        A[Upload Data File<br/>CSV/JSON/Excel] --> B[Data Loader ✅]
+        DD[Data Dictionary Upload<br/>🚧 PLANNED] -.-> VAL[Dictionary Validation<br/>🚧 PLANNED]
     end
 
     subgraph "Metadata Extraction - No PHI Exposure"
-        B --> C[Metadata Extractor]
-        C --> D[Statistical Analysis<br/>- Column Types<br/>- Distributions<br/>- Correlations<br/>- Patterns]
-        D --> E[Secure JSON Metadata<br/>NO actual data values]
+        B --> C[Metadata Extractor ✅]
+        C --> D[Statistical Analysis ⚠️<br/>- Column Types 🔧<br/>- Distributions ✅<br/>- Correlations ⚠️<br/>- Patterns ⚠️]
+        D --> E[Secure JSON Metadata ✅<br/>NO actual data values]
+        VAL -.-> C
     end
 
     subgraph "LLM Generation - Privacy Safe"
-        E --> F{Cache Check}
-        F -->|Cache Hit| G[Reuse Existing<br/>Generation Script]
-        F -->|Cache Miss| H[Send Metadata to LLM<br/>ONLY statistics, NO PHI]
-        H --> I[LLM Creates Python Code<br/>Based on Statistics]
+        E --> F{Cache Check ⚠️}
+        F -->|Cache Hit| G[Reuse Existing<br/>Generation Script ⚠️]
+        F -->|Cache Miss| H[Send Metadata to LLM ✅<br/>ONLY statistics, NO PHI]
+        H --> I[LLM Creates Python Code ⚠️<br/>Needs Domain Knowledge]
+        REF[Clinical Reference Library<br/>🚧 PLANNED] -.-> I
     end
 
     subgraph "Synthetic Data Creation"
-        G --> J[Execute Python Code]
+        G --> J[Execute Python Code ✅]
         I --> J
-        J --> K[Generate Synthetic Data<br/>Matching Statistics]
-        K --> L[Validate Against<br/>Original Metadata]
-        L -->|Valid| M[Return Synthetic Data]
-        L -->|Invalid| N[Regenerate with<br/>Stricter Parameters]
+        J --> K[Generate Synthetic Data ⚠️<br/>Date Issues Present]
+        K --> L[Validate Against<br/>Original Metadata 🚧]
+        L -->|Valid| M[Return Synthetic Data ✅<br/>Multi-file ZIP Support ✅]
+        L -->|Invalid| N[Regenerate with<br/>Stricter Parameters ⚠️]
         N --> J
     end
 
-    style C fill:#e1f5e1
-    style E fill:#e1f5e1
-    style H fill:#e1f5e1
-    style M fill:#e1f5e1
+    %% Color coding for development status
+    style A fill:#90EE90
+    style B fill:#90EE90
+    style C fill:#90EE90
+    style E fill:#90EE90
+    style H fill:#90EE90
+    style J fill:#90EE90
+    style M fill:#90EE90
+
+    style D fill:#FFE4B5
+    style F fill:#FFE4B5
+    style G fill:#FFE4B5
+    style I fill:#FFE4B5
+    style K fill:#FFE4B5
+    style N fill:#FFE4B5
+
+    style DD fill:#FFB6C1
+    style VAL fill:#FFB6C1
+    style REF fill:#FFB6C1
+    style L fill:#FFB6C1
+
+    %% Legend
+    subgraph "Legend"
+        L1[✅ Complete - Green]
+        L2[⚠️ Partial/Issues - Yellow]
+        L3[🚧 Planned - Pink]
+    end
 ```
 
 ## Privacy Protection

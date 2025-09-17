@@ -121,9 +121,10 @@ async function generateSyntheticData() {
         showError('Please upload a file first');
         return;
     }
-    
-    showLoading('Generating synthetic data...');
-    
+
+    const fileCount = parseInt(document.getElementById('fileCount').value);
+    showLoading(`Generating ${fileCount} synthetic data file${fileCount > 1 ? 's' : ''}...`);
+
     const formData = new FormData();
     
     // If data was edited, send the edited version as CSV
@@ -149,6 +150,7 @@ async function generateSyntheticData() {
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
+    formData.append('file_count', fileCount);
     
     console.log('FormData being sent:');
     for (let [key, value] of formData.entries()) {
@@ -192,12 +194,28 @@ async function generateSyntheticData() {
         
         // Handle different response types
         const contentType = response.headers.get('content-type');
-        
+
         if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
             displayResults(data);
+        } else if (contentType && contentType.includes('application/zip')) {
+            // ZIP file download (multiple files)
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('content-disposition');
+            let filename = 'synthetic_data.zip';
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+                if (filenameMatch) {
+                    filename = filenameMatch[1];
+                }
+            }
+            downloadFile(blob, filename);
+            displayResults({
+                status: 'success',
+                message: `Successfully generated ${fileCount} synthetic data files!`
+            });
         } else if (contentType && (contentType.includes('text/csv') || contentType.includes('application/vnd.openxmlformats'))) {
-            // File download (CSV or Excel)
+            // Single file download (CSV or Excel)
             const blob = await response.blob();
             downloadFile(blob, `synthetic_data.${outputFormat.value}`);
             displayResults({

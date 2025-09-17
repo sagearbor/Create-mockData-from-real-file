@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import pandas as pd
 import uvicorn
+import zipfile
+from datetime import datetime
 
 from src.core.data_loader import DataLoader
 from src.core.metadata_extractor import MetadataExtractor
@@ -118,6 +120,17 @@ async def root():
                 "docs": "/docs"
             }
         }
+
+@app.get("/about")
+async def about():
+    """Serve the about page."""
+    html_file = Path(__file__).parent / "src" / "web" / "about.html"
+    if html_file.exists():
+        with open(html_file, 'r') as f:
+            content = f.read()
+        return HTMLResponse(content=content)
+    else:
+        return HTMLResponse(content="<h1>About page not found</h1>")
 
 @app.get("/api")
 async def api_info():
@@ -230,7 +243,8 @@ async def generate_synthetic_data(
     num_rows: Optional[int] = Form(None),
     match_threshold: float = Form(0.8),
     output_format: str = Form("csv"),
-    use_cache: bool = Form(True)
+    use_cache: bool = Form(True),
+    file_count: int = Form(1)
 ):
     """
     Generate synthetic data based on uploaded file or metadata.
@@ -263,6 +277,56 @@ async def generate_synthetic_data(
         if use_cache:
             cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
         
+        # Generate multiple files if requested
+        if file_count > 1:
+            # Generate multiple synthetic datasets
+            synthetic_files = []
+            base_filename = file.filename if file else "synthetic_data"
+            base_name = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
+
+            for i in range(file_count):
+                if cached_result and "generation_code" in cached_result:
+                    logger.info(f"Using cached generation script for file {i+1}/{file_count}")
+                    generation_code = cached_result["generation_code"]
+                    synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                else:
+                    # Generate new synthetic data
+                    synthetic_df = synthetic_generator.generate(
+                        metadata=metadata,
+                        num_rows=num_rows,
+                        match_threshold=match_threshold,
+                        use_cached=use_cache
+                    )
+
+                # Store generated dataframe with filename
+                filename = f"{base_name}_synthetic_{i+1:03d}"
+                synthetic_files.append((filename, synthetic_df))
+
+            # Create ZIP file
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filename, df in synthetic_files:
+                    if output_format == "json":
+                        json_data = df.to_json(orient="records", indent=2)
+                        zipf.writestr(f"{filename}.json", json_data)
+                    elif output_format == "excel":
+                        excel_buffer = io.BytesIO()
+                        df.to_excel(excel_buffer, index=False)
+                        excel_buffer.seek(0)
+                        zipf.writestr(f"{filename}.xlsx", excel_buffer.getvalue())
+                    else:  # CSV
+                        csv_data = df.to_csv(index=False)
+                        zipf.writestr(f"{filename}.csv", csv_data)
+
+            zip_buffer.seek(0)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            return StreamingResponse(
+                zip_buffer,
+                media_type="application/zip",
+                headers={"Content-Disposition": f"attachment; filename=synthetic_data_{timestamp}.zip"}
+            )
+
+        # Single file generation (existing logic)
         if cached_result and "generation_code" in cached_result:
             logger.info("Using cached generation script")
             generation_code = cached_result["generation_code"]
@@ -275,13 +339,13 @@ async def generate_synthetic_data(
                 match_threshold=match_threshold,
                 use_cached=use_cache
             )
-            
+
             # Cache the result if generation was successful
             if use_cache and synthetic_generator.openai_client:
                 # Get the generation code (would need to modify generator to return it)
                 # For now, we'll skip caching the code
                 pass
-        
+
         # Convert to requested format
         if output_format == "json":
             output_data = synthetic_df.to_json(orient="records")
@@ -291,23 +355,23 @@ async def generate_synthetic_data(
                 "shape": list(synthetic_df.shape),
                 "columns": list(synthetic_df.columns)
             })
-        
+
         elif output_format == "excel":
             output = io.BytesIO()
             synthetic_df.to_excel(output, index=False)
             output.seek(0)
-            
+
             return StreamingResponse(
                 output,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 headers={"Content-Disposition": "attachment; filename=synthetic_data.xlsx"}
             )
-        
+
         else:  # Default to CSV
             output = io.StringIO()
             synthetic_df.to_csv(output, index=False)
             output.seek(0)
-            
+
             return StreamingResponse(
                 io.BytesIO(output.getvalue().encode()),
                 media_type="text/csv",

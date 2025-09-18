@@ -173,6 +173,10 @@ function processFile(file) {
     if (resultsSection) resultsSection.style.display = 'none';
     if (metadataSection) metadataSection.style.display = 'none';
 
+    // Show experimental features now that data is loaded
+    const experimentalSection = document.getElementById('experimentalSection');
+    if (experimentalSection) experimentalSection.style.display = 'block';
+
     // Update quick action buttons
     updateQuickActionButtons();
 }
@@ -586,6 +590,10 @@ function reset() {
     thresholdValue.textContent = '80%';
     outputFormat.value = 'csv';
     useCache.checked = true;
+
+    // Hide experimental features since no data is loaded
+    const experimentalSection = document.getElementById('experimentalSection');
+    if (experimentalSection) experimentalSection.style.display = 'none';
 }
 
 // Helper function to convert data to CSV (if not defined in data-editor.js)

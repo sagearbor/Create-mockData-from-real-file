@@ -54,26 +54,75 @@ const useCache = document.getElementById('useCache');
 
 // Initialize event listeners
 function init() {
-    // File upload
-    uploadArea.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', handleFileSelect);
-    
-    // Drag and drop
-    uploadArea.addEventListener('dragover', handleDragOver);
-    uploadArea.addEventListener('dragleave', handleDragLeave);
-    uploadArea.addEventListener('drop', handleDrop);
-    
+    // Data file upload
+    if (uploadArea) {
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', handleDragOver);
+        uploadArea.addEventListener('dragleave', handleDragLeave);
+        uploadArea.addEventListener('drop', handleDrop);
+    }
+    if (fileInput) {
+        fileInput.addEventListener('change', handleFileSelect);
+    }
+
+    // Dictionary file upload - new dual upload layout
+    const dictionaryUploadArea = document.getElementById('dictionaryUploadArea');
+    const dictionaryFileInput = document.getElementById('dictionaryFileInput');
+
+    if (dictionaryUploadArea && dictionaryFileInput) {
+        dictionaryUploadArea.addEventListener('click', () => dictionaryFileInput.click());
+        dictionaryUploadArea.addEventListener('dragover', (e) => handleDragOverDict(e, dictionaryUploadArea));
+        dictionaryUploadArea.addEventListener('dragleave', (e) => handleDragLeaveDict(e, dictionaryUploadArea));
+        dictionaryUploadArea.addEventListener('drop', (e) => handleDropDict(e));
+        dictionaryFileInput.addEventListener('change', handleDictionarySelect);
+    }
+
+    // Quick action buttons
+    const generateFromDataBtn = document.getElementById('generateFromDataBtn');
+    const generateFromDictBtn = document.getElementById('generateFromDictBtn');
+    const generateFromBothBtn = document.getElementById('generateFromBothBtn');
+
+    if (generateFromDataBtn) {
+        generateFromDataBtn.addEventListener('click', () => {
+            configSection.style.display = 'block';
+            document.getElementById('dictionaryDetails').style.display = 'none';
+            generateSyntheticData();
+        });
+    }
+    if (generateFromDictBtn) {
+        generateFromDictBtn.addEventListener('click', generateFromDictionary);
+    }
+    if (generateFromBothBtn) {
+        generateFromBothBtn.addEventListener('click', () => {
+            configSection.style.display = 'block';
+            generateSyntheticData();
+        });
+    }
+
+    // Clear dictionary button
+    const clearDictionaryBtn = document.getElementById('clearDictionaryBtn');
+    if (clearDictionaryBtn) {
+        clearDictionaryBtn.addEventListener('click', clearDataDictionary);
+    }
+
     // Threshold slider
-    matchThreshold.addEventListener('input', (e) => {
-        thresholdValue.textContent = `${e.target.value}%`;
+    if (matchThreshold) {
+        matchThreshold.addEventListener('input', (e) => {
+            thresholdValue.textContent = `${e.target.value}%`;
+        });
+    }
+
+    // Main buttons
+    if (generateBtn) generateBtn.addEventListener('click', generateSyntheticData);
+    if (extractMetadataBtn) extractMetadataBtn.addEventListener('click', extractMetadata);
+    if (resetBtn) resetBtn.addEventListener('click', reset);
+
+    // Demo buttons - updated for compact layout
+    document.querySelectorAll('.demo-btn-compact').forEach(btn => {
+        btn.addEventListener('click', loadDemoData);
     });
-    
-    // Buttons
-    generateBtn.addEventListener('click', generateSyntheticData);
-    extractMetadataBtn.addEventListener('click', extractMetadata);
-    resetBtn.addEventListener('click', reset);
-    
-    // Demo buttons
+
+    // Legacy demo buttons (if any remain)
     document.querySelectorAll('.demo-btn').forEach(btn => {
         btn.addEventListener('click', loadDemoData);
     });
@@ -109,14 +158,44 @@ function handleDrop(e) {
 
 function processFile(file) {
     currentFile = file;
-    fileName.textContent = file.name;
-    fileStats.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
 
-    fileInfo.style.display = 'block';
-    document.getElementById('dictionarySection').style.display = 'block';  // Show dictionary section
-    configSection.style.display = 'block';
-    resultsSection.style.display = 'none';
-    metadataSection.style.display = 'none';
+    // Update data file info display
+    const fileNameEl = document.getElementById('fileName');
+    const fileStatsEl = document.getElementById('fileStats');
+    const fileInfoEl = document.getElementById('fileInfo');
+
+    if (fileNameEl) fileNameEl.textContent = file.name;
+    if (fileStatsEl) fileStatsEl.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
+    if (fileInfoEl) fileInfoEl.style.display = 'block';
+
+    // Update sections
+    if (configSection) configSection.style.display = 'block';
+    if (resultsSection) resultsSection.style.display = 'none';
+    if (metadataSection) metadataSection.style.display = 'none';
+
+    // Update quick action buttons
+    updateQuickActionButtons();
+}
+
+// Helper function to update quick action buttons
+function updateQuickActionButtons() {
+    const generateFromDataBtn = document.getElementById('generateFromDataBtn');
+    const generateFromDictBtn = document.getElementById('generateFromDictBtn');
+    const generateFromBothBtn = document.getElementById('generateFromBothBtn');
+
+    // Hide all buttons first
+    if (generateFromDataBtn) generateFromDataBtn.style.display = 'none';
+    if (generateFromDictBtn) generateFromDictBtn.style.display = 'none';
+    if (generateFromBothBtn) generateFromBothBtn.style.display = 'none';
+
+    // Show appropriate buttons based on what's loaded
+    if (currentFile && currentDictionary) {
+        if (generateFromBothBtn) generateFromBothBtn.style.display = 'inline-block';
+    } else if (currentFile) {
+        if (generateFromDataBtn) generateFromDataBtn.style.display = 'inline-block';
+    } else if (currentDictionary) {
+        if (generateFromDictBtn) generateFromDictBtn.style.display = 'inline-block';
+    }
 }
 
 // API calls
@@ -657,18 +736,42 @@ function regenerateData() {
     generateSyntheticData();
 }
 
-// Data Dictionary Functions
-async function uploadDataDictionary() {
-    const dictionaryFile = document.getElementById('dictionaryFile').files[0];
-    if (!dictionaryFile) {
-        showError('Please select a dictionary file');
-        return;
-    }
+// Dictionary drag and drop handlers
+function handleDragOverDict(e, area) {
+    e.preventDefault();
+    area.classList.add('active');
+}
 
+function handleDragLeaveDict(e, area) {
+    e.preventDefault();
+    area.classList.remove('active');
+}
+
+function handleDropDict(e) {
+    e.preventDefault();
+    const area = document.getElementById('dictionaryUploadArea');
+    area.classList.remove('active');
+
+    const file = e.dataTransfer.files[0];
+    if (file) {
+        processDictionaryFile(file);
+    }
+}
+
+// Handle dictionary file selection
+function handleDictionarySelect(e) {
+    const file = e.target.files[0];
+    if (file) {
+        processDictionaryFile(file);
+    }
+}
+
+// Process dictionary file
+async function processDictionaryFile(file) {
     showLoading('Uploading data dictionary...');
 
     const formData = new FormData();
-    formData.append('file', dictionaryFile);
+    formData.append('file', file);
     formData.append('format', 'auto');
 
     try {
@@ -684,17 +787,50 @@ async function uploadDataDictionary() {
         const data = await response.json();
         currentDictionary = data.dictionary;
 
-        // Show dictionary status
-        document.getElementById('dictionaryStatus').style.display = 'block';
-        document.getElementById('dictionaryInfo').textContent =
-            `${data.columns_defined} columns defined from ${data.filename}`;
+        // Update dictionary info display
+        const dictionaryInfo = document.getElementById('dictionaryInfo');
+        const dictionaryFileName = document.getElementById('dictionaryFileName');
+        const dictionaryStats = document.getElementById('dictionaryStats');
 
-        // Display column definitions
-        const columnsDiv = document.getElementById('dictionaryColumns');
-        columnsDiv.innerHTML = '<h4>Defined Columns:</h4><ul>' +
-            Object.keys(data.dictionary.columns || {}).map(col =>
-                `<li><strong>${col}</strong>: ${data.dictionary.columns[col].type || 'string'}</li>`
-            ).join('') + '</ul>';
+        if (dictionaryInfo) dictionaryInfo.style.display = 'block';
+        if (dictionaryFileName) dictionaryFileName.textContent = file.name;
+        if (dictionaryStats) {
+            dictionaryStats.textContent = `${data.columns_defined} columns defined`;
+        }
+
+        // Display dictionary details section
+        const dictionaryDetails = document.getElementById('dictionaryDetails');
+        if (dictionaryDetails) {
+            dictionaryDetails.style.display = 'block';
+
+            // Display column definitions
+            const columnsDiv = document.getElementById('dictionaryColumns');
+            if (columnsDiv) {
+                columnsDiv.innerHTML = '<h4>Defined Columns:</h4><ul>' +
+                    Object.keys(data.dictionary.columns || {}).map(col => {
+                        const colDef = data.dictionary.columns[col];
+                        let details = `<li><strong>${col}</strong>: ${colDef.type || 'string'}`;
+                        if (colDef.constraints) {
+                            if (colDef.constraints.min_value !== undefined || colDef.constraints.max_value !== undefined) {
+                                details += ` (range: ${colDef.constraints.min_value || '*'}-${colDef.constraints.max_value || '*'})`;
+                            }
+                            if (colDef.constraints.allowed_values) {
+                                details += ` (values: ${colDef.constraints.allowed_values.slice(0, 3).join(', ')}${colDef.constraints.allowed_values.length > 3 ? '...' : ''})`;
+                            }
+                        }
+                        details += '</li>';
+                        return details;
+                    }).join('') + '</ul>';
+            }
+        }
+
+        // Show configuration section if no data file
+        if (!currentFile && configSection) {
+            configSection.style.display = 'block';
+        }
+
+        // Update quick action buttons
+        updateQuickActionButtons();
 
         showSuccess('Data dictionary uploaded successfully');
 
@@ -705,10 +841,68 @@ async function uploadDataDictionary() {
     }
 }
 
+// Generate from dictionary only
+async function generateFromDictionary() {
+    if (!currentDictionary) {
+        showError('Please upload a data dictionary first');
+        return;
+    }
+
+    const fileCount = parseInt(document.getElementById('fileCount')?.value || 1);
+    showLoading(`Generating ${fileCount} synthetic file${fileCount > 1 ? 's' : ''} from dictionary...`);
+
+    const formData = new FormData();
+    formData.append('use_stored_dictionary', 'true');
+    formData.append('num_rows', numRows.value || '100');
+    formData.append('output_format', outputFormat.value);
+    formData.append('file_count', fileCount);
+    formData.append('preview_only', 'true');
+
+    try {
+        const response = await fetch(`${API_BASE}/generate-with-dictionary`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error('Generation failed');
+        }
+
+        const data = await response.json();
+        if (data.preview) {
+            displayPreview(data);
+        }
+
+    } catch (error) {
+        showError('Failed to generate: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// Show dictionary-only mode
+function showDictionaryOnlyMode() {
+    document.getElementById('dictionarySection').style.display = 'block';
+    document.getElementById('configSection').style.display = 'block';
+    document.querySelector('.upload-section').style.display = 'none';
+    window.scrollTo(0, document.getElementById('dictionarySection').offsetTop);
+}
+
 function clearDataDictionary() {
     currentDictionary = null;
-    document.getElementById('dictionaryStatus').style.display = 'none';
-    document.getElementById('dictionaryFile').value = '';
+
+    // Hide dictionary info and details
+    const dictionaryInfo = document.getElementById('dictionaryInfo');
+    const dictionaryDetails = document.getElementById('dictionaryDetails');
+    const dictionaryFileInput = document.getElementById('dictionaryFileInput');
+
+    if (dictionaryInfo) dictionaryInfo.style.display = 'none';
+    if (dictionaryDetails) dictionaryDetails.style.display = 'none';
+    if (dictionaryFileInput) dictionaryFileInput.value = '';
+
+    // Update quick action buttons
+    updateQuickActionButtons();
+
     showSuccess('Data dictionary cleared');
 }
 
@@ -716,6 +910,7 @@ function clearDataDictionary() {
 function initDictionaryHandlers() {
     const uploadBtn = document.getElementById('uploadDictionaryBtn');
     const clearBtn = document.getElementById('clearDictionaryBtn');
+    const generateBtn = document.getElementById('generateFromDictBtn');
 
     if (uploadBtn) {
         uploadBtn.addEventListener('click', uploadDataDictionary);
@@ -723,6 +918,10 @@ function initDictionaryHandlers() {
 
     if (clearBtn) {
         clearBtn.addEventListener('click', clearDataDictionary);
+    }
+
+    if (generateBtn) {
+        generateBtn.addEventListener('click', generateFromDictionary);
     }
 }
 

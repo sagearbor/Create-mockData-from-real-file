@@ -19,19 +19,20 @@ class DataDictionary:
         self.dictionary = {}
         self.constraints = {}
 
-    def parse_dictionary(self, content: Union[str, bytes, dict], format: str = 'auto') -> Dict[str, Any]:
+    def parse_dictionary(self, content: Union[str, bytes, dict], format: str = 'auto', filename: str = '') -> Dict[str, Any]:
         """
         Parse data dictionary from various formats.
 
         Args:
             content: Dictionary content (string, bytes, or dict)
-            format: Format type ('json', 'yaml', 'csv', 'excel', 'auto')
+            format: Format type ('json', 'yaml', 'csv', 'excel', 'pdf', 'auto')
+            filename: Original filename for format detection
 
         Returns:
             Parsed dictionary structure
         """
         if format == 'auto':
-            format = self._detect_format(content)
+            format = self._detect_format(content, filename)
 
         self.logger.info(f"Parsing data dictionary in {format} format")
 
@@ -41,21 +42,44 @@ class DataDictionary:
             return self._parse_yaml(content)
         elif format == 'csv':
             return self._parse_csv(content)
-        elif format == 'excel':
+        elif format in ['excel', 'xls', 'xlsx']:
             return self._parse_excel(content)
+        elif format == 'pdf':
+            return self._parse_pdf(content)
         elif format == 'text':
             return self._parse_text_with_llm(content)
         else:
             # Try to parse as text with LLM
             return self._parse_text_with_llm(str(content))
 
-    def _detect_format(self, content: Union[str, bytes, dict]) -> str:
+    def _detect_format(self, content: Union[str, bytes, dict], filename: str = '') -> str:
         """Detect the format of the data dictionary."""
         if isinstance(content, dict):
             return 'json'
 
-        # Convert bytes to string if needed
+        # Check file extension first
+        if filename:
+            ext = filename.lower().split('.')[-1] if '.' in filename else ''
+            if ext in ['json']:
+                return 'json'
+            elif ext in ['yaml', 'yml']:
+                return 'yaml'
+            elif ext in ['csv']:
+                return 'csv'
+            elif ext in ['xls', 'xlsx']:
+                return 'excel'
+            elif ext in ['pdf']:
+                return 'pdf'
+
+        # Convert bytes to string if needed for content detection
         if isinstance(content, bytes):
+            # Check for PDF magic bytes
+            if content.startswith(b'%PDF'):
+                return 'pdf'
+            # Check for Excel magic bytes
+            if content.startswith(b'PK') or content.startswith(b'\xd0\xcf'):
+                return 'excel'
+
             content = content.decode('utf-8', errors='ignore')
 
         content_str = str(content).strip()
@@ -158,6 +182,29 @@ class DataDictionary:
         # Convert to CSV-like format and parse
         csv_content = df.to_csv(index=False)
         return self._parse_csv(csv_content)
+
+    def _parse_pdf(self, content: bytes) -> Dict[str, Any]:
+        """Parse PDF format dictionary using text extraction."""
+        try:
+            import PyPDF2
+            import io
+
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+
+            # Parse extracted text
+            return self._parse_text_with_llm(text)
+        except ImportError:
+            # If PyPDF2 not available, try basic text extraction
+            self.logger.warning("PyPDF2 not available, using basic text extraction")
+            text = content.decode('utf-8', errors='ignore')
+            return self._parse_text_with_llm(text)
+        except Exception as e:
+            self.logger.error(f"Error parsing PDF: {e}")
+            # Fallback to text parsing
+            return self._parse_text_with_llm(str(content))
 
     def _parse_text_with_llm(self, content: str) -> Dict[str, Any]:
         """

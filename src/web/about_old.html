@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - BYOD Synthetic Data Generator</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/about.css">
+    <!-- Mermaid JS for diagrams - using specific version with cache buster -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js?v=2"></script>
+    <script>
+        // Initialize Mermaid with error handling
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Initializing Mermaid diagrams...');
+
+            // Check if Mermaid loaded
+            if (typeof mermaid === 'undefined') {
+                console.error('Mermaid library failed to load');
+                // Show fallback text
+                document.querySelectorAll('.mermaid').forEach(function(el) {
+                    el.innerHTML = '<pre style="background: #f5f5f5; padding: 20px; border-radius: 8px;">' +
+                        'Data Flow:\n' +
+                        '1. Upload: Your Data File → Data Loader\n' +
+                        '2. Analysis (Local): Data Loader → Metadata Extractor → Extract Statistics (NO actual values)\n' +
+                        '3. Code Generation (Privacy Safe): Statistics → Check Cache → Send Stats to LLM → Generate Python Code\n' +
+                        '4. Create Synthetic Data: Run Code Locally → Generate Data → Download Files\n' +
+                        '</pre>';
+                });
+                return;
+            }
+
+            try {
+                mermaid.initialize({
+                    startOnLoad: true,
+                    theme: 'default',
+                    securityLevel: 'loose',
+                    flowchart: {
+                        useMaxWidth: true,
+                        htmlLabels: true
+                    }
+                });
+                // Force render
+                mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+                console.log('Mermaid initialized successfully');
+            } catch (error) {
+                console.error('Mermaid initialization error:', error);
+            }
+        });
+    </script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">🔐 BYOD Synthetic Data Generator</div>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/about" class="active">About</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <header>
+            <h1>About BYOD Synthetic Data Generator</h1>
+            <p class="tagline">Privacy-First Synthetic Data Generation</p>
+        </header>
+
+        <main>
+            <section class="info-section">
+                <h2>🛡️ Your Data is Safe</h2>
+                <div class="highlight-box">
+                    <h3>⚠️ Important: The LLM NEVER sees your actual data!</h3>
+                    <p>Only statistical metadata (distributions, patterns, correlations) is sent to the AI model. Your sensitive data never leaves your system.</p>
+                </div>
+            </section>
+
+            <section class="diagram-section">
+                <h2>📊 How It Works</h2>
+                <!-- Fallback message if Mermaid doesn't load -->
+                <noscript>
+                    <p style="color: red;">JavaScript is required to view the diagram</p>
+                </noscript>
+                <div class="mermaid" style="min-height: 400px;">
+                    graph TB
+                        subgraph Upload["1. Upload - Your Files"]
+                            A[Your Data File] --> B[Data Loader]
+                            A2[Data Dictionary<br/>✓ IMPLEMENTED]:::implemented --> DD[Dictionary Parser]
+                            DD --> DC[Apply Constraints]
+                        end
+
+                        subgraph Analysis["2. Analysis - Local Only"]
+                            B --> C[Metadata Extractor]
+                            C --> D[Extract Statistics<br/>NO actual values]
+                            C --> D2[Clinical Reference<br/>Library ✓]:::implemented
+                            D2 --> D3[Domain Detection<br/>✓ Date columns]:::implemented
+                            DC --> D
+                        end
+
+                        subgraph CodeGen["3. Code Generation - Privacy Safe"]
+                            D --> E{Check Cache}
+                            E -->|Found| F[Reuse Code]
+                            E -->|New| G[Send Stats + Constraints<br/>to LLM]
+                            G --> H[LLM Generates<br/>Python Code]
+                            E -.->|Future| V[Vector Similarity<br/>PLANNED]:::pending
+                        end
+
+                        subgraph CreateData["4. Create Synthetic Data"]
+                            F --> I[Run Code Locally]
+                            H --> I
+                            I --> J[Generate Data]
+                            J --> P[Preview First 10 Rows]:::implemented
+                            P --> K[Download Files<br/>ZIP Multi-file ✓]:::implemented
+                        end
+
+                        %% Styling for different states
+                        classDef implemented fill:#90EE90,stroke:#333,stroke-width:2px
+                        classDef inprogress fill:#FFE4B5,stroke:#333,stroke-width:2px
+                        classDef pending fill:#FFB6C1,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
+
+                        style C fill:#90EE90
+                        style D fill:#90EE90
+                        style G fill:#FFE4B5
+                        style K fill:#87CEEB
+                        style P fill:#87CEEB
+                </div>
+            </section>
+
+            <section class="features-section">
+                <h2>✨ Key Features</h2>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h3>🔒 Privacy First</h3>
+                        <p>Your data never leaves your control. Only statistical patterns are analyzed.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>📈 Statistical Preservation</h3>
+                        <p>Maintains distributions, correlations, and patterns from original data.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>⚡ Smart Caching</h3>
+                        <p>Similar data structures reuse generation scripts for consistency.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🎯 Multiple Formats</h3>
+                        <p>Supports CSV, JSON, Excel, Parquet, and TSV files.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="faq-section">
+                <h2>❓ Frequently Asked Questions</h2>
+
+                <details>
+                    <summary>Is my data sent to the cloud?</summary>
+                    <p>Your file is uploaded to the secure web app, and deleted after processing. Additionally, only statistical metadata (no actual data values) is sent to the LLM for code generation. The original data is processed locally on the server to extract statistics only.</p>
+                </details>
+
+                <details>
+                    <summary>How does column type detection work?</summary>
+                    <p>The system uses pandas type inference, pattern matching, and statistical analysis to detect column types. However, it may sometimes misidentify complex formats like custom date strings.</p>
+                </details>
+
+                <details>
+                    <summary>Why is my date column showing random text?</summary>
+                    <p>Date detection relies on pandas' automatic type inference. If your dates are in a non-standard format, they may be treated as text. We're working on improving this.</p>
+                </details>
+
+                <details>
+                    <summary>Will the same file generate the same synthetic data?</summary>
+                    <p>Files with similar metadata structures will use cached generation scripts, providing consistent patterns. However, the actual values will be different each time (randomized but statistically similar).</p>
+                </details>
+
+                <details>
+                    <summary>Can it understand domain-specific data like medications?</summary>
+                    <p>Currently, the system doesn't have domain knowledge. A column named "medication" will get random values matching the pattern, not actual medication names. This is a planned future enhancement.</p>
+                </details>
+            </section>
+
+            <section class="limitations-section">
+                <h2>⚠️ Current Limitations</h2>
+                <ul>
+                    <li><strong>Date Format Detection:</strong> May not recognize all custom date formats</li>
+                    <li><strong>Domain Knowledge:</strong> Doesn't understand semantic meaning (e.g., medical terms)</li>
+                    <li><strong>Complex Relationships:</strong> Multi-column dependencies may not be fully preserved</li>
+                    <li><strong>Large Files:</strong> Performance may degrade with very large datasets</li>
+                </ul>
+            </section>
+
+            <section class="roadmap-section">
+                <h2>🚀 Future Enhancements</h2>
+                <ul>
+                    <li>Domain-specific value libraries (medical, financial, etc.)</li>
+                    <li>Improved date/time format detection</li>
+                    <li>Better preservation of multi-column relationships</li>
+                    <li>Custom validation rules</li>
+                    <li>Batch processing optimization</li>
+                </ul>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

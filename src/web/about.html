@@ -4,54 +4,122 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>About - BYOD Synthetic Data Generator</title>
+    <!-- Favicon with fallback support -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/about.css">
-    <!-- Mermaid JS for diagrams - using specific version with cache buster -->
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js?v=2"></script>
-    <script>
-        // Initialize Mermaid with error handling
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Initializing Mermaid diagrams...');
+    <style>
+        /* Inline Accordion Styles */
+        .accordion-word {
+            color: #2196F3;
+            cursor: pointer;
+            text-decoration: underline;
+            text-decoration-style: dotted;
+            position: relative;
+            display: inline;
+        }
 
-            // Check if Mermaid loaded
-            if (typeof mermaid === 'undefined') {
-                console.error('Mermaid library failed to load');
-                // Show fallback text
-                document.querySelectorAll('.mermaid').forEach(function(el) {
-                    el.innerHTML = '<pre style="background: #f5f5f5; padding: 20px; border-radius: 8px;">' +
-                        'Data Flow:\n' +
-                        '1. Upload: Your Data File → Data Loader\n' +
-                        '2. Analysis (Local): Data Loader → Metadata Extractor → Extract Statistics (NO actual values)\n' +
-                        '3. Code Generation (Privacy Safe): Statistics → Check Cache → Send Stats to LLM → Generate Python Code\n' +
-                        '4. Create Synthetic Data: Run Code Locally → Generate Data → Download Files\n' +
-                        '</pre>';
-                });
-                return;
-            }
+        .accordion-word:hover {
+            color: #1976D2;
+            text-decoration-style: solid;
+        }
 
-            try {
-                mermaid.initialize({
-                    startOnLoad: true,
-                    theme: 'default',
-                    securityLevel: 'loose',
-                    flowchart: {
-                        useMaxWidth: true,
-                        htmlLabels: true
-                    }
-                });
-                // Force render
-                mermaid.init(undefined, document.querySelectorAll('.mermaid'));
-                console.log('Mermaid initialized successfully');
-            } catch (error) {
-                console.error('Mermaid initialization error:', error);
+        .accordion-content {
+            display: none;
+            background: #f8f9fa;
+            border-left: 3px solid #2196F3;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 4px;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        .accordion-content.active {
+            display: block;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
             }
-        });
-    </script>
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Nested Accordions */
+        .nested-accordion {
+            margin-left: 20px;
+            border-left: 2px solid #ddd;
+            padding-left: 15px;
+        }
+
+        .nested-accordion .accordion-word {
+            color: #FF9800;
+        }
+
+        /* Toggle Button */
+        .toggle-all {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+
+        .toggle-all:hover {
+            background: #1976D2;
+            transform: scale(1.05);
+        }
+
+        /* Compact sections */
+        .info-block {
+            margin-bottom: 2rem;
+            line-height: 1.8;
+        }
+
+        .info-block h2 {
+            color: #333;
+            margin-bottom: 1rem;
+        }
+
+        .info-block p {
+            margin-bottom: 0.8rem;
+        }
+
+        /* Code examples */
+        .code-example {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar">
         <div class="nav-container">
-            <div class="nav-brand">🔐 BYOD Synthetic Data Generator</div>
+            <h1>🧬 BYOD Synthetic Data Generator</h1>
             <div class="nav-links">
                 <a href="/">Home</a>
                 <a href="/about" class="active">About</a>
@@ -65,39 +133,240 @@
             <p class="tagline">Privacy-First Synthetic Data Generation</p>
         </header>
 
+        <button class="toggle-all" onclick="toggleAllAccordions()">
+            <span id="toggleText">Expand All Details</span>
+        </button>
+
         <main>
-            <section class="info-section">
-                <h2>🛡️ Your Data is Safe</h2>
-                <div class="highlight-box">
-                    <h3>⚠️ Important: The LLM NEVER sees your actual data!</h3>
-                    <p>Only statistical metadata (distributions, patterns, correlations) is sent to the AI model. Your sensitive data never leaves your system.</p>
-                </div>
+            <section class="info-block">
+                <h2>🛡️ How We Protect Your Data</h2>
+                <p>
+                    Your data is processed <span class="accordion-word" onclick="toggleAccordion(this)">locally</span>
+                    <span class="accordion-content">
+                        Data files are loaded into memory on the server, never saved to disk. The files exist only
+                        during processing and are immediately garbage collected after use. No permanent storage occurs.
+                    </span>
+                    and only <span class="accordion-word" onclick="toggleAccordion(this)">statistical metadata</span>
+                    <span class="accordion-content">
+                        We extract only aggregate statistics like mean, min, max, standard deviation, and data types.
+                        No actual data values are sent to the AI. For example, from patient names we only extract
+                        "string column, average length 15 characters, 95% unique values" - never the actual names.
+                    </span>
+                    is sent to the AI model. The LLM <span class="accordion-word" onclick="toggleAccordion(this)">NEVER sees your actual data</span>
+                    <span class="accordion-content">
+                        The Azure OpenAI model receives only:
+                        <ul>
+                            <li>Column names and types</li>
+                            <li>Statistical distributions</li>
+                            <li>Correlations between columns</li>
+                            <li>Pattern descriptions</li>
+                        </ul>
+                        It generates Python code based on these statistics, which then runs locally to create synthetic data.
+                    </span>.
+                </p>
             </section>
 
-            <section class="diagram-section">
-                <h2>📊 How It Works</h2>
-                <!-- Fallback message if Mermaid doesn't load -->
-                <noscript>
-                    <p style="color: red;">JavaScript is required to view the diagram</p>
-                </noscript>
+            <section class="info-block">
+                <h2>📊 Two Ways to Generate Data</h2>
+                <p>
+                    <strong>1. From Real Data:</strong> Upload your <span class="accordion-word" onclick="toggleAccordion(this)">data file</span>
+                    <span class="accordion-content">
+                        Supported formats: CSV, JSON, Excel (.xlsx, .xls), Parquet, TSV.
+                        The system automatically detects the format and extracts the structure.
+                        <span class="nested-accordion">
+                            Files are processed using <span class="accordion-word" onclick="toggleAccordion(this)">pandas</span>
+                            <span class="accordion-content">
+                                We use pandas DataFrames to analyze your data efficiently. This allows us to:
+                                <ul>
+                                    <li>Handle large files (though streaming for 1GB+ files is planned)</li>
+                                    <li>Detect data types automatically</li>
+                                    <li>Calculate statistics in a single pass</li>
+                                    <li>Identify patterns and correlations</li>
+                                </ul>
+                            </span>
+                            for maximum compatibility.
+                        </span>
+                    </span>
+                    to extract patterns and generate similar synthetic data.
+                </p>
+                <p>
+                    <strong>2. From Data Dictionary:</strong> Define your structure with a <span class="accordion-word" onclick="toggleAccordion(this)">data dictionary</span>
+                    <span class="accordion-content">
+                        Upload a dictionary file (JSON, YAML, CSV, Excel, PDF) that defines:
+                        <ul>
+                            <li>Column names and types</li>
+                            <li>Constraints (min/max values, allowed values)</li>
+                            <li>Required vs optional fields</li>
+                            <li>Format patterns</li>
+                        </ul>
+                        <div class="code-example">
+{
+  "columns": {
+    "patient_id": {
+      "type": "integer",
+      "constraints": {"min_value": 1000, "max_value": 9999}
+    },
+    "treatment_date": {"type": "datetime"},
+    "medication": {
+      "type": "string",
+      "constraints": {"allowed_values": ["Aspirin", "Metformin"]}
+    }
+  }
+}
+                        </div>
+                        No real data file needed - generates purely from specifications!
+                    </span>
+                    without needing any real data.
+                </p>
+                <p>
+                    <strong>Bonus:</strong> Combine both approaches by uploading data AND a dictionary for
+                    <span class="accordion-word" onclick="toggleAccordion(this)">constraint enforcement</span>
+                    <span class="accordion-content">
+                        When you provide both:
+                        <ol>
+                            <li>Statistical patterns are extracted from your real data</li>
+                            <li>Dictionary constraints override these statistics</li>
+                            <li>Result: Realistic patterns with enforced business rules</li>
+                        </ol>
+                        Example: Your data shows ages 18-95, but dictionary specifies max_value: 65.
+                        Generated data will follow the distribution pattern but cap at 65.
+                    </span>.
+                </p>
+            </section>
+
+            <section class="info-block">
+                <h2>🔬 Advanced Features</h2>
+                <p>
+                    The system includes <span class="accordion-word" onclick="toggleAccordion(this)">domain detection</span>
+                    <span class="accordion-content">
+                        Automatically recognizes:
+                        <ul>
+                            <li><strong>Date columns:</strong> Fields with 'date', 'time', 'created', 'updated' generate proper dates</li>
+                            <li><strong>Medical data:</strong> Medication names, lab tests, diagnoses use clinical reference library</li>
+                            <li><strong>Email/Phone:</strong> Patterns detected and appropriate formats generated</li>
+                            <li><strong>IDs:</strong> Sequential or UUID patterns maintained</li>
+                        </ul>
+                    </span>
+                    for intelligent data generation, a <span class="accordion-word" onclick="toggleAccordion(this)">clinical reference library</span>
+                    <span class="accordion-content">
+                        Built-in database of:
+                        <ul>
+                            <li>100+ common medications (Metformin, Lisinopril, etc.)</li>
+                            <li>50+ lab tests (CBC, Glucose, Hemoglobin A1c)</li>
+                            <li>30+ diagnoses (Hypertension, Diabetes, etc.)</li>
+                            <li>Medical units (mg, mL, mg/dL, mmol/L)</li>
+                        </ul>
+                        When medical columns are detected, realistic clinical values are used instead of random strings.
+                    </span>
+                    for healthcare data, and <span class="accordion-word" onclick="toggleAccordion(this)">smart caching</span>
+                    <span class="accordion-content">
+                        The system caches:
+                        <span class="nested-accordion">
+                            <span class="accordion-word" onclick="toggleAccordion(this)">Generation scripts</span>
+                            <span class="accordion-content">
+                                Python code generated by the LLM is cached with metadata signatures.
+                                Similar data structures reuse the same generation script, saving API calls and ensuring consistency.
+                            </span>
+                            for similar data structures, reducing API costs and improving speed.
+                            Future plans include <span class="accordion-word" onclick="toggleAccordion(this)">vector similarity search</span>
+                            <span class="accordion-content">
+                                Using Azure AI Search, we'll embed metadata and find the most similar previously processed files,
+                                allowing intelligent parameter suggestions and pattern reuse across your organization.
+                            </span>.
+                        </span>
+                    </span>
+                    to optimize performance.
+                </p>
+            </section>
+
+            <section class="info-block">
+                <h2>🚀 API Usage</h2>
+                <p>
+                    Use our RESTful API for <span class="accordion-word" onclick="toggleAccordion(this)">programmatic access</span>
+                    <span class="accordion-content">
+                        <strong>Basic generation:</strong>
+                        <div class="code-example">
+curl -X POST http://localhost:8201/generate \
+  -F "file=@your_data.csv" \
+  -F "num_rows=1000" \
+  -F "file_count=3" \
+  -F "output_format=csv"
+                        </div>
+
+                        <strong>With data dictionary:</strong>
+                        <div class="code-example">
+curl -X POST http://localhost:8201/generate-with-dictionary \
+  -F "dictionary_file=@rules.json" \
+  -F "data_file=@sample.csv" \
+  -F "num_rows=5000"
+                        </div>
+
+                        <strong>Dictionary only (no data file):</strong>
+                        <div class="code-example">
+curl -X POST http://localhost:8201/generate-with-dictionary \
+  -F "dictionary_file=@schema.yaml" \
+  -F "num_rows=1000" \
+  -F "output_format=json"
+                        </div>
+                    </span>.
+                    Generate data in <span class="accordion-word" onclick="toggleAccordion(this)">multiple formats</span>
+                    <span class="accordion-content">
+                        Output formats supported:
+                        <ul>
+                            <li><strong>CSV:</strong> Standard comma-separated values</li>
+                            <li><strong>JSON:</strong> Array of objects or nested structure</li>
+                            <li><strong>Excel:</strong> .xlsx files with proper formatting</li>
+                            <li><strong>Parquet:</strong> Columnar format for big data (coming soon)</li>
+                        </ul>
+                        Multi-file generation creates a ZIP archive automatically.
+                    </span>
+                    and integrate with your <span class="accordion-word" onclick="toggleAccordion(this)">CI/CD pipelines</span>
+                    <span class="accordion-content">
+                        Perfect for:
+                        <ul>
+                            <li>Generating test data in development pipelines</li>
+                            <li>Creating fixtures for unit tests</li>
+                            <li>Populating staging databases</li>
+                            <li>Load testing with realistic data</li>
+                        </ul>
+                        Can be deployed as Azure Function for serverless operation.
+                    </span>.
+                </p>
+            </section>
+
+            <div class="highlight-box">
+                <h3>🎯 Perfect For:</h3>
+                <ul style="list-style: none; padding: 0;">
+                    <li>✅ Healthcare organizations needing HIPAA-compliant test data</li>
+                    <li>✅ Financial institutions requiring PCI-compliant mock data</li>
+                    <li>✅ Development teams needing realistic test datasets</li>
+                    <li>✅ Data scientists creating training data</li>
+                    <li>✅ QA teams validating edge cases</li>
+                </ul>
+            </div>
+
+            <section class="info-block">
+                <h2>📈 Architecture</h2>
                 <div class="mermaid" style="min-height: 400px;">
                     graph TB
                         subgraph Upload["1. Upload - Your Files"]
                             A[Your Data File] --> B[Data Loader]
-                            A2[Data Dictionary<br/>COMING SOON]:::pending -.-> B
+                            A2[Data Dictionary<br/>✓ IMPLEMENTED]:::implemented --> DD[Dictionary Parser]
+                            DD --> DC[Apply Constraints]
                         end
 
                         subgraph Analysis["2. Analysis - Local Only"]
                             B --> C[Metadata Extractor]
                             C --> D[Extract Statistics<br/>NO actual values]
                             C --> D2[Clinical Reference<br/>Library ✓]:::implemented
-                            D2 --> D3[Domain Detection<br/>IN PROGRESS]:::inprogress
+                            D2 --> D3[Domain Detection<br/>✓ Date columns]:::implemented
+                            DC --> D
                         end
 
                         subgraph CodeGen["3. Code Generation - Privacy Safe"]
                             D --> E{Check Cache}
                             E -->|Found| F[Reuse Code]
-                            E -->|New| G[Send Stats to LLM]
+                            E -->|New| G[Send Stats + Constraints<br/>to LLM]
                             G --> H[LLM Generates<br/>Python Code]
                             E -.->|Future| V[Vector Similarity<br/>PLANNED]:::pending
                         end
@@ -106,7 +375,8 @@
                             F --> I[Run Code Locally]
                             H --> I
                             I --> J[Generate Data]
-                            J --> K[Download Files<br/>ZIP Multi-file ✓]:::implemented
+                            J --> P[Preview First 10 Rows]:::implemented
+                            P --> K[Download Files<br/>ZIP Multi-file ✓]:::implemented
                         end
 
                         %% Styling for different states
@@ -118,81 +388,57 @@
                         style D fill:#90EE90
                         style G fill:#FFE4B5
                         style K fill:#87CEEB
+                        style P fill:#87CEEB
                 </div>
-            </section>
-
-            <section class="features-section">
-                <h2>✨ Key Features</h2>
-                <div class="feature-grid">
-                    <div class="feature-card">
-                        <h3>🔒 Privacy First</h3>
-                        <p>Your data never leaves your control. Only statistical patterns are analyzed.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>📈 Statistical Preservation</h3>
-                        <p>Maintains distributions, correlations, and patterns from original data.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>⚡ Smart Caching</h3>
-                        <p>Similar data structures reuse generation scripts for consistency.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>🎯 Multiple Formats</h3>
-                        <p>Supports CSV, JSON, Excel, Parquet, and TSV files.</p>
-                    </div>
-                </div>
-            </section>
-
-            <section class="faq-section">
-                <h2>❓ Frequently Asked Questions</h2>
-
-                <details>
-                    <summary>Is my data sent to the cloud?</summary>
-                    <p>Your file is uploaded to the secure web app, and deleted after processing. Additionally, only statistical metadata (no actual data values) is sent to the LLM for code generation. The original data is processed locally on the server to extract statistics only.</p>
-                </details>
-
-                <details>
-                    <summary>How does column type detection work?</summary>
-                    <p>The system uses pandas type inference, pattern matching, and statistical analysis to detect column types. However, it may sometimes misidentify complex formats like custom date strings.</p>
-                </details>
-
-                <details>
-                    <summary>Why is my date column showing random text?</summary>
-                    <p>Date detection relies on pandas' automatic type inference. If your dates are in a non-standard format, they may be treated as text. We're working on improving this.</p>
-                </details>
-
-                <details>
-                    <summary>Will the same file generate the same synthetic data?</summary>
-                    <p>Files with similar metadata structures will use cached generation scripts, providing consistent patterns. However, the actual values will be different each time (randomized but statistically similar).</p>
-                </details>
-
-                <details>
-                    <summary>Can it understand domain-specific data like medications?</summary>
-                    <p>Currently, the system doesn't have domain knowledge. A column named "medication" will get random values matching the pattern, not actual medication names. This is a planned future enhancement.</p>
-                </details>
-            </section>
-
-            <section class="limitations-section">
-                <h2>⚠️ Current Limitations</h2>
-                <ul>
-                    <li><strong>Date Format Detection:</strong> May not recognize all custom date formats</li>
-                    <li><strong>Domain Knowledge:</strong> Doesn't understand semantic meaning (e.g., medical terms)</li>
-                    <li><strong>Complex Relationships:</strong> Multi-column dependencies may not be fully preserved</li>
-                    <li><strong>Large Files:</strong> Performance may degrade with very large datasets</li>
-                </ul>
-            </section>
-
-            <section class="roadmap-section">
-                <h2>🚀 Future Enhancements</h2>
-                <ul>
-                    <li>Domain-specific value libraries (medical, financial, etc.)</li>
-                    <li>Improved date/time format detection</li>
-                    <li>Better preservation of multi-column relationships</li>
-                    <li>Custom validation rules</li>
-                    <li>Batch processing optimization</li>
-                </ul>
             </section>
         </main>
     </div>
+
+    <script>
+        let allExpanded = false;
+
+        function toggleAccordion(element) {
+            const content = element.nextElementSibling;
+            if (content && content.classList.contains('accordion-content')) {
+                content.classList.toggle('active');
+            }
+        }
+
+        function toggleAllAccordions() {
+            const accordions = document.querySelectorAll('.accordion-content');
+            const toggleBtn = document.getElementById('toggleText');
+
+            allExpanded = !allExpanded;
+
+            accordions.forEach(acc => {
+                if (allExpanded) {
+                    acc.classList.add('active');
+                } else {
+                    acc.classList.remove('active');
+                }
+            });
+
+            toggleBtn.textContent = allExpanded ? 'Collapse All Details' : 'Expand All Details';
+        }
+
+        // Add click tracking
+        document.querySelectorAll('.accordion-word').forEach(word => {
+            word.addEventListener('click', function() {
+                console.log('Expanded:', this.textContent);
+            });
+        });
+    </script>
+
+    <!-- Mermaid initialization -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js?v=3"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            mermaid.initialize({
+                startOnLoad: true,
+                theme: 'default',
+                securityLevel: 'loose'
+            });
+        });
+    </script>
 </body>
 </html>

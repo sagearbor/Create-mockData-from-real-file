@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BYOD Synthetic Data Generator</title>
+    <!-- Favicon with fallback support -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/data-editor.css">
 </head>
@@ -25,37 +28,72 @@
         </header>
 
         <main>
-            <!-- Upload Section -->
-            <section class="upload-section">
-                <h2>Upload Your Data</h2>
-                <div class="upload-area" id="uploadArea">
-                    <svg class="upload-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    <p>Drag & drop your file here or click to browse</p>
-                    <p class="file-types">Supported: CSV, JSON, Excel, Parquet, TSV</p>
-                    <input type="file" id="fileInput" accept=".csv,.json,.xlsx,.xls,.parquet,.tsv,.txt" hidden>
+            <!-- Dual Upload Section -->
+            <section class="dual-upload-section">
+                <div class="upload-grid">
+                    <!-- Data File Upload -->
+                    <div class="upload-box">
+                        <h3>📊 Upload Data File</h3>
+                        <div class="upload-area" id="uploadArea">
+                            <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p>Drop your data file here</p>
+                            <p class="file-types">CSV, JSON, Excel, Parquet, TSV</p>
+                            <input type="file" id="fileInput" accept=".csv,.json,.xlsx,.xls,.parquet,.tsv,.txt" hidden>
+                        </div>
+                        <div id="fileInfo" class="file-info" style="display: none;">
+                            <strong>Loaded:</strong> <span id="fileName"></span>
+                            <div id="fileStats"></div>
+                        </div>
+                    </div>
+
+                    <!-- OR Divider -->
+                    <div class="or-divider">
+                        <span>AND / OR</span>
+                    </div>
+
+                    <!-- Dictionary Upload -->
+                    <div class="upload-box">
+                        <h3>📖 Upload Data Dictionary</h3>
+                        <div class="upload-area" id="dictionaryUploadArea">
+                            <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                            <p>Drop dictionary file here</p>
+                            <p class="file-types">JSON, YAML, CSV, Excel, PDF</p>
+                            <input type="file" id="dictionaryFileInput" accept=".json,.yaml,.yml,.csv,.xls,.xlsx,.pdf,.txt" hidden>
+                        </div>
+                        <div id="dictionaryInfo" class="file-info" style="display: none;">
+                            <strong>Loaded:</strong> <span id="dictionaryFileName"></span>
+                            <div id="dictionaryStats"></div>
+                        </div>
+                    </div>
                 </div>
-                
-                <div id="fileInfo" class="file-info" style="display: none;">
-                    <h3>File Loaded:</h3>
-                    <p id="fileName"></p>
-                    <div id="fileStats"></div>
+
+                <!-- Quick Start Options -->
+                <div class="quick-start">
+                    <button id="generateFromDataBtn" class="btn btn-primary" style="display: none;">🚀 Generate from Data</button>
+                    <button id="generateFromDictBtn" class="btn btn-primary" style="display: none;">🚀 Generate from Dictionary</button>
+                    <button id="generateFromBothBtn" class="btn btn-primary" style="display: none;">🚀 Generate with Both</button>
                 </div>
             </section>
 
-            <!-- Demo Mode -->
-            <section class="demo-section">
-                <h2>Try Demo Datasets</h2>
-                <div class="demo-buttons">
-                    <button class="demo-btn" data-demo="sales">💰 Sales Data</button>
-                    <button class="demo-btn" data-demo="customer">👥 Customer Data</button>
-                    <button class="demo-btn" data-demo="medical">🏥 Medical Records</button>
-                    <button class="demo-btn" data-demo="financial">💳 Financial Transactions</button>
+            <!-- Demo Mode - Compact Single Row -->
+            <section class="demo-section-compact">
+                <h3>Try Demo Datasets:</h3>
+                <div class="demo-buttons-row">
+                    <button class="demo-btn-compact" data-demo="sales" title="Sales Data">💰 Sales</button>
+                    <button class="demo-btn-compact" data-demo="customer" title="Customer Data">👥 Customer</button>
+                    <button class="demo-btn-compact" data-demo="medical" title="Medical Records">🏥 Medical</button>
+                    <button class="demo-btn-compact" data-demo="financial" title="Financial Transactions">💳 Financial</button>
                 </div>
-                <p class="demo-note">Click any demo to load sample data and test the synthetic generation</p>
             </section>
 
             <!-- Data Editor Section -->
@@ -91,33 +129,11 @@
                 </div>
             </section>
 
-            <!-- Data Dictionary Section -->
-            <section class="dictionary-section" id="dictionarySection" style="display: none;">
-                <h2>📖 Data Dictionary (Optional)</h2>
-
-                <div class="dictionary-upload">
-                    <p>Upload a data dictionary to enforce constraints and validation rules:</p>
-                    <input type="file" id="dictionaryFile" accept=".json,.yaml,.yml,.csv,.xlsx,.txt">
-                    <button id="uploadDictionaryBtn" class="btn btn-secondary">📤 Upload Dictionary</button>
-                </div>
-
-                <div id="dictionaryStatus" class="dictionary-status" style="display: none;">
-                    <h3>Dictionary Loaded</h3>
-                    <p id="dictionaryInfo"></p>
-                    <div id="dictionaryColumns"></div>
-                    <button id="clearDictionaryBtn" class="btn btn-secondary">❌ Clear Dictionary</button>
-                </div>
-
-                <div class="dictionary-features">
-                    <h3>Benefits of Using a Data Dictionary:</h3>
-                    <ul>
-                        <li>✅ Enforce column types and constraints</li>
-                        <li>✅ Define allowed values for categorical columns</li>
-                        <li>✅ Set min/max ranges for numeric values</li>
-                        <li>✅ Specify required vs optional columns</li>
-                        <li>✅ Ensure consistent data formats</li>
-                    </ul>
-                </div>
+            <!-- Dictionary Details (Hidden by default, shown when dictionary loaded) -->
+            <section class="dictionary-details" id="dictionaryDetails" style="display: none;">
+                <h3>📖 Dictionary Constraints Applied</h3>
+                <div id="dictionaryColumns"></div>
+                <button id="clearDictionaryBtn" class="btn btn-small btn-secondary">❌ Clear Dictionary</button>
             </section>
 
             <!-- Configuration Section -->
@@ -254,17 +270,17 @@
             </section>
 
 
-            <!-- Experimental Features -->
-            <section class="experimental-section">
-                <h2>🧪 Experimental Features</h2>
+            <!-- Experimental Features - Collapsible -->
+            <details class="experimental-section">
+                <summary>🧪 Experimental Features</summary>
                 <div class="experiment-buttons">
-                    <button id="corruptDataBtn" class="experiment-btn">💥 Corrupt Random Data</button>
-                    <button id="duplicateRowsBtn" class="experiment-btn">📋 Duplicate Random Rows</button>
-                    <button id="addNullsBtn" class="experiment-btn">❓ Add Random Nulls</button>
-                    <button id="scrambleColBtn" class="experiment-btn">🔀 Scramble Column</button>
-                    <button id="generateOutliersBtn" class="experiment-btn">📈 Generate Outliers</button>
+                    <button id="corruptDataBtn" class="experiment-btn">💥 Corrupt</button>
+                    <button id="duplicateRowsBtn" class="experiment-btn">📋 Duplicate</button>
+                    <button id="addNullsBtn" class="experiment-btn">❓ Add Nulls</button>
+                    <button id="scrambleColBtn" class="experiment-btn">🔀 Scramble</button>
+                    <button id="generateOutliersBtn" class="experiment-btn">📈 Outliers</button>
                 </div>
-            </section>
+            </details>
         </main>
 
         <!-- Loading Overlay -->

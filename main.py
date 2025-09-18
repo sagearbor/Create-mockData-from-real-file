@@ -142,6 +142,19 @@ async def about():
     else:
         return HTMLResponse(content="<h1>About page not found</h1>")
 
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve favicon.ico directly if it exists, otherwise redirect to favicon.svg."""
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    # Check if favicon.ico exists
+    ico_path = Path(__file__).parent / "src" / "web" / "static" / "img" / "favicon.ico"
+    if ico_path.exists():
+        return FileResponse(ico_path, media_type="image/x-icon")
+
+    # Otherwise redirect to favicon.svg
+    return RedirectResponse(url="/static/img/favicon.svg", status_code=301)
+
 @app.get("/api")
 async def api_info():
     """API information endpoint."""

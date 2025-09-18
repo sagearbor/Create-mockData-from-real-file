@@ -510,3 +510,229 @@ input[type="range"]::-moz-range-thumb {
     padding: 0.5rem 0;
     color: #666;
 }
+
+/* Dual Upload Section */
+.dual-upload-section {
+    margin-bottom: 2rem;
+}
+
+.upload-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 2rem;
+    align-items: stretch;
+    margin-bottom: 1.5rem;
+}
+
+.upload-box {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+}
+
+.upload-box h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+}
+
+.upload-box .upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.upload-box .upload-area:hover {
+    border-color: var(--primary-color);
+    background: #f0f9ff;
+}
+
+.upload-box .upload-area.active {
+    border-color: var(--success-color);
+    background: #f0fdf4;
+}
+
+.upload-box .upload-icon {
+    margin-bottom: 0.5rem;
+}
+
+.upload-box .file-info {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: #f0f9ff;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.or-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.or-divider span {
+    background: var(--background);
+    padding: 0.5rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.quick-start {
+    text-align: center;
+    margin-top: 1rem;
+}
+
+.quick-start .btn {
+    margin: 0 0.5rem;
+}
+
+/* Demo Section Compact */
+.demo-section-compact {
+    background: var(--surface);
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow);
+}
+
+.demo-section-compact h3 {
+    display: inline-block;
+    margin-right: 1rem;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    vertical-align: middle;
+}
+
+.demo-buttons-row {
+    display: inline-flex;
+    gap: 1rem;
+}
+
+.demo-btn-compact {
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.demo-btn-compact:hover {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    transform: translateY(-2px);
+}
+
+/* Dictionary Details */
+.dictionary-details {
+    background: #f0f9ff;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    border-left: 4px solid var(--primary-color);
+}
+
+.dictionary-details h3 {
+    color: var(--primary-color);
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Experimental Features - Collapsible */
+details.experimental-section {
+    background: #fffbf0;
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    margin-top: 2rem;
+    padding: 0.75rem 1rem;
+}
+
+details.experimental-section summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #92400e;
+    list-style: none;
+    position: relative;
+    padding-left: 1.5rem;
+    user-select: none;
+}
+
+details.experimental-section summary::-webkit-details-marker {
+    display: none;
+}
+
+details.experimental-section summary::before {
+    content: '▶';
+    position: absolute;
+    left: 0;
+    transition: transform 0.2s;
+}
+
+details.experimental-section[open] summary::before {
+    transform: rotate(90deg);
+}
+
+details.experimental-section .experiment-buttons {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #fde68a;
+}
+
+.experiment-btn {
+    padding: 0.5rem 1rem;
+    background: #fbbf24;
+    color: #78350f;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+}
+
+.experiment-btn:hover {
+    background: #f59e0b;
+    transform: translateY(-1px);
+}
+
+/* Additional Responsive adjustments */
+@media (max-width: 768px) {
+    .upload-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .or-divider {
+        margin: 0.5rem 0;
+    }
+
+    .demo-buttons-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+
+    .demo-section-compact h3 {
+        display: block;
+        margin-bottom: 0.5rem;
+    }
+}

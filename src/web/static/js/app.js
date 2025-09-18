@@ -7,14 +7,23 @@
 const API_BASE = (() => {
     // If served from same origin (FastAPI at port 8201), use relative paths
     if (window.location.port === '8201') {
-        return window.location.origin;
+        // Normalize localhost to 127.0.0.1 for consistency
+        const origin = window.location.origin;
+        if (origin.includes('localhost')) {
+            return origin.replace('localhost', '127.0.0.1');
+        }
+        return origin;
     }
     // If file:// protocol, use 127.0.0.1
     if (window.location.protocol === 'file:') {
         return 'http://127.0.0.1:8201';
     }
     // If served from different port (like VS Code preview), match the hostname format
-    const hostname = window.location.hostname || '127.0.0.1';
+    let hostname = window.location.hostname || '127.0.0.1';
+    // Always use 127.0.0.1 instead of localhost for consistency
+    if (hostname === 'localhost') {
+        hostname = '127.0.0.1';
+    }
     return `http://${hostname}:8201`;
 })();
 let currentFile = null;
@@ -587,6 +596,33 @@ function showError(message) {
     
     errorMessage.textContent = displayMessage;
     errorModal.style.display = 'flex';
+}
+
+function showSuccess(message) {
+    // Create a success notification element
+    const successDiv = document.createElement('div');
+    successDiv.className = 'success-notification';
+    successDiv.textContent = message;
+    successDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #10b981;
+        color: white;
+        padding: 16px 24px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        z-index: 10000;
+        animation: slideIn 0.3s ease-out;
+    `;
+
+    document.body.appendChild(successDiv);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        successDiv.style.animation = 'slideOut 0.3s ease-out';
+        setTimeout(() => successDiv.remove(), 300);
+    }, 3000);
 }
 
 function closeError() {

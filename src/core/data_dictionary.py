@@ -127,6 +127,240 @@ class DataDictionary:
         data = yaml.safe_load(content)
         return self._standardize_dictionary(data)
 
+    def _parse_excel_dictionary(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Generic parser for Excel data dictionaries."""
+        dictionary = {"columns": {}}
+
+        # Map common column patterns to their semantic meaning
+        column_patterns = {
+            'name': ['variable', 'field', 'column', 'name', 'attribute', 'parameter', 'element'],
+            'type': ['type', 'datatype', 'data_type', 'dtype', 'format', 'class'],
+            'description': ['description', 'label', 'definition', 'comment', 'notes', 'meaning'],
+            'choices': ['choices', 'values', 'options', 'allowed', 'valid', 'enum', 'list'],
+            'min': ['min', 'minimum', 'lower', 'low', 'floor'],
+            'max': ['max', 'maximum', 'upper', 'high', 'ceiling'],
+            'required': ['required', 'mandatory', 'nullable', 'optional'],
+            'validation': ['validation', 'constraint', 'rule', 'check', 'format'],
+            'length': ['length', 'size', 'width', 'max_length', 'maxlength'],
+            'default': ['default', 'initial', 'preset'],
+            'unique': ['unique', 'distinct', 'key', 'identifier'],
+            'pattern': ['pattern', 'regex', 'regexp', 'expression', 'mask']
+        }
+
+        # Identify which columns map to what semantic meaning
+        column_mapping = {}
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            for semantic_key, patterns in column_patterns.items():
+                if any(pattern in col_lower for pattern in patterns):
+                    # Prioritize more specific matches
+                    if semantic_key not in column_mapping or len(col_lower) < len(column_mapping[semantic_key].lower()):
+                        column_mapping[semantic_key] = col
+                    break
+
+        self.logger.info(f"Column mapping detected: {column_mapping}")
+
+        # If no name column found, try to use the first column
+        if 'name' not in column_mapping and len(df.columns) > 0:
+            column_mapping['name'] = df.columns[0]
+            self.logger.info(f"Using first column '{df.columns[0]}' as field name")
+
+        # Parse each row as a field definition
+        for _, row in df.iterrows():
+            # Get field name
+            field_name = None
+            if 'name' in column_mapping:
+                field_name_val = row.get(column_mapping['name'])
+                if pd.notna(field_name_val):
+                    field_name = str(field_name_val).strip()
+
+            if not field_name:
+                continue
+
+            col_def = {}
+
+            # Get type
+            if 'type' in column_mapping:
+                type_val = row.get(column_mapping['type'])
+                if pd.notna(type_val):
+                    col_def['type'] = self._normalize_type(str(type_val))
+
+            # Get description
+            if 'description' in column_mapping:
+                desc_val = row.get(column_mapping['description'])
+                if pd.notna(desc_val):
+                    col_def['description'] = str(desc_val).strip()
+
+            # Get allowed values/choices
+            if 'choices' in column_mapping:
+                choices_val = row.get(column_mapping['choices'])
+                if pd.notna(choices_val):
+                    col_def['allowed_values'] = self._parse_choices(str(choices_val))
+
+            # Get validation/constraints
+            constraints = {}
+
+            # Min value
+            if 'min' in column_mapping:
+                min_val = row.get(column_mapping['min'])
+                if pd.notna(min_val):
+                    try:
+                        constraints['min_value'] = float(min_val)
+                    except:
+                        pass
+
+            # Max value
+            if 'max' in column_mapping:
+                max_val = row.get(column_mapping['max'])
+                if pd.notna(max_val):
+                    try:
+                        constraints['max_value'] = float(max_val)
+                    except:
+                        pass
+
+            # Required field
+            if 'required' in column_mapping:
+                req_val = row.get(column_mapping['required'])
+                if pd.notna(req_val):
+                    req_str = str(req_val).lower().strip()
+                    if req_str in ['y', 'yes', 'true', '1', 'required', 'mandatory']:
+                        constraints['required'] = True
+                    elif req_str in ['n', 'no', 'false', '0', 'optional']:
+                        constraints['required'] = False
+
+            # Length constraint
+            if 'length' in column_mapping:
+                length_val = row.get(column_mapping['length'])
+                if pd.notna(length_val):
+                    try:
+                        constraints['max_length'] = int(length_val)
+                    except:
+                        pass
+
+            # Pattern
+            if 'pattern' in column_mapping:
+                pattern_val = row.get(column_mapping['pattern'])
+                if pd.notna(pattern_val):
+                    constraints['pattern'] = str(pattern_val).strip()
+
+            # Validation rules
+            if 'validation' in column_mapping:
+                val_val = row.get(column_mapping['validation'])
+                if pd.notna(val_val):
+                    validation = str(val_val).lower().strip()
+                    # Try to infer type from validation
+                    if not col_def.get('type'):
+                        if 'int' in validation:
+                            col_def['type'] = 'integer'
+                        elif 'float' in validation or 'decimal' in validation or 'number' in validation:
+                            col_def['type'] = 'float'
+                        elif 'date' in validation:
+                            col_def['type'] = 'datetime'
+                        elif 'email' in validation:
+                            constraints['pattern'] = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                        elif 'phone' in validation:
+                            constraints['pattern'] = r'^[\d\s\-\(\)\+]+$'
+                        elif 'url' in validation or 'website' in validation:
+                            constraints['pattern'] = r'^https?://'
+
+            # Unique constraint
+            if 'unique' in column_mapping:
+                unique_val = row.get(column_mapping['unique'])
+                if pd.notna(unique_val):
+                    unique_str = str(unique_val).lower().strip()
+                    if unique_str in ['y', 'yes', 'true', '1', 'unique']:
+                        constraints['unique'] = True
+
+            # Default value
+            if 'default' in column_mapping:
+                default_val = row.get(column_mapping['default'])
+                if pd.notna(default_val):
+                    col_def['default'] = str(default_val)
+
+            # Add constraints if any were found
+            if constraints:
+                col_def['constraints'] = constraints
+
+            # If no type was determined, default to string
+            if 'type' not in col_def:
+                col_def['type'] = 'string'
+
+            dictionary["columns"][field_name] = col_def
+
+        return dictionary
+
+    def _normalize_type(self, type_str: str) -> str:
+        """Normalize various type representations to standard types."""
+        type_lower = type_str.lower().strip()
+
+        # Integer types
+        if any(t in type_lower for t in ['int', 'integer', 'bigint', 'smallint', 'tinyint', 'long', 'number']):
+            if 'float' not in type_lower and 'decimal' not in type_lower and 'double' not in type_lower:
+                return 'integer'
+
+        # Float/decimal types
+        if any(t in type_lower for t in ['float', 'decimal', 'double', 'real', 'numeric', 'money', 'currency']):
+            return 'float'
+
+        # Boolean types
+        if any(t in type_lower for t in ['bool', 'boolean', 'bit', 'yesno', 'truefalse', 'logical']):
+            return 'boolean'
+
+        # Date/time types
+        if any(t in type_lower for t in ['date', 'time', 'timestamp', 'datetime', 'year', 'month']):
+            return 'datetime'
+
+        # String types
+        if any(t in type_lower for t in ['str', 'string', 'text', 'char', 'varchar', 'nvarchar', 'clob', 'memo']):
+            return 'string'
+
+        # Categorical
+        if any(t in type_lower for t in ['category', 'categorical', 'enum', 'choice', 'option', 'select', 'radio', 'dropdown', 'checkbox']):
+            return 'categorical'
+
+        # Default to string for unknown types
+        return 'string'
+
+    def _parse_choices(self, choices_str: str) -> list:
+        """Parse various formats of choices/allowed values."""
+        choices = []
+
+        # Try different separators
+        separators = ['|', ';', ',', '\n']
+
+        for sep in separators:
+            if sep in choices_str:
+                parts = choices_str.split(sep)
+                for part in parts:
+                    part = part.strip()
+                    if not part:
+                        continue
+
+                    # Handle "key: value" or "key, value" formats
+                    if ':' in part:
+                        # Take the part after the colon
+                        _, value = part.split(':', 1)
+                        choices.append(value.strip())
+                    elif ',' in part and sep != ',':
+                        # Might be "1, Option 1" format
+                        subparts = part.split(',', 1)
+                        if len(subparts) > 1:
+                            choices.append(subparts[1].strip())
+                        else:
+                            choices.append(part)
+                    else:
+                        choices.append(part)
+
+                if choices:
+                    break
+
+        # If no separator found, treat as single choice
+        if not choices and choices_str.strip():
+            choices = [choices_str.strip()]
+
+        return choices
+
+
     def _parse_csv(self, content: Union[str, bytes]) -> Dict[str, Any]:
         """Parse CSV format dictionary."""
         if isinstance(content, bytes):
@@ -176,12 +410,77 @@ class DataDictionary:
         return dictionary
 
     def _parse_excel(self, content: bytes) -> Dict[str, Any]:
-        """Parse Excel format dictionary."""
+        """Parse Excel format dictionary with multi-sheet support."""
         import io
-        df = pd.read_excel(io.BytesIO(content))
-        # Convert to CSV-like format and parse
-        csv_content = df.to_csv(index=False)
-        return self._parse_csv(csv_content)
+
+        # Read all sheets
+        excel_file = pd.ExcelFile(io.BytesIO(content))
+        sheet_names = excel_file.sheet_names
+
+        self.logger.info(f"Excel file contains {len(sheet_names)} sheets: {sheet_names}")
+
+        # Try to find the data dictionary sheet
+        dict_sheet = None
+        dict_df = None
+
+        # Common data dictionary sheet names (case-insensitive)
+        common_dict_names = ['dictionary', 'data dictionary', 'data_dictionary', 'dict',
+                            'metadata', 'schema', 'codebook', 'variables', 'fields',
+                            'field_definitions', 'column_definitions', 'columns',
+                            'data_model', 'datamodel', 'spec', 'specification']
+
+        # First, try to find by sheet name
+        for sheet_name in sheet_names:
+            sheet_lower = sheet_name.lower().strip()
+            if any(dict_name in sheet_lower for dict_name in common_dict_names):
+                dict_sheet = sheet_name
+                self.logger.info(f"Found dictionary sheet by name: {sheet_name}")
+                break
+
+        # If no obvious dictionary sheet, check each sheet's content
+        if dict_sheet is None:
+            for sheet_name in sheet_names:
+                df = pd.read_excel(excel_file, sheet_name=sheet_name)
+
+                if df.empty or len(df) == 0:
+                    continue
+
+                # Check if this looks like a data dictionary
+                # Look for common dictionary column headers
+                common_headers = ['field', 'variable', 'column', 'field_name', 'variable_name',
+                                'type', 'data_type', 'datatype', 'field_type',
+                                'description', 'label', 'field_label',
+                                'choices', 'values', 'allowed_values', 'validation']
+
+                df_columns_lower = [col.lower().strip() for col in df.columns]
+                matches = sum(1 for header in common_headers if any(header in col for col in df_columns_lower))
+
+                # If we have at least 2 matching headers, likely a dictionary
+                if matches >= 2:
+                    dict_sheet = sheet_name
+                    dict_df = df
+                    self.logger.info(f"Found dictionary sheet by content analysis: {sheet_name}")
+                    break
+
+        # If still no dictionary found, use the first non-empty sheet
+        if dict_sheet is None:
+            for sheet_name in sheet_names:
+                df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                if not df.empty and len(df) > 0:
+                    dict_sheet = sheet_name
+                    dict_df = df
+                    self.logger.warning(f"No clear dictionary sheet found, using first non-empty sheet: {sheet_name}")
+                    break
+
+        # Load the identified sheet if not already loaded
+        if dict_df is None and dict_sheet:
+            dict_df = pd.read_excel(excel_file, sheet_name=dict_sheet)
+
+        if dict_df is None or dict_df.empty:
+            raise ValueError("Could not find valid data dictionary in Excel file")
+
+        # Use generic Excel dictionary parser
+        return self._parse_excel_dictionary(dict_df)
 
     def _parse_pdf(self, content: bytes) -> Dict[str, Any]:
         """Parse PDF format dictionary using text extraction."""

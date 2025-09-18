@@ -19,6 +19,9 @@ const API_BASE = (() => {
 })();
 let currentFile = null;
 let currentMetadata = null;
+let currentSyntheticData = null;
+let pendingDownloadData = null;
+let currentDictionary = null;
 
 // DOM Elements
 const uploadArea = document.getElementById('uploadArea');
@@ -108,8 +111,9 @@ function processFile(file) {
     currentFile = file;
     fileName.textContent = file.name;
     fileStats.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
-    
+
     fileInfo.style.display = 'block';
+    document.getElementById('dictionarySection').style.display = 'block';  // Show dictionary section
     configSection.style.display = 'block';
     resultsSection.style.display = 'none';
     metadataSection.style.display = 'none';
@@ -151,6 +155,7 @@ async function generateSyntheticData() {
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
     formData.append('file_count', fileCount);
+    formData.append('preview_only', 'true');  // Request preview mode
     
     console.log('FormData being sent:');
     for (let [key, value] of formData.entries()) {
@@ -197,7 +202,12 @@ async function generateSyntheticData() {
 
         if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
-            displayResults(data);
+            if (data.preview) {
+                // Show preview instead of auto-download
+                displayPreview(data);
+            } else {
+                displayResults(data);
+            }
         } else if (contentType && contentType.includes('application/zip')) {
             // ZIP file download (multiple files)
             const blob = await response.blob();
@@ -514,5 +524,210 @@ if (typeof convertToCSV === 'undefined') {
     }
 }
 
+// Display preview of generated data
+function displayPreview(data) {
+    // Hide other sections
+    configSection.style.display = 'none';
+    resultsSection.style.display = 'none';
+
+    // Show preview section
+    const previewSection = document.getElementById('previewSection');
+    previewSection.style.display = 'block';
+
+    // Store data for download
+    currentSyntheticData = data;
+
+    // Display info
+    const info = document.getElementById('previewInfo');
+    const fileCountText = data.file_count > 1 ? `${data.file_count} files generated` : '1 file generated';
+    info.innerHTML = `<strong>${fileCountText}</strong> - Showing preview of first 10 rows (Total: ${data.total_rows} rows × ${data.total_columns} columns)`;
+
+    // Build table
+    const thead = document.getElementById('previewHead');
+    const tbody = document.getElementById('previewBody');
+
+    // Clear existing content
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
+
+    // Add headers
+    const headerRow = document.createElement('tr');
+    data.column_names.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+
+    // Add data rows
+    data.preview.forEach(row => {
+        const tr = document.createElement('tr');
+        data.column_names.forEach(col => {
+            const td = document.createElement('td');
+            let value = row[col];
+            // Format dates if they look like ISO strings
+            if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}/)) {
+                value = new Date(value).toLocaleDateString();
+            }
+            td.textContent = value !== null && value !== undefined ? value : '';
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+
+    // Show/hide appropriate download buttons
+    const downloadFileBtn = document.getElementById('downloadFileBtn');
+    const downloadZipBtn = document.getElementById('downloadZipBtn');
+
+    if (data.file_count > 1) {
+        downloadFileBtn.style.display = 'none';
+        downloadZipBtn.style.display = 'inline-block';
+    } else {
+        downloadFileBtn.style.display = 'inline-block';
+        downloadZipBtn.style.display = 'none';
+    }
+
+    // Add event listeners for preview buttons
+    document.getElementById('downloadFileBtn').onclick = () => downloadGeneratedData(false);
+    document.getElementById('downloadZipBtn').onclick = () => downloadGeneratedData(false);
+    document.getElementById('regenerateBtn').onclick = regenerateData;
+    document.getElementById('newFileBtn').onclick = reset;
+}
+
+// Download generated data
+async function downloadGeneratedData(preview = false) {
+    if (!currentFile && !window.currentEditedData) {
+        showError('No data to download');
+        return;
+    }
+
+    const fileCount = currentSyntheticData?.file_count || 1;
+    showLoading(`Preparing download of ${fileCount} file${fileCount > 1 ? 's' : ''}...`);
+
+    const formData = new FormData();
+
+    if (window.currentEditedData) {
+        const csv = convertToCSV(window.currentEditedData);
+        formData.append('edited_data', csv);
+    } else if (currentFile) {
+        formData.append('file', currentFile);
+    }
+
+    // Use same settings as preview
+    if (numRows.value && numRows.value.trim() !== '') {
+        formData.append('num_rows', numRows.value);
+    }
+    formData.append('match_threshold', matchThreshold.value / 100);
+    formData.append('output_format', outputFormat.value);
+    formData.append('use_cache', useCache.checked);
+    formData.append('file_count', fileCount);
+    formData.append('preview_only', 'false');  // Request actual download
+
+    try {
+        const response = await fetch(`${API_BASE}/generate`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error('Download failed');
+        }
+
+        const contentType = response.headers.get('content-type');
+        const blob = await response.blob();
+
+        let filename;
+        if (contentType && contentType.includes('application/zip')) {
+            filename = `synthetic_data_${new Date().toISOString().slice(0,10)}.zip`;
+        } else {
+            filename = `synthetic_data.${outputFormat.value}`;
+        }
+
+        downloadFile(blob, filename);
+
+    } catch (error) {
+        showError('Download failed: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// Regenerate with same settings
+function regenerateData() {
+    generateSyntheticData();
+}
+
+// Data Dictionary Functions
+async function uploadDataDictionary() {
+    const dictionaryFile = document.getElementById('dictionaryFile').files[0];
+    if (!dictionaryFile) {
+        showError('Please select a dictionary file');
+        return;
+    }
+
+    showLoading('Uploading data dictionary...');
+
+    const formData = new FormData();
+    formData.append('file', dictionaryFile);
+    formData.append('format', 'auto');
+
+    try {
+        const response = await fetch(`${API_BASE}/dictionary/upload`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error('Dictionary upload failed');
+        }
+
+        const data = await response.json();
+        currentDictionary = data.dictionary;
+
+        // Show dictionary status
+        document.getElementById('dictionaryStatus').style.display = 'block';
+        document.getElementById('dictionaryInfo').textContent =
+            `${data.columns_defined} columns defined from ${data.filename}`;
+
+        // Display column definitions
+        const columnsDiv = document.getElementById('dictionaryColumns');
+        columnsDiv.innerHTML = '<h4>Defined Columns:</h4><ul>' +
+            Object.keys(data.dictionary.columns || {}).map(col =>
+                `<li><strong>${col}</strong>: ${data.dictionary.columns[col].type || 'string'}</li>`
+            ).join('') + '</ul>';
+
+        showSuccess('Data dictionary uploaded successfully');
+
+    } catch (error) {
+        showError('Failed to upload dictionary: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+function clearDataDictionary() {
+    currentDictionary = null;
+    document.getElementById('dictionaryStatus').style.display = 'none';
+    document.getElementById('dictionaryFile').value = '';
+    showSuccess('Data dictionary cleared');
+}
+
+// Initialize dictionary handlers
+function initDictionaryHandlers() {
+    const uploadBtn = document.getElementById('uploadDictionaryBtn');
+    const clearBtn = document.getElementById('clearDictionaryBtn');
+
+    if (uploadBtn) {
+        uploadBtn.addEventListener('click', uploadDataDictionary);
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearDataDictionary);
+    }
+}
+
 // Initialize on load
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', function() {
+    init();
+    initDictionaryHandlers();
+});

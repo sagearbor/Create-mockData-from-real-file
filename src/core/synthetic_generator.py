@@ -87,17 +87,21 @@ class SyntheticDataGenerator:
         
         if self.openai_client:
             # Use actual OpenAI API
-            response = self.openai_client.chat.completions.create(
-                model=settings.azure_openai_chat_deployment,
-                messages=[
-                    {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=4000
-            )
-            
-            code = response.choices[0].message.content
+            try:
+                response = self.openai_client.chat.completions.create(
+                    model=settings.azure_openai_chat_deployment,
+                    messages=[
+                        {"role": "system", "content": self._get_system_prompt()},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=4000
+                )
+
+                code = response.choices[0].message.content
+            except Exception as e:
+                self.logger.warning(f"Azure OpenAI call failed: {e}. Using fallback generation.")
+                return self._generate_fallback_code(metadata, num_rows)
             
             # Extract code from markdown if present
             if "```python" in code:
@@ -123,40 +127,53 @@ class SyntheticDataGenerator:
         6. Generate realistic patterns for string data
         7. When clinical_context or suggested_values are provided, use those specific values
         8. For medical columns (medications, lab tests, etc.), use the suggested clinical values
-        9. For date columns marked as datetime type, generate proper datetime objects
-        10. Return ONLY the Python code, no explanations or markdown formatting
+        9. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
+        10. For any column with 'date' or 'time' in the name, generate dates not random strings
+        11. Return ONLY the Python code, no explanations or markdown formatting
         """
     
     def _construct_generation_prompt(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> str:
         """Construct the prompt for LLM code generation."""
-        
+
+        # Check if there are dictionary constraints
+        constraints_text = ""
+        if "generation_constraints" in metadata:
+            constraints_text = f"""
+        DATA DICTIONARY CONSTRAINTS (MUST BE FOLLOWED):
+        {metadata['generation_constraints']}
+        """
+
         prompt = f"""Generate Python code to create a synthetic dataset with {num_rows} rows.
-        
+
         The dataset should have the following structure and properties:
-        
+
         COLUMNS:
         {json.dumps(metadata['structure']['columns'], indent=2)}
-        
+
         STATISTICAL PROPERTIES:
         {json.dumps(metadata['statistics'], indent=2)}
-        
+
         PATTERNS:
         {json.dumps(metadata.get('patterns', {}), indent=2)}
-        
+
         CORRELATIONS:
         {json.dumps(metadata.get('correlations', {}), indent=2)}
-        
+        {constraints_text}
+
         Match threshold: {match_threshold} (0=loose match, 1=exact match)
-        
+
         Generate complete Python code that:
         1. Creates a function generate_synthetic_data() that returns a pandas DataFrame
         2. Matches the statistical properties within {(1-match_threshold)*20}% margin
         3. Preserves data types and patterns
         4. Maintains correlations between columns
         5. Generates realistic synthetic values
-        
+        6. IMPORTANT: For columns with type='datetime', generate proper datetime objects using datetime.now() or pd.date_range()
+        7. For date columns with names containing 'date', 'time', 'created', 'updated', generate datetime values
+        8. CRITICAL: If DATA DICTIONARY CONSTRAINTS are provided above, they MUST override any statistical properties
+
         Return only the Python code."""
-        
+
         return prompt
     
     def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> str:
@@ -196,8 +213,17 @@ class SyntheticDataGenerator:
                         code_lines.append(f"    data['{col_name}'] = np.clip(data['{col_name}'], {col_stats['min']}, {col_stats['max']})")
             
             elif col_stats.get('type') == 'string':
-                # String column generation
-                if col_stats.get('is_categorical', False):
+                # Check if this is actually a date column by name
+                date_keywords = ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp', 'expires', 'started', 'ended', 'completed']
+                is_likely_date = any(keyword in col_name.lower() for keyword in date_keywords)
+
+                if is_likely_date:
+                    # Generate dates even if stored as string
+                    code_lines.append(f"    # Detected '{col_name}' as likely date column")
+                    code_lines.append(f"    base_date = datetime.now()")
+                    code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
+                    code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
+                elif col_stats.get('is_categorical', False):
                     # Categorical values
                     unique_count = min(col_stats.get('unique_values', 10), 20)
                     code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")

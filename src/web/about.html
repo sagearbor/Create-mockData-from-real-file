@@ -6,8 +6,47 @@
     <title>About - BYOD Synthetic Data Generator</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/about.css">
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <script>mermaid.initialize({startOnLoad:true, theme: 'default'});</script>
+    <!-- Mermaid JS for diagrams - using specific version with cache buster -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js?v=2"></script>
+    <script>
+        // Initialize Mermaid with error handling
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Initializing Mermaid diagrams...');
+
+            // Check if Mermaid loaded
+            if (typeof mermaid === 'undefined') {
+                console.error('Mermaid library failed to load');
+                // Show fallback text
+                document.querySelectorAll('.mermaid').forEach(function(el) {
+                    el.innerHTML = '<pre style="background: #f5f5f5; padding: 20px; border-radius: 8px;">' +
+                        'Data Flow:\n' +
+                        '1. Upload: Your Data File → Data Loader\n' +
+                        '2. Analysis (Local): Data Loader → Metadata Extractor → Extract Statistics (NO actual values)\n' +
+                        '3. Code Generation (Privacy Safe): Statistics → Check Cache → Send Stats to LLM → Generate Python Code\n' +
+                        '4. Create Synthetic Data: Run Code Locally → Generate Data → Download Files\n' +
+                        '</pre>';
+                });
+                return;
+            }
+
+            try {
+                mermaid.initialize({
+                    startOnLoad: true,
+                    theme: 'default',
+                    securityLevel: 'loose',
+                    flowchart: {
+                        useMaxWidth: true,
+                        htmlLabels: true
+                    }
+                });
+                // Force render
+                mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+                console.log('Mermaid initialized successfully');
+            } catch (error) {
+                console.error('Mermaid initialization error:', error);
+            }
+        });
+    </script>
 </head>
 <body>
     <nav class="navbar">
@@ -37,30 +76,43 @@
 
             <section class="diagram-section">
                 <h2>📊 How It Works</h2>
-                <div class="mermaid">
+                <!-- Fallback message if Mermaid doesn't load -->
+                <noscript>
+                    <p style="color: red;">JavaScript is required to view the diagram</p>
+                </noscript>
+                <div class="mermaid" style="min-height: 400px;">
                     graph TB
-                        subgraph "1. Upload"
+                        subgraph Upload["1. Upload - Your Files"]
                             A[Your Data File] --> B[Data Loader]
+                            A2[Data Dictionary<br/>COMING SOON]:::pending -.-> B
                         end
 
-                        subgraph "2. Analysis - Local Only"
+                        subgraph Analysis["2. Analysis - Local Only"]
                             B --> C[Metadata Extractor]
                             C --> D[Extract Statistics<br/>NO actual values]
+                            C --> D2[Clinical Reference<br/>Library ✓]:::implemented
+                            D2 --> D3[Domain Detection<br/>IN PROGRESS]:::inprogress
                         end
 
-                        subgraph "3. Code Generation - Privacy Safe"
+                        subgraph CodeGen["3. Code Generation - Privacy Safe"]
                             D --> E{Check Cache}
                             E -->|Found| F[Reuse Code]
                             E -->|New| G[Send Stats to LLM]
                             G --> H[LLM Generates<br/>Python Code]
+                            E -.->|Future| V[Vector Similarity<br/>PLANNED]:::pending
                         end
 
-                        subgraph "4. Create Synthetic Data"
+                        subgraph CreateData["4. Create Synthetic Data"]
                             F --> I[Run Code Locally]
                             H --> I
                             I --> J[Generate Data]
-                            J --> K[Download Files]
+                            J --> K[Download Files<br/>ZIP Multi-file ✓]:::implemented
                         end
+
+                        %% Styling for different states
+                        classDef implemented fill:#90EE90,stroke:#333,stroke-width:2px
+                        classDef inprogress fill:#FFE4B5,stroke:#333,stroke-width:2px
+                        classDef pending fill:#FFB6C1,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
 
                         style C fill:#90EE90
                         style D fill:#90EE90

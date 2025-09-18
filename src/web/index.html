@@ -91,6 +91,35 @@
                 </div>
             </section>
 
+            <!-- Data Dictionary Section -->
+            <section class="dictionary-section" id="dictionarySection" style="display: none;">
+                <h2>📖 Data Dictionary (Optional)</h2>
+
+                <div class="dictionary-upload">
+                    <p>Upload a data dictionary to enforce constraints and validation rules:</p>
+                    <input type="file" id="dictionaryFile" accept=".json,.yaml,.yml,.csv,.xlsx,.txt">
+                    <button id="uploadDictionaryBtn" class="btn btn-secondary">📤 Upload Dictionary</button>
+                </div>
+
+                <div id="dictionaryStatus" class="dictionary-status" style="display: none;">
+                    <h3>Dictionary Loaded</h3>
+                    <p id="dictionaryInfo"></p>
+                    <div id="dictionaryColumns"></div>
+                    <button id="clearDictionaryBtn" class="btn btn-secondary">❌ Clear Dictionary</button>
+                </div>
+
+                <div class="dictionary-features">
+                    <h3>Benefits of Using a Data Dictionary:</h3>
+                    <ul>
+                        <li>✅ Enforce column types and constraints</li>
+                        <li>✅ Define allowed values for categorical columns</li>
+                        <li>✅ Set min/max ranges for numeric values</li>
+                        <li>✅ Specify required vs optional columns</li>
+                        <li>✅ Ensure consistent data formats</li>
+                    </ul>
+                </div>
+            </section>
+
             <!-- Configuration Section -->
             <section class="config-section" id="configSection" style="display: none;">
                 <h2>Generation Settings</h2>
@@ -159,6 +188,26 @@
                             <option value="20">20</option>
                         </select>
                     </div>
+                </div>
+            </section>
+
+            <!-- Preview Section -->
+            <section class="preview-section" id="previewSection" style="display: none;">
+                <h2>📊 Generated Data Preview</h2>
+                <p id="previewInfo" class="preview-info"></p>
+
+                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table id="previewTable" class="data-table">
+                        <thead id="previewHead"></thead>
+                        <tbody id="previewBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="button-group" style="margin-top: 20px;">
+                    <button id="downloadFileBtn" class="btn btn-primary">📥 Download File</button>
+                    <button id="downloadZipBtn" class="btn btn-primary" style="display: none;">📦 Download ZIP</button>
+                    <button id="regenerateBtn" class="btn btn-secondary">🔄 Regenerate</button>
+                    <button id="newFileBtn" class="btn btn-secondary">📂 New File</button>
                 </div>
             </section>
 

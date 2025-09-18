@@ -24,6 +24,7 @@ from src.core.data_loader import DataLoader
 from src.core.metadata_extractor import MetadataExtractor
 from src.core.synthetic_generator import SyntheticDataGenerator
 from src.core.cache_manager import CacheManager
+from src.core.data_dictionary import DataDictionary
 from src.utils.config import settings
 from src.utils.logger import logger
 
@@ -31,6 +32,7 @@ from src.utils.logger import logger
 data_loader = DataLoader()
 metadata_extractor = MetadataExtractor()
 cache_manager = CacheManager()
+data_dictionary = DataDictionary()
 
 # Initialize synthetic generator (OpenAI client will be added when API key is provided)
 synthetic_generator = None
@@ -123,12 +125,20 @@ async def root():
 
 @app.get("/about")
 async def about():
-    """Serve the about page."""
+    """Serve the about page with no-cache headers."""
+    from fastapi.responses import Response
+
     html_file = Path(__file__).parent / "src" / "web" / "about.html"
     if html_file.exists():
         with open(html_file, 'r') as f:
             content = f.read()
-        return HTMLResponse(content=content)
+
+        # Add cache-busting headers
+        response = HTMLResponse(content=content)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     else:
         return HTMLResponse(content="<h1>About page not found</h1>")
 
@@ -244,11 +254,12 @@ async def generate_synthetic_data(
     match_threshold: float = Form(0.8),
     output_format: str = Form("csv"),
     use_cache: bool = Form(True),
-    file_count: int = Form(1)
+    file_count: int = Form(1),
+    preview_only: bool = Form(False)
 ):
     """
     Generate synthetic data based on uploaded file or metadata.
-    
+
     Args:
         file: Optional uploaded file
         metadata_json: Optional metadata JSON string
@@ -256,6 +267,8 @@ async def generate_synthetic_data(
         match_threshold: Statistical matching threshold (0-1)
         output_format: Output format (csv, json, excel)
         use_cache: Whether to use cached generation scripts
+        file_count: Number of files to generate
+        preview_only: If True, return preview data instead of file download
     """
     try:
         # Get metadata from edited data, file, or JSON
@@ -277,6 +290,69 @@ async def generate_synthetic_data(
         if use_cache:
             cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
         
+        # If preview only, generate single file and return preview data
+        if preview_only:
+            # Generate single synthetic dataset
+            if cached_result and "generation_code" in cached_result:
+                logger.info("Using cached generation script for preview")
+                generation_code = cached_result["generation_code"]
+                synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+            else:
+                synthetic_df = synthetic_generator.generate(
+                    metadata=metadata,
+                    num_rows=num_rows,
+                    match_threshold=match_threshold,
+                    use_cached=use_cache
+                )
+
+            # Prepare preview data (first 10 rows)
+            preview_rows = min(10, len(synthetic_df))
+            preview_df = synthetic_df.head(preview_rows)
+
+            # Convert DataFrame to dict for JSON serialization
+            preview_data = preview_df.to_dict('records')
+
+            # Generate download data for all files
+            download_data = {}
+            if file_count > 1:
+                # Generate all files for download preparation
+                base_filename = file.filename if file else "synthetic_data"
+                base_name = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
+
+                synthetic_files = []
+                for i in range(file_count):
+                    if i == 0:
+                        # Use already generated data for first file
+                        synthetic_files.append((f"{base_name}_synthetic_{i+1:03d}", synthetic_df))
+                    else:
+                        # Generate additional files
+                        additional_df = synthetic_generator.generate(
+                            metadata=metadata,
+                            num_rows=num_rows,
+                            match_threshold=match_threshold,
+                            use_cached=use_cache
+                        )
+                        synthetic_files.append((f"{base_name}_synthetic_{i+1:03d}", additional_df))
+
+                download_data['file_count'] = file_count
+                download_data['files'] = []
+                for fname, df in synthetic_files:
+                    download_data['files'].append({
+                        'name': fname,
+                        'rows': len(df),
+                        'columns': len(df.columns)
+                    })
+
+            return JSONResponse(content={
+                "status": "success",
+                "preview": preview_data,
+                "total_rows": len(synthetic_df),
+                "total_columns": len(synthetic_df.columns),
+                "column_names": list(synthetic_df.columns),
+                "file_count": file_count,
+                "download_info": download_data
+            })
+
         # Generate multiple files if requested
         if file_count > 1:
             # Generate multiple synthetic datasets
@@ -380,6 +456,230 @@ async def generate_synthetic_data(
             
     except Exception as e:
         logger.error(f"Error generating synthetic data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/dictionary/upload")
+async def upload_data_dictionary(
+    file: UploadFile = File(...),
+    format: Optional[str] = Form("auto")
+):
+    """
+    Upload and parse a data dictionary.
+
+    Args:
+        file: Data dictionary file (JSON, YAML, CSV, Excel, or text)
+        format: Format hint ('json', 'yaml', 'csv', 'excel', 'text', 'auto')
+    """
+    try:
+        content = await file.read()
+
+        # Parse the dictionary
+        parsed_dict = data_dictionary.parse_dictionary(content, format)
+
+        # Store it for later use
+        data_dictionary.dictionary = parsed_dict
+
+        # Return parsed structure
+        return JSONResponse(content={
+            "status": "success",
+            "filename": file.filename,
+            "columns_defined": len(parsed_dict.get("columns", {})),
+            "dictionary": parsed_dict
+        })
+
+    except Exception as e:
+        logger.error(f"Error parsing data dictionary: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/dictionary/validate")
+async def validate_with_dictionary(
+    data_file: UploadFile = File(...),
+    dictionary_file: Optional[UploadFile] = File(None),
+    use_stored: bool = Form(True)
+):
+    """
+    Validate data against a data dictionary.
+
+    Args:
+        data_file: Data file to validate
+        dictionary_file: Optional dictionary file (uses stored if not provided)
+        use_stored: Whether to use stored dictionary
+    """
+    try:
+        # Load the data
+        data_content = await data_file.read()
+        df = data_loader.load_from_bytes(data_content, data_file.filename)
+
+        # Get dictionary
+        if dictionary_file:
+            dict_content = await dictionary_file.read()
+            dictionary = data_dictionary.parse_dictionary(dict_content)
+        elif use_stored and data_dictionary.dictionary:
+            dictionary = data_dictionary.dictionary
+        else:
+            raise HTTPException(status_code=400, detail="No data dictionary provided or stored")
+
+        # Validate
+        errors = data_dictionary.validate_data(df, dictionary)
+
+        return JSONResponse(content={
+            "status": "success" if not errors else "validation_failed",
+            "data_file": data_file.filename,
+            "rows_validated": len(df),
+            "columns_validated": len(df.columns),
+            "errors": errors,
+            "valid": len(errors) == 0
+        })
+
+    except Exception as e:
+        logger.error(f"Error validating data: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/generate-with-dictionary")
+async def generate_with_dictionary(
+    dictionary_file: Optional[UploadFile] = File(None),
+    data_file: Optional[UploadFile] = File(None),
+    use_stored_dictionary: bool = Form(True),
+    num_rows: Optional[int] = Form(100),
+    output_format: str = Form("csv"),
+    file_count: int = Form(1),
+    preview_only: bool = Form(False)
+):
+    """
+    Generate synthetic data using data dictionary constraints.
+
+    Args:
+        dictionary_file: Optional dictionary file
+        data_file: Optional data file for statistical reference
+        use_stored_dictionary: Use previously uploaded dictionary
+        num_rows: Number of rows to generate
+        output_format: Output format
+        file_count: Number of files to generate
+        preview_only: Return preview instead of download
+    """
+    try:
+        # Get dictionary
+        if dictionary_file:
+            dict_content = await dictionary_file.read()
+            dictionary = data_dictionary.parse_dictionary(dict_content)
+            data_dictionary.dictionary = dictionary
+        elif use_stored_dictionary and data_dictionary.dictionary:
+            dictionary = data_dictionary.dictionary
+        else:
+            raise HTTPException(status_code=400, detail="No data dictionary provided")
+
+        # Create metadata from dictionary
+        metadata = {
+            "structure": {
+                "columns": [],
+                "shape": {"rows": num_rows, "columns": len(dictionary.get("columns", {}))}
+            },
+            "statistics": {}
+        }
+
+        # If data file provided, extract base statistics
+        if data_file:
+            data_content = await data_file.read()
+            df = data_loader.load_from_bytes(data_content, data_file.filename)
+            base_metadata = metadata_extractor.extract(df)
+            metadata = base_metadata
+
+        # Apply dictionary constraints to metadata
+        metadata = data_dictionary.apply_to_metadata(metadata, dictionary)
+
+        # Add dictionary constraints to generation prompt
+        if "generation_constraints" not in metadata:
+            metadata["generation_constraints"] = data_dictionary.to_generation_constraints(dictionary)
+
+        # Generate synthetic data
+        if preview_only:
+            synthetic_df = synthetic_generator.generate(
+                metadata=metadata,
+                num_rows=num_rows,
+                match_threshold=0.9
+            )
+
+            preview_rows = min(10, len(synthetic_df))
+            preview_df = synthetic_df.head(preview_rows)
+
+            return JSONResponse(content={
+                "status": "success",
+                "preview": preview_df.to_dict('records'),
+                "total_rows": len(synthetic_df),
+                "total_columns": len(synthetic_df.columns),
+                "column_names": list(synthetic_df.columns),
+                "file_count": file_count,
+                "dictionary_applied": True
+            })
+
+        # Generate actual files
+        if file_count > 1:
+            synthetic_files = []
+            for i in range(file_count):
+                synthetic_df = synthetic_generator.generate(
+                    metadata=metadata,
+                    num_rows=num_rows,
+                    match_threshold=0.9
+                )
+                synthetic_files.append((f"synthetic_{i+1:03d}", synthetic_df))
+
+            # Create ZIP
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for filename, df in synthetic_files:
+                    if output_format == "json":
+                        json_data = df.to_json(orient="records", indent=2)
+                        zipf.writestr(f"{filename}.json", json_data)
+                    elif output_format == "excel":
+                        excel_buffer = io.BytesIO()
+                        df.to_excel(excel_buffer, index=False)
+                        excel_buffer.seek(0)
+                        zipf.writestr(f"{filename}.xlsx", excel_buffer.getvalue())
+                    else:  # CSV
+                        csv_data = df.to_csv(index=False)
+                        zipf.writestr(f"{filename}.csv", csv_data)
+
+            zip_buffer.seek(0)
+            return StreamingResponse(
+                zip_buffer,
+                media_type="application/zip",
+                headers={"Content-Disposition": f"attachment; filename=dictionary_generated.zip"}
+            )
+        else:
+            # Single file
+            synthetic_df = synthetic_generator.generate(
+                metadata=metadata,
+                num_rows=num_rows,
+                match_threshold=0.9
+            )
+
+            if output_format == "json":
+                output_data = synthetic_df.to_json(orient="records")
+                return JSONResponse(content={
+                    "status": "success",
+                    "data": json.loads(output_data)
+                })
+            elif output_format == "excel":
+                output = io.BytesIO()
+                synthetic_df.to_excel(output, index=False)
+                output.seek(0)
+                return StreamingResponse(
+                    output,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename=dictionary_generated.xlsx"}
+                )
+            else:  # CSV
+                output = io.StringIO()
+                synthetic_df.to_csv(output, index=False)
+                output.seek(0)
+                return StreamingResponse(
+                    io.BytesIO(output.getvalue().encode()),
+                    media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=dictionary_generated.csv"}
+                )
+
+    except Exception as e:
+        logger.error(f"Error generating with dictionary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate/batch")

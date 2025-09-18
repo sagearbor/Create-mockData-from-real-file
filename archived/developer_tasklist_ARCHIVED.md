@@ -166,11 +166,46 @@ This file contains all completed development tasks for the BYOD Synthetic Data G
 
 ---
 
+---
+
+## Development Tasks - September 17, 2025 (Continued - Evening Session)
+
+### Task: Domain-Aware Date Detection (FIX.2) ✅
+- **Status**: COMPLETED
+- **Completion Date**: September 17, 2025
+- **Description**: Enhanced fallback code generation to detect date columns by name
+- **Completion Notes**:
+  - Added keyword detection for date-related column names
+  - Fallback generator now creates proper date formats for columns with date keywords
+  - Fixed issue where treatment_date was showing random text
+
+### Task: Data Dictionary Upload Feature (CLINICAL.2) ✅
+- **Status**: COMPLETED
+- **Completion Date**: September 17, 2025
+- **Description**: Implemented comprehensive data dictionary support
+- **Completion Notes**:
+  - Created DataDictionary class for parsing and validation
+  - Supports JSON, YAML, CSV, Excel, and text formats
+  - Added API endpoints for dictionary upload and validation
+  - Integrated dictionary constraints into generation process
+  - Added web UI section for dictionary management
+  - Dictionary constraints override statistical properties in generation
+
+### Task: Preview and Download UI Enhancement ✅
+- **Status**: COMPLETED
+- **Completion Date**: September 17, 2025
+- **Description**: Added preview display and explicit download buttons
+- **Completion Notes**:
+  - Generated data now displays in preview table (first 10 rows)
+  - No more auto-download popups
+  - Added explicit "Download File" and "Download ZIP" buttons
+  - Added "Regenerate" and "New File" options
+
 ## Statistics
 
-**Total Completed Tasks**: 15
+**Total Completed Tasks**: 18
 **Archive Date**: September 17, 2025
-**Project Status**: Core MVP functional with basic features operational
+**Project Status**: Core MVP functional with advanced features including data dictionary support
 
 ## Major Milestones Achieved
 1. ✅ Local development environment fully operational

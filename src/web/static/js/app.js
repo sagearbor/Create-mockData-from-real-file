@@ -60,6 +60,7 @@ function init() {
         uploadArea.addEventListener('dragover', handleDragOver);
         uploadArea.addEventListener('dragleave', handleDragLeave);
         uploadArea.addEventListener('drop', handleDrop);
+        uploadArea.addEventListener('paste', handlePaste);
     }
     if (fileInput) {
         fileInput.addEventListener('change', handleFileSelect);
@@ -74,6 +75,7 @@ function init() {
         dictionaryUploadArea.addEventListener('dragover', (e) => handleDragOverDict(e, dictionaryUploadArea));
         dictionaryUploadArea.addEventListener('dragleave', (e) => handleDragLeaveDict(e, dictionaryUploadArea));
         dictionaryUploadArea.addEventListener('drop', (e) => handleDropDict(e));
+        dictionaryUploadArea.addEventListener('paste', handlePasteDict);
         dictionaryFileInput.addEventListener('change', handleDictionarySelect);
     }
 
@@ -149,10 +151,25 @@ function handleDragLeave(e) {
 function handleDrop(e) {
     e.preventDefault();
     uploadArea.classList.remove('dragover');
-    
+
     const file = e.dataTransfer.files[0];
     if (file) {
         processFile(file);
+    }
+}
+
+function handlePaste(e) {
+    e.preventDefault();
+    const items = e.clipboardData.items;
+
+    for (let item of items) {
+        if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file) {
+                processFile(file);
+                break;
+            }
+        }
     }
 }
 
@@ -763,6 +780,21 @@ function handleDropDict(e) {
     const file = e.dataTransfer.files[0];
     if (file) {
         processDictionaryFile(file);
+    }
+}
+
+function handlePasteDict(e) {
+    e.preventDefault();
+    const items = e.clipboardData.items;
+
+    for (let item of items) {
+        if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file) {
+                processDictionaryFile(file);
+                break;
+            }
+        }
     }
 }
 

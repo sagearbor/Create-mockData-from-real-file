@@ -97,16 +97,19 @@ function init() {
         generateFromDataBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
             document.getElementById('dictionaryDetails').style.display = 'none';
-            generateSyntheticData();
+            configSection.scrollIntoView({ behavior: 'smooth' });
         });
     }
     if (generateFromDictBtn) {
-        generateFromDictBtn.addEventListener('click', generateFromDictionary);
+        generateFromDictBtn.addEventListener('click', () => {
+            configSection.style.display = 'block';
+            configSection.scrollIntoView({ behavior: 'smooth' });
+        });
     }
     if (generateFromBothBtn) {
         generateFromBothBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
-            generateSyntheticData();
+            configSection.scrollIntoView({ behavior: 'smooth' });
         });
     }
 
@@ -124,7 +127,23 @@ function init() {
     }
 
     // Main buttons
-    if (generateBtn) generateBtn.addEventListener('click', generateSyntheticData);
+    if (generateBtn) {
+        generateBtn.addEventListener('click', async () => {
+            // Check what we have available for generation
+            if (!currentFile && !currentDictionary) {
+                showError('Please upload a data file or dictionary first');
+                return;
+            }
+
+            if (currentDictionary && !currentFile) {
+                // Dictionary-only generation
+                await generateFromDictionary();
+            } else {
+                // Data-based or combined generation
+                await generateSyntheticData();
+            }
+        });
+    }
     if (extractMetadataBtn) extractMetadataBtn.addEventListener('click', extractMetadata);
     if (resetBtn) resetBtn.addEventListener('click', reset);
 
@@ -900,8 +919,8 @@ async function processDictionaryFile(file) {
             }
         }
 
-        // Show configuration section if no data file
-        if (!currentFile && configSection) {
+        // Show configuration section
+        if (configSection) {
             configSection.style.display = 'block';
         }
 
@@ -986,19 +1005,17 @@ function clearDataDictionary() {
 function initDictionaryHandlers() {
     const uploadBtn = document.getElementById('uploadDictionaryBtn');
     const clearBtn = document.getElementById('clearDictionaryBtn');
-    const generateBtn = document.getElementById('generateFromDictBtn');
 
     if (uploadBtn) {
-        uploadBtn.addEventListener('click', uploadDataDictionary);
+        uploadBtn.addEventListener('click', () => {
+            document.getElementById('dictionaryFileInput').click();
+        });
     }
 
     if (clearBtn) {
         clearBtn.addEventListener('click', clearDataDictionary);
     }
 
-    if (generateBtn) {
-        generateBtn.addEventListener('click', generateFromDictionary);
-    }
 }
 
 // Initialize on load

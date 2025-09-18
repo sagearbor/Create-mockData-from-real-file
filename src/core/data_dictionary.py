@@ -135,8 +135,8 @@ class DataDictionary:
         column_patterns = {
             'name': ['variable', 'field', 'column', 'name', 'attribute', 'parameter', 'element'],
             'type': ['type', 'datatype', 'data_type', 'dtype', 'format', 'class'],
-            'description': ['description', 'label', 'definition', 'comment', 'notes', 'meaning'],
-            'choices': ['choices', 'values', 'options', 'allowed', 'valid', 'enum', 'list'],
+            'description': ['description', 'label', 'definition', 'comment', 'notes', 'meaning', 'prompt', 'question'],
+            'choices': ['choices', 'values', 'options', 'allowed', 'valid', 'enum', 'list', 'responses', 'response'],
             'min': ['min', 'minimum', 'lower', 'low', 'floor'],
             'max': ['max', 'maximum', 'upper', 'high', 'ceiling'],
             'required': ['required', 'mandatory', 'nullable', 'optional'],
@@ -195,7 +195,16 @@ class DataDictionary:
             if 'choices' in column_mapping:
                 choices_val = row.get(column_mapping['choices'])
                 if pd.notna(choices_val):
-                    col_def['allowed_values'] = self._parse_choices(str(choices_val))
+                    parsed_choices = self._parse_choices(str(choices_val))
+                    if parsed_choices:
+                        col_def['allowed_values'] = parsed_choices
+                        # If we have allowed values, it's likely categorical
+                        if not col_def.get('type') or col_def.get('type') == 'string':
+                            # Check if values are numeric codes
+                            if all(c[0].isdigit() or c.startswith('-') for c in str(choices_val).split(';') if c.strip()):
+                                col_def['type'] = 'categorical_numeric'
+                            else:
+                                col_def['type'] = 'categorical'
 
             # Get validation/constraints
             constraints = {}
@@ -323,42 +332,82 @@ class DataDictionary:
 
     def _parse_choices(self, choices_str: str) -> list:
         """Parse various formats of choices/allowed values."""
+        choices_str = choices_str.strip()
+
+        # Special case: if it's just "text", return None (not a categorical field)
+        if choices_str.lower() == 'text':
+            return None
+
         choices = []
 
-        # Try different separators
-        separators = ['|', ';', ',', '\n']
+        # First check for semicolon-separated format (e.g., "0, Description;1, Another;...")
+        if ';' in choices_str:
+            parts = choices_str.split(';')
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
 
-        for sep in separators:
-            if sep in choices_str:
-                parts = choices_str.split(sep)
-                for part in parts:
-                    part = part.strip()
-                    if not part:
-                        continue
-
-                    # Handle "key: value" or "key, value" formats
-                    if ':' in part:
-                        # Take the part after the colon
-                        _, value = part.split(':', 1)
-                        choices.append(value.strip())
-                    elif ',' in part and sep != ',':
-                        # Might be "1, Option 1" format
-                        subparts = part.split(',', 1)
-                        if len(subparts) > 1:
-                            choices.append(subparts[1].strip())
-                        else:
-                            choices.append(part)
+                # Check if it's "code, description" format
+                if ',' in part:
+                    # Split only on first comma to preserve descriptions with commas
+                    subparts = part.split(',', 1)
+                    if len(subparts) == 2:
+                        code = subparts[0].strip()
+                        desc = subparts[1].strip()
+                        # Store both code and description as a tuple or just description
+                        # For now, storing the full "code: description" for clarity
+                        choices.append(f"{code}: {desc}")
                     else:
                         choices.append(part)
+                else:
+                    choices.append(part)
 
-                if choices:
-                    break
+        # Try pipe-separated format
+        elif '|' in choices_str:
+            parts = choices_str.split('|')
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
 
-        # If no separator found, treat as single choice
-        if not choices and choices_str.strip():
-            choices = [choices_str.strip()]
+                # Handle "key: value" format
+                if ':' in part:
+                    choices.append(part)
+                elif ',' in part:
+                    # Might be "1, Option 1" format
+                    subparts = part.split(',', 1)
+                    if len(subparts) > 1:
+                        choices.append(f"{subparts[0].strip()}: {subparts[1].strip()}")
+                    else:
+                        choices.append(part)
+                else:
+                    choices.append(part)
 
-        return choices
+        # Try comma-separated only if no semicolons or pipes
+        elif ',' in choices_str and '\n' not in choices_str:
+            # This might be a simple comma-separated list
+            parts = choices_str.split(',')
+            # Only treat as comma-separated if we have multiple items
+            if len(parts) > 2:
+                choices = [p.strip() for p in parts if p.strip()]
+            else:
+                # Might be a single "code, description" pair
+                choices = [choices_str.strip()]
+
+        # Try newline-separated
+        elif '\n' in choices_str:
+            lines = choices_str.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line:
+                    choices.append(line)
+
+        # If no separator found, treat as single choice (unless it's empty)
+        elif choices_str and choices_str.lower() not in ['na', 'n/a', 'none']:
+            choices = [choices_str]
+
+        return choices if choices else None
 
 
     def _parse_csv(self, content: Union[str, bytes]) -> Dict[str, Any]:

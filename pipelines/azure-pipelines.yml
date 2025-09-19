@@ -8,10 +8,10 @@ variables:
     value: 'dev' # default value
   - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
     - name: environmentName
-      value: 'sandbox'
+      value: 'dev'
   - ${{ if eq(variables['Build.SourceBranchName'], 'val') }}:
     - name: environmentName
-      value: 'test'
+      value: 'val'
   - ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
     - name: environmentName
       value: 'prod'

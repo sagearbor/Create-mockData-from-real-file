@@ -46,20 +46,39 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code
+# Copy application code and all necessary files
+# This includes: main.py, src/, static/, templates/, .env (if present)
 COPY --chown=appuser:appuser . .
 
 # Create necessary directories with appropriate permissions
-RUN mkdir -p /app/data /app/cache /app/logs /app/static && \
+RUN mkdir -p /app/data /app/cache /app/logs /app/static /app/templates && \
     chown -R appuser:appuser /app
+
+# Verify critical files are present
+RUN echo "=== Verifying Docker build contents ===" && \
+    ls -la /app/ | head -20 && \
+    echo "=== Checking for main.py ===" && \
+    test -f /app/main.py && echo "✓ main.py found" || echo "✗ main.py missing" && \
+    echo "=== Checking for src directory ===" && \
+    test -d /app/src && echo "✓ src/ directory found" || echo "✗ src/ directory missing" && \
+    echo "=== Checking for .env file ===" && \
+    test -f /app/.env && echo "✓ .env file found (local mode)" || echo "✗ .env not found (use Azure env vars)"
 
 # Switch to non-root user
 USER appuser
 
 # Environment variables
+# PYTHONUNBUFFERED: Ensures stdout/stderr are unbuffered for real-time logs
+# PYTHONDONTWRITEBYTECODE: Prevents Python from writing .pyc files
+# PORT: Application port (can be overridden by Azure App Service)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8201
+
+# Default environment variables (can be overridden)
+# These will be overridden by .env file if present, or Azure App Service configs
+ENV ENVIRONMENT=production \
+    LOG_LEVEL=INFO
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

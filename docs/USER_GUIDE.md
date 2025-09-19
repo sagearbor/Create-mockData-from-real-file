@@ -59,7 +59,7 @@ cp .env.example .env
 python main.py
 ```
 
-The application will start at `http://localhost:8000`
+The application will start at `http://localhost:8201`
 
 ## Quick Start
 
@@ -70,7 +70,7 @@ The application will start at `http://localhost:8000`
 3. **Download the synthetic dataset**
 
 ### Example using the Web Interface:
-1. Navigate to `http://localhost:8000`
+1. Navigate to `http://localhost:8201`
 2. Drag and drop your data file
 3. Adjust the "Match Strictness" slider (80% recommended)
 4. Click "Generate Synthetic Data"
@@ -78,7 +78,7 @@ The application will start at `http://localhost:8000`
 
 ### Example using curl:
 ```bash
-curl -X POST "http://localhost:8000/generate" \
+curl -X POST "http://localhost:8201/generate" \
   -F "file=@your_data.csv" \
   -F "match_threshold=0.8" \
   -F "output_format=csv" \
@@ -172,7 +172,7 @@ import requests
 # Upload and generate synthetic data
 with open('data.csv', 'rb') as f:
     response = requests.post(
-        'http://localhost:8000/generate',
+        'http://localhost:8201/generate',
         files={'file': f},
         data={
             'match_threshold': 0.85,
@@ -203,7 +203,7 @@ AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-ada-002
 GENERATOR_VERSION=1.0
 LOG_LEVEL=INFO
 ENVIRONMENT=local
-APP_PORT=8000
+APP_PORT=8201
 
 # Local Storage (when not using cloud services)
 USE_LOCAL_STORAGE=true
@@ -221,10 +221,10 @@ The system automatically caches generation scripts for performance:
 Clear cache when needed:
 ```bash
 # Clear all cache
-curl -X DELETE http://localhost:8000/cache
+curl -X DELETE http://localhost:8201/cache
 
 # Clear cache older than 7 days
-curl -X DELETE "http://localhost:8000/cache?older_than_days=7"
+curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 ```
 
 ## Advanced Features
@@ -281,7 +281,7 @@ The generator preserves various statistical properties:
 
 ### Getting Help
 
-- **API Documentation**: http://localhost:8000/docs
+- **API Documentation**: http://localhost:8201/docs
 - **GitHub Issues**: Report bugs and request features
 - **Logs**: Check `./logs/` directory for detailed error information
 

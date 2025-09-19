@@ -11,12 +11,12 @@ echo ""
 echo "Checking Python version..."
 python3 --version
 
-# Kill any existing processes on port 8000
+# Kill any existing processes on port 8201
 echo ""
-echo "Checking for processes on port 8000..."
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo "Found process on port 8000, killing it..."
-    kill -9 $(lsof -Pi :8000 -sTCP:LISTEN -t) 2>/dev/null
+echo "Checking for processes on port 8201..."
+if lsof -Pi :8201 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "Found process on port 8201, killing it..."
+    kill -9 $(lsof -Pi :8201 -sTCP:LISTEN -t) 2>/dev/null
     sleep 2
 fi
 
@@ -61,9 +61,9 @@ echo "==========================================="
 echo "Starting BYOD Synthetic Data Generator"
 echo "==========================================="
 echo ""
-echo "Web Interface: http://localhost:8000"
-echo "API Docs:      http://localhost:8000/docs"
-echo "Health Check:  http://localhost:8000/health"
+echo "Web Interface: http://localhost:8201"
+echo "API Docs:      http://localhost:8201/docs"
+echo "Health Check:  http://localhost:8201/health"
 echo ""
 echo "Press Ctrl+C to stop the server"
 echo "==========================================="

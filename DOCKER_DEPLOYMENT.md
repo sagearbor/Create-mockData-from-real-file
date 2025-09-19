@@ -25,7 +25,7 @@ docker-compose build
 # Run with docker directly
 docker run -d \
   --name byod-synthetic-generator \
-  -p 8000:8000 \
+  -p 8201:8201 \
   --env-file .env \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/cache:/app/cache \
@@ -88,7 +88,7 @@ az container create \
   --registry-login-server <your-acr-name>.azurecr.io \
   --registry-username <acr-username> \
   --registry-password <acr-password> \
-  --ports 8000 \
+  --ports 8201 \
   --environment-variables \
     AZURE_OPENAI_ENDPOINT=<your-endpoint> \
     AZURE_OPENAI_API_KEY=<your-api-key> \
@@ -133,7 +133,7 @@ az webapp config appsettings set \
     AZURE_OPENAI_API_KEY=<your-api-key> \
     AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=<your-deployment> \
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=<your-embedding-deployment> \
-    WEBSITES_PORT=8000
+    WEBSITES_PORT=8201
 ```
 
 ### 4. Deploy to Azure Kubernetes Service (AKS)
@@ -159,7 +159,7 @@ spec:
       - name: byod-synthetic-generator
         image: <your-acr-name>.azurecr.io/byod-synthetic-generator:latest
         ports:
-        - containerPort: 8000
+        - containerPort: 8201
         env:
         - name: AZURE_OPENAI_ENDPOINT
           valueFrom:
@@ -188,7 +188,7 @@ spec:
     app: byod-synthetic-generator
   ports:
   - port: 80
-    targetPort: 8000
+    targetPort: 8201
   type: LoadBalancer
 ```
 
@@ -252,7 +252,7 @@ The application exposes a health endpoint at `/health` which can be used for con
 ### Connection issues
 - Verify network configuration and firewall rules
 - Check if the container is running: `docker ps`
-- Test health endpoint: `curl http://localhost:8000/health`
+- Test health endpoint: `curl http://localhost:8201/health`
 
 ### Performance issues
 - Increase container resources (CPU/Memory)

@@ -44,7 +44,7 @@ flake8 src/
 mypy src/
 
 # Run with auto-reload
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8201
 ```
 
 ## Azure Deployment
@@ -205,7 +205,7 @@ COPY . .
 RUN mkdir -p data/local_storage data/cache data/samples logs
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8201
 
 # Run application
 CMD ["python", "main.py"]
@@ -219,7 +219,7 @@ docker build -t byod-synthetic:latest .
 # Run container
 docker run -d \
   --name byod-synthetic \
-  -p 8000:8000 \
+  -p 8201:8201 \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/logs:/app/logs \
   --env-file .env \
@@ -238,7 +238,7 @@ services:
   web:
     build: .
     ports:
-      - "8000:8000"
+      - "8201:8201"
     environment:
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
@@ -283,7 +283,7 @@ docker-compose down
 ENVIRONMENT=production
 LOG_LEVEL=INFO
 APP_HOST=0.0.0.0
-APP_PORT=8000
+APP_PORT=8201
 
 # Azure OpenAI (Required)
 AZURE_OPENAI_ENDPOINT=https://prod-openai.openai.azure.com/
@@ -321,7 +321,7 @@ events {
 
 http {
     upstream app {
-        server web:8000;
+        server web:8201;
     }
     
     server {
@@ -527,9 +527,9 @@ spec:
 1. **Port binding errors:**
 ```bash
 # Check if port is in use
-lsof -i :8000
+lsof -i :8201
 # Kill process using port
-kill -9 $(lsof -t -i:8000)
+kill -9 $(lsof -t -i:8201)
 ```
 
 2. **Memory issues:**

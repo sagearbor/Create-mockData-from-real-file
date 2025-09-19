@@ -2,7 +2,7 @@
 
 ## Base URL
 ```
-http://localhost:8000
+http://localhost:8201
 ```
 
 ## Authentication
@@ -38,7 +38,7 @@ Upload a file for analysis and prepare for synthetic data generation.
 
 **Request:**
 ```bash
-curl -X POST "http://localhost:8000/upload" \
+curl -X POST "http://localhost:8201/upload" \
   -F "file=@data.csv" \
   -F "extract_metadata_only=false"
 ```
@@ -69,7 +69,7 @@ Extract and return metadata from a file without generating synthetic data.
 
 **Request:**
 ```bash
-curl -X POST "http://localhost:8000/metadata" \
+curl -X POST "http://localhost:8201/metadata" \
   -F "file=@data.csv"
 ```
 
@@ -127,7 +127,7 @@ Generate synthetic data based on uploaded file or metadata.
 
 **Request:**
 ```bash
-curl -X POST "http://localhost:8000/generate" \
+curl -X POST "http://localhost:8201/generate" \
   -F "file=@data.csv" \
   -F "num_rows=5000" \
   -F "match_threshold=0.85" \
@@ -161,7 +161,7 @@ Generate synthetic data for multiple files.
 
 **Request:**
 ```bash
-curl -X POST "http://localhost:8000/generate/batch" \
+curl -X POST "http://localhost:8201/generate/batch" \
   -F "files=@file1.csv" \
   -F "files=@file2.csv" \
   -F "match_threshold=0.8"
@@ -215,10 +215,10 @@ Clear cached generation scripts.
 **Request:**
 ```bash
 # Clear all cache
-curl -X DELETE "http://localhost:8000/cache"
+curl -X DELETE "http://localhost:8201/cache"
 
 # Clear cache older than 7 days
-curl -X DELETE "http://localhost:8000/cache?older_than_days=7"
+curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 ```
 
 **Response:**
@@ -284,7 +284,7 @@ ws.onmessage = (event) => {
 from byod_synthetic import SyntheticGenerator
 
 # Initialize client
-generator = SyntheticGenerator(base_url="http://localhost:8000")
+generator = SyntheticGenerator(base_url="http://localhost:8201")
 
 # Generate synthetic data
 result = generator.generate(
@@ -308,7 +308,7 @@ form.append('file', fs.createReadStream('data.csv'));
 form.append('match_threshold', '0.85');
 
 const response = await axios.post(
-  'http://localhost:8000/generate',
+  'http://localhost:8201/generate',
   form,
   { headers: form.getHeaders() }
 );
@@ -319,12 +319,12 @@ fs.writeFileSync('synthetic_data.csv', response.data);
 ### cURL Examples
 ```bash
 # Extract metadata only
-curl -X POST "http://localhost:8000/metadata" \
+curl -X POST "http://localhost:8201/metadata" \
   -F "file=@data.csv" \
   -o metadata.json
 
 # Generate with specific settings
-curl -X POST "http://localhost:8000/generate" \
+curl -X POST "http://localhost:8201/generate" \
   -F "file=@data.csv" \
   -F "num_rows=1000" \
   -F "match_threshold=0.9" \
@@ -332,7 +332,7 @@ curl -X POST "http://localhost:8000/generate" \
   -o synthetic_data.json
 
 # Batch processing
-curl -X POST "http://localhost:8000/generate/batch" \
+curl -X POST "http://localhost:8201/generate/batch" \
   -F "files=@dataset1.csv" \
   -F "files=@dataset2.csv" \
   -F "files=@dataset3.csv" \
@@ -358,5 +358,5 @@ X-API-Version: 1.0.0
 
 For API issues or questions:
 - Check the [User Guide](USER_GUIDE.md)
-- Review [OpenAPI documentation](http://localhost:8000/docs)
+- Review [OpenAPI documentation](http://localhost:8201/docs)
 - Submit issues on GitHub

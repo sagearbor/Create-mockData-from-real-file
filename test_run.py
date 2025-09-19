@@ -39,9 +39,9 @@ def start_server():
     """Start the FastAPI server."""
     print("Starting FastAPI server...")
     print("-" * 50)
-    print("Web Interface: http://localhost:8000")
-    print("API Docs:      http://localhost:8000/docs")
-    print("Health Check:  http://localhost:8000/health")
+    print("Web Interface: http://localhost:8201")
+    print("API Docs:      http://localhost:8201/docs")
+    print("Health Check:  http://localhost:8201/health")
     print("-" * 50)
     print("\nPress Ctrl+C to stop the server\n")
     
@@ -52,7 +52,7 @@ def start_server():
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=8201,
         log_level="info"
     )
 

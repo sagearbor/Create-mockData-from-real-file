@@ -6,17 +6,17 @@ pool:
 variables:
   - name: environmentName
     value: 'dev' # default value
-  - ${{ if eq(variables['Build.SourceBranchName'], 'sandbox') }}:
+  - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
     - name: environmentName
-      value: 'sandbox'
-  - ${{ if eq(variables['Build.SourceBranchName'], 'test') }}:
+      value: 'dev'
+  - ${{ if eq(variables['Build.SourceBranchName'], 'val') }}:
     - name: environmentName
-      value: 'test'
+      value: 'val'
   - ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
     - name: environmentName
       value: 'prod'
   - name: imageName
-    value: "$(environmentName)/aitest-app"
+    value: "$(environmentName)/createMockData"
   - name: tag
     value: '$(Build.BuildId)'
 stages:
@@ -100,7 +100,7 @@ stages:
   dependsOn: 
     - Init
     - Build
-  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/dev'), eq(variables['Build.SourceBranch'], 'refs/heads/test'), eq(variables['Build.SourceBranch'], 'refs/heads/main')))
+  condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/dev'), eq(variables['Build.SourceBranch'], 'refs/heads/val'), eq(variables['Build.SourceBranch'], 'refs/heads/prod')))
   variables:
       useThisAgent: $[ stageDependencies.Init.InstallSoftware.outputs['setvarStep.agentValue'] ]  
   pool:

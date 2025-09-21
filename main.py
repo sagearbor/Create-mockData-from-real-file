@@ -91,13 +91,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# Add CORS middleware with secure configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.get_allowed_origins(),  # Environment-specific origins
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],  # Only methods needed (GET for reading, POST for file uploads/generation, OPTIONS for preflight)
     allow_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 @app.get("/")

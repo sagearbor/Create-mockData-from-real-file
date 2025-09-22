@@ -82,7 +82,12 @@ stages:
 
   jobs:
     - job: Build
-      steps:    
+      steps:  
+      - script: |
+          echo "##[command]Diagnosing Environment Variables..."
+          echo "This pipeline was triggered by branch: $(Build.SourceBranchName)"
+          echo "Based on the branch, the environmentName variable is set to: $(environmentName)"
+        displayName: 'Diagnose Environment Name'  
       - task: Docker@2
         displayName: Build an image
         inputs:

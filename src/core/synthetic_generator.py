@@ -89,13 +89,13 @@ class SyntheticDataGenerator:
         if generation_code is None:
             code_gen_start = time.time()
             generation_code, generation_method, llm_response_time = self._generate_code_with_llm(metadata, num_rows, match_threshold)
-        # Only track llm_response time (code_generation is redundant as it's the same)
-        if llm_response_time:
-            step_timings['llm_response'] = llm_response_time
-        else:
-            # Track time even if no LLM was called
-            if generation_method != 'cached':
-                step_timings['llm_response'] = time.time() - code_gen_start
+            # Only track llm_response time (code_generation is redundant as it's the same)
+            if llm_response_time:
+                step_timings['llm_response'] = llm_response_time
+            else:
+                # Track time even if no LLM was called
+                if generation_method != 'cached':
+                    step_timings['llm_response'] = time.time() - code_gen_start
         else:
             # Cache hit - already set llm_response to 0 above
             pass

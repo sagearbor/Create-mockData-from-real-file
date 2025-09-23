@@ -154,6 +154,25 @@ async def about():
     else:
         return HTMLResponse(content="<h1>About page not found</h1>")
 
+@app.get("/dashboard")
+async def dashboard():
+    """Serve the usage dashboard page."""
+    from fastapi.responses import Response
+
+    html_file = Path(__file__).parent / "src" / "web" / "dashboard.html"
+    if html_file.exists():
+        with open(html_file, 'r') as f:
+            content = f.read()
+
+        # Add cache-busting headers for real-time updates
+        response = HTMLResponse(content=content)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+    else:
+        return HTMLResponse(content="<h1>Dashboard page not found</h1>")
+
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon.ico directly if it exists, otherwise redirect to favicon.svg."""
@@ -191,6 +210,82 @@ async def health_check():
         "openai_configured": synthetic_generator.openai_client is not None,
         "cache_enabled": True,
         "environment": settings.environment
+    }
+
+@app.get("/api/usage-logs")
+async def get_usage_logs(start: str = None, end: str = None):
+    """
+    Fetch usage logs for the dashboard.
+
+    Args:
+        start: Start date in YYYY-MM-DD format
+        end: End date in YYYY-MM-DD format
+    """
+    import json
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    # Default to last 7 days if no range specified
+    if not end:
+        end_date = datetime.now()
+    else:
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+
+    if not start:
+        start_date = end_date - timedelta(days=7)
+    else:
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+
+    logs = []
+    log_dir = Path(__file__).parent / "logs" / "usage"
+
+    # Iterate through date range
+    current_date = start_date
+    while current_date <= end_date:
+        log_file = log_dir / f"usage_{current_date.strftime('%Y-%m-%d')}.jsonl"
+
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                for line in f:
+                    try:
+                        log_entry = json.loads(line)
+                        logs.append(log_entry)
+                    except json.JSONDecodeError:
+                        continue
+
+        current_date += timedelta(days=1)
+
+    # Calculate metrics
+    total_requests = len(logs)
+    cache_hits = sum(1 for log in logs if log.get('cache_hit', False))
+    total_rows = sum(log.get('num_rows', 0) for log in logs)
+    avg_response_time = sum(log.get('total_time', 0) for log in logs) / max(total_requests, 1)
+
+    # Group by day for chart data
+    daily_stats = defaultdict(lambda: {'requests': 0, 'cache_hits': 0})
+    for log in logs:
+        timestamp = log.get('timestamp', '')
+        if timestamp:
+            date_key = timestamp.split('T')[0]
+            daily_stats[date_key]['requests'] += 1
+            if log.get('cache_hit', False):
+                daily_stats[date_key]['cache_hits'] += 1
+
+    # Convert to list for frontend
+    daily = [
+        {'date': date, **stats}
+        for date, stats in sorted(daily_stats.items())
+    ]
+
+    return {
+        "logs": logs,
+        "metrics": {
+            "total_requests": total_requests,
+            "cache_hits": cache_hits,
+            "total_rows": total_rows,
+            "avg_response_time": avg_response_time
+        },
+        "daily": daily
     }
 
 @app.post("/upload")

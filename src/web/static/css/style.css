@@ -144,6 +144,43 @@ header {
     height: 14px;
 }
 
+/* Global tooltip (append-to-body solution) */
+.global-tooltip {
+    display: none;
+    position: absolute;
+    background: var(--text-primary);
+    color: white;
+    padding: 0.75rem;
+    border-radius: var(--radius);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    z-index: 999999; /* Highest z-index to ensure it's on top */
+    min-width: 280px;
+    max-width: min(90vw, 400px);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.global-tooltip.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.global-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-bottom-color: var(--text-primary);
+}
+
+/* Hide original tooltips (they're now just data sources) */
+.info-tooltip-content {
+    display: none !important;
+}
+
 /* Info tooltip */
 .info-tooltip {
     position: relative;
@@ -167,29 +204,85 @@ header {
 }
 
 .info-tooltip-content {
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-top: 0.5rem;
+    position: fixed;
     background: var(--text-primary);
     color: white;
     padding: 0.75rem;
     border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-    z-index: 1000;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    z-index: 99999;
     min-width: 280px;
+    max-width: min(90vw, 400px);
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.2s, visibility 0.2s;
     pointer-events: none;
+    white-space: normal;
+    word-wrap: break-word;
 }
 
+/* Smart positioning for tooltips */
 .info-tooltip:hover .info-tooltip-content {
     opacity: 1;
     visibility: visible;
+    top: var(--tooltip-top, auto);
+    left: var(--tooltip-left, auto);
+    right: var(--tooltip-right, auto);
+    bottom: var(--tooltip-bottom, auto);
 }
 
+/* Settings tooltip - positioned to avoid truncation */
+.info-tooltip-settings .info-tooltip-content {
+    position: fixed;
+    top: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: 20px !important;
+    margin-top: 30px;
+}
+
+/* Upload info tooltip - centered below */
+.info-tooltip-upload .info-tooltip-content {
+    position: fixed;
+    left: 50% !important;
+    transform: translateX(-50%);
+    margin-top: 30px;
+}
+
+/* Inline tooltip (Strictness) - smart positioning */
+.info-tooltip-inline .info-tooltip-content {
+    position: fixed;
+    left: 50% !important;
+    transform: translateX(-50%);
+    margin-top: 30px;
+}
+
+/* Mobile responsive tooltips */
+@media (max-width: 768px) {
+    .info-tooltip-content {
+        position: fixed !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        max-width: calc(100vw - 40px);
+        margin-top: 30px;
+    }
+
+    .info-tooltip-settings .info-tooltip-content,
+    .info-tooltip-upload .info-tooltip-content,
+    .info-tooltip-inline .info-tooltip-content {
+        right: auto !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+    }
+}
+
+.upload-box h3 {
+    display: flex;
+    align-items: center;
+}
+
+
+/* Tooltip arrow */
 .info-tooltip-content::before {
     content: '';
     position: absolute;
@@ -198,6 +291,18 @@ header {
     transform: translateX(-50%);
     border: 6px solid transparent;
     border-bottom-color: var(--text-primary);
+}
+
+/* Adjust arrow for different positions */
+.info-tooltip-settings .info-tooltip-content::before {
+    left: auto;
+    right: 30px;
+    transform: none;
+}
+
+.info-tooltip-upload .info-tooltip-content::before {
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 .badge-legend {
@@ -229,13 +334,72 @@ header {
     margin-top: 1rem;
 }
 
-/* Preview Section */
+/* Preview Section - Smooth animation (slower) */
+.preview-section {
+    transition: all 0.6s ease-in-out;
+    animation: slideDown 0.8s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        max-height: 2000px;
+        transform: translateY(0);
+    }
+}
+
 .preview-section > div:not(summary) {
     padding: 1.5rem;
 }
 
 .preview-section .generation-badges {
     margin-bottom: 1rem;
+}
+
+/* Demo section styling inside settings */
+.demo-section-compact {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.demo-divider {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+}
+
+.demo-buttons-row {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.demo-btn-compact {
+    padding: 0.5rem 1rem;
+    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.demo-btn-compact:hover {
+    background: linear-gradient(135deg, #e5e7eb, #d1d5db);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
 }
 
 header h1 {
@@ -250,12 +414,162 @@ header h1 {
     font-size: 1.125rem;
 }
 
+/* Config section - Compact */
+.config-section-condensed {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--shadow);
+}
+
+.config-section-condensed summary {
+    cursor: pointer;
+    padding: 0.5rem;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    list-style: none;
+}
+
+.summary-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.summary-right {
+    display: flex;
+    align-items: center;
+}
+
+/* Settings info tooltip - fixed positioning */
+.info-tooltip-settings {
+    position: relative;
+}
+
+.info-tooltip-settings .info-tooltip-content {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    left: auto;
+    transform: none;
+    margin-top: 0.5rem;
+}
+
+/* Inline tooltip for form items */
+.info-tooltip-inline {
+    display: inline-flex;
+    margin-left: 0.25rem;
+    vertical-align: middle;
+}
+
+.info-tooltip-inline .info-tooltip-content {
+    position: absolute;
+    left: auto;
+    right: -50px;
+    transform: none;
+    top: 100%;
+    margin-top: 0.5rem;
+    z-index: 10001;
+}
+
+.config-section-condensed summary::-webkit-details-marker {
+    display: none;
+}
+
+.config-section-condensed[open] > div {
+    padding: 1rem 0.5rem 0.5rem 0.5rem;
+}
+
+/* Settings Grid Compact */
+.settings-grid-compact {
+    margin-bottom: 1rem;
+}
+
+.settings-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.settings-grid-compact .settings-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: fit-content;
+}
+
+.settings-grid-compact .settings-item label {
+    margin-bottom: 0;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    white-space: nowrap;
+}
+
+.settings-grid-compact .settings-item input[type="number"] {
+    width: 80px;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--background);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+}
+
+.settings-grid-compact .settings-item select {
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--background);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    min-width: 80px;
+}
+
+.settings-grid-compact .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.settings-grid-compact .slider-container input[type="range"] {
+    width: 100px;
+}
+
+.settings-grid-compact .checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+/* Inline icon style */
+.inline-icon {
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.25rem;
+    color: currentColor;
+}
+
+/* Action Buttons Section */
+.action-buttons-section {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid var(--border);
+}
+
 /* Sections */
 section {
     background: var(--surface);
     border-radius: 12px;
-    padding: 2rem;
-    margin-bottom: 2rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
     box-shadow: var(--shadow);
 }
 
@@ -263,6 +577,77 @@ section h2 {
     font-size: 1.5rem;
     margin-bottom: 1.5rem;
     color: var(--text-primary);
+}
+
+/* File loaded state */
+.upload-area.file-loaded {
+    background: linear-gradient(to bottom, rgba(16, 185, 129, 0.05), rgba(16, 185, 129, 0.02));
+    border-color: var(--success-color);
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+}
+
+.file-icon {
+    color: var(--success-color);
+    flex-shrink: 0;
+}
+
+.file-loaded-info {
+    flex-grow: 1;
+    text-align: left;
+    margin: 0 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.file-loaded-info strong {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.file-loaded-info span {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.clear-file-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s;
+}
+
+.clear-file-btn:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error-color);
+}
+
+/* Inline spinner for loading state */
+.spinner-inline {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 /* Upload Area */
@@ -341,6 +726,46 @@ details {
     box-shadow: var(--shadow);
     margin-bottom: 1.5rem;
     overflow: hidden;
+}
+
+/* Smooth animations for collapsible sections */
+details[open] > *:not(summary) {
+    animation: slideDown 0.4s ease-out;
+}
+
+details:not([open]) > *:not(summary) {
+    animation: slideUp 0.4s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+}
+
+/* Smooth height transitions */
+details.animating {
+    transition: all 0.3s ease-out;
+}
+
+details.animating > *:not(summary) {
+    transition: all 0.3s ease-out;
 }
 
 details summary {
@@ -831,7 +1256,7 @@ input[type="range"]::-moz-range-thumb {
 .upload-box {
     background: var(--surface);
     border-radius: var(--radius-md);
-    padding: 1.75rem;
+    padding: 1.25rem;
     box-shadow: var(--shadow);
     border: 1px solid rgba(226, 232, 240, 0.5);
     transition: all 0.2s ease;
@@ -844,8 +1269,8 @@ input[type="range"]::-moz-range-thumb {
 
 .upload-box h3 {
     color: var(--text-primary);
-    margin-bottom: 1rem;
-    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.95rem;
     font-weight: 600;
     letter-spacing: -0.01em;
 }
@@ -853,11 +1278,12 @@ input[type="range"]::-moz-range-thumb {
 .upload-box .upload-area {
     border: 2px dashed rgba(148, 163, 184, 0.4);
     border-radius: var(--radius);
-    padding: 2rem 1rem;
+    padding: 1rem;
     text-align: center;
     cursor: pointer;
     transition: all 0.2s ease;
-    min-height: 150px;
+    min-height: 90px;
+    max-height: 100px;
     display: flex;
     flex-direction: column;
     justify-content: center;

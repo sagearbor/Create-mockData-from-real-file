@@ -97,19 +97,22 @@ function init() {
         generateFromDataBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
             document.getElementById('dictionaryDetails').style.display = 'none';
-            configSection.scrollIntoView({ behavior: 'smooth' });
+            // Don't scroll, just show
+            configSection.style.display = 'block';
         });
     }
     if (generateFromDictBtn) {
         generateFromDictBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
-            configSection.scrollIntoView({ behavior: 'smooth' });
+            // Don't scroll, just show
+            configSection.style.display = 'block';
         });
     }
     if (generateFromBothBtn) {
         generateFromBothBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
-            configSection.scrollIntoView({ behavior: 'smooth' });
+            // Don't scroll, just show
+            configSection.style.display = 'block';
         });
     }
 
@@ -147,15 +150,22 @@ function init() {
     if (extractMetadataBtn) extractMetadataBtn.addEventListener('click', extractMetadata);
     if (resetBtn) resetBtn.addEventListener('click', reset);
 
-    // Demo buttons - updated for compact layout
-    document.querySelectorAll('.demo-btn-compact').forEach(btn => {
-        btn.addEventListener('click', loadDemoData);
-    });
-
-    // Legacy demo buttons (if any remain)
-    document.querySelectorAll('.demo-btn').forEach(btn => {
-        btn.addEventListener('click', loadDemoData);
-    });
+    // Demo dropdown handler
+    const demoDropdown = document.getElementById('demoDataset');
+    if (demoDropdown) {
+        demoDropdown.addEventListener('change', (e) => {
+            if (e.target.value) {
+                // Create a mock event object that matches what loadDemoData expects
+                const mockEvent = {
+                    target: {
+                        dataset: { demo: e.target.value }
+                    }
+                };
+                loadDemoData(mockEvent);
+                // Keep the selection visible - don't reset
+            }
+        });
+    }
 }
 
 // File handling
@@ -213,8 +223,11 @@ function processFile(file) {
     if (fileStatsEl) fileStatsEl.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
     if (fileInfoEl) fileInfoEl.style.display = 'block';
 
-    // Update sections
-    if (configSection) configSection.style.display = 'block';
+    // Update sections - keep config visible and open
+    if (configSection) {
+        configSection.style.display = 'block';
+        configSection.setAttribute('open', 'open');
+    }
     if (resultsSection) resultsSection.style.display = 'none';
     if (metadataSection) metadataSection.style.display = 'none';
 
@@ -228,23 +241,16 @@ function processFile(file) {
 
 // Helper function to update quick action buttons
 function updateQuickActionButtons() {
-    const generateFromDataBtn = document.getElementById('generateFromDataBtn');
-    const generateFromDictBtn = document.getElementById('generateFromDictBtn');
-    const generateFromBothBtn = document.getElementById('generateFromBothBtn');
+    // Deprecated - using single generate button
+}
 
-    // Hide all buttons first
-    if (generateFromDataBtn) generateFromDataBtn.style.display = 'none';
-    if (generateFromDictBtn) generateFromDictBtn.style.display = 'none';
-    if (generateFromBothBtn) generateFromBothBtn.style.display = 'none';
+// Smooth collapse/expand helper
+function smoothToggleSection(section, open) {
+    if (!section || section.tagName !== 'DETAILS') return;
 
-    // Show appropriate buttons based on what's loaded
-    if (currentFile && currentDictionary) {
-        if (generateFromBothBtn) generateFromBothBtn.style.display = 'inline-block';
-    } else if (currentFile) {
-        if (generateFromDataBtn) generateFromDataBtn.style.display = 'inline-block';
-    } else if (currentDictionary) {
-        if (generateFromDictBtn) generateFromDictBtn.style.display = 'inline-block';
-    }
+    section.classList.add('animating');
+    section.open = open;
+    setTimeout(() => section.classList.remove('animating'), 400);
 }
 
 // API calls
@@ -488,15 +494,34 @@ function displayMetadata(metadata) {
 // Demo data
 async function loadDemoData(e) {
     const demoType = e.target.dataset.demo;
-    
+
     showLoading(`Loading ${demoType} demo data...`);
-    
+
     // Create sample data based on type
     const demoData = generateDemoData(demoType);
     const blob = new Blob([demoData], {type: 'text/csv'});
     const file = new File([blob], `${demoType}_demo.csv`, {type: 'text/csv'});
-    
+
+    // Process file and update upload area
     processFile(file);
+
+    // Also update the upload area to show the demo file is loaded
+    const uploadArea = document.getElementById('uploadArea');
+    if (uploadArea) {
+        uploadArea.classList.add('file-loaded');
+        uploadArea.innerHTML = `
+            <svg class="file-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <div class="file-loaded-info">
+                <strong>Loaded: ${demoType}_demo.csv</strong>
+                <span>Demo Data | Type: CSV</span>
+            </div>
+            <button class="clear-file-btn" onclick="clearDataFile(event)" title="Remove file">×</button>
+        `;
+    }
+
     hideLoading();
 }
 
@@ -653,7 +678,32 @@ function reset() {
     currentMetadata = null;
     fileInput.value = '';
     fileInfo.style.display = 'none';
-    configSection.style.display = 'none';
+
+    // Reset upload area to original state
+    const uploadArea = document.getElementById('uploadArea');
+    if (uploadArea) {
+        uploadArea.classList.remove('file-loaded');
+        uploadArea.innerHTML = `
+            <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>Drop your data file here</p>
+            <p class="file-types">CSV, JSON, Excel, Parquet, TSV</p>
+        `;
+    }
+
+    // Reset demo dropdown
+    const demoDropdown = document.getElementById('demoDataset');
+    if (demoDropdown) {
+        demoDropdown.value = '';
+    }
+
+    // Keep config visible and open it
+    if (configSection) {
+        configSection.setAttribute('open', 'open');
+    }
     resultsSection.style.display = 'none';
     metadataSection.style.display = 'none';
     downloadBtn.style.display = 'none';
@@ -685,8 +735,11 @@ if (typeof convertToCSV === 'undefined') {
 
 // Display preview of generated data
 function displayPreview(data) {
-    // Hide other sections
-    configSection.style.display = 'none';
+    // Keep settings visible but collapse it
+    const configDetails = document.getElementById('configSection');
+    if (configDetails) {
+        configDetails.removeAttribute('open');
+    }
     resultsSection.style.display = 'none';
 
     // Show preview section
@@ -755,8 +808,13 @@ function displayPreview(data) {
     document.getElementById('regenerateBtn').onclick = regenerateData;
     document.getElementById('newFileBtn').onclick = reset;
 
-    // Scroll to preview
-    previewSection.scrollIntoView({ behavior: 'smooth' });
+    // Smoothly open the preview section without scrolling (slower animation)
+    setTimeout(() => {
+        previewSection.style.display = 'block';
+        setTimeout(() => {
+            previewSection.setAttribute('open', 'open');
+        }, 50);
+    }, 100);
 }
 
 // Display generation method badges
@@ -968,9 +1026,10 @@ async function processDictionaryFile(file) {
             }
         }
 
-        // Show configuration section
+        // Show configuration section and open it
         if (configSection) {
             configSection.style.display = 'block';
+            configSection.setAttribute('open', 'open');
         }
 
         // Update quick action buttons
@@ -1067,8 +1126,116 @@ function initDictionaryHandlers() {
 
 }
 
+// Clear data file function
+function clearDataFile(event) {
+    event.stopPropagation();
+    reset();
+}
+
+// Robust append-to-body tooltip solution
+function initTooltips() {
+    // Create a single tooltip element that will be moved to body
+    let globalTooltip = document.getElementById('global-tooltip');
+    if (!globalTooltip) {
+        globalTooltip = document.createElement('div');
+        globalTooltip.id = 'global-tooltip';
+        globalTooltip.className = 'global-tooltip';
+        document.body.appendChild(globalTooltip);
+    }
+
+    let activeTrigger = null;
+    let isTouch = false;
+
+    // Function to show tooltip
+    const showTooltip = (trigger, event) => {
+        // Get tooltip content from the trigger's tooltip element
+        const tooltipContent = trigger.closest('.info-tooltip')?.querySelector('.info-tooltip-content');
+        if (!tooltipContent) return;
+
+        activeTrigger = trigger;
+
+        // Clone the content HTML
+        globalTooltip.innerHTML = tooltipContent.innerHTML;
+        globalTooltip.style.display = 'block';
+
+        // Calculate position relative to viewport
+        const triggerRect = trigger.getBoundingClientRect();
+        const tooltipRect = globalTooltip.getBoundingClientRect();
+
+        let top = triggerRect.bottom + window.scrollY + 10; // 10px below trigger
+        let left = triggerRect.left + window.scrollX + (triggerRect.width / 2) - (tooltipRect.width / 2);
+
+        // Prevent going off-screen horizontally
+        const padding = 10;
+        if (left < padding) left = padding;
+        if (left + tooltipRect.width > window.innerWidth - padding) {
+            left = window.innerWidth - tooltipRect.width - padding;
+        }
+
+        // If not enough space below, show above
+        if (triggerRect.bottom + tooltipRect.height + 10 > window.innerHeight) {
+            top = triggerRect.top + window.scrollY - tooltipRect.height - 10;
+        }
+
+        globalTooltip.style.position = 'absolute';
+        globalTooltip.style.left = `${left}px`;
+        globalTooltip.style.top = `${top}px`;
+        globalTooltip.classList.add('visible');
+    };
+
+    // Function to hide tooltip
+    const hideTooltip = () => {
+        if (globalTooltip) {
+            globalTooltip.classList.remove('visible');
+            setTimeout(() => {
+                if (!globalTooltip.classList.contains('visible')) {
+                    globalTooltip.style.display = 'none';
+                }
+            }, 200);
+        }
+        activeTrigger = null;
+    };
+
+    // Add event listeners to all tooltip triggers
+    document.querySelectorAll('.info-tooltip-icon').forEach(trigger => {
+        // Desktop: hover
+        trigger.addEventListener('mouseenter', (e) => {
+            if (!isTouch) showTooltip(trigger, e);
+        });
+        trigger.addEventListener('mouseleave', () => {
+            if (!isTouch) hideTooltip();
+        });
+
+        // Mobile: click/tap
+        trigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (activeTrigger === trigger) {
+                hideTooltip();
+            } else {
+                hideTooltip(); // Hide any existing tooltip
+                showTooltip(trigger, e);
+                isTouch = true;
+            }
+        });
+    });
+
+    // Hide tooltip on click/tap outside
+    document.addEventListener('click', (e) => {
+        if (activeTrigger && !activeTrigger.contains(e.target) && !globalTooltip.contains(e.target)) {
+            hideTooltip();
+        }
+    });
+
+    // Detect touch vs mouse
+    document.addEventListener('touchstart', () => { isTouch = true; });
+    document.addEventListener('mousemove', () => { isTouch = false; });
+}
+
 // Initialize on load
 document.addEventListener('DOMContentLoaded', function() {
     init();
     initDictionaryHandlers();
+    initTooltips();
 });

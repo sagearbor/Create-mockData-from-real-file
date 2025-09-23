@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UI Animation Test</title>
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .test-section {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .test-btn {
+            padding: 10px 20px;
+            background: #6366f1;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-btn:hover {
+            background: #4f46e5;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f3f4f6;
+            border-radius: 6px;
+        }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+    </style>
+</head>
+<body>
+    <h1>🧪 UI Animation Tests</h1>
+
+    <div class="test-section">
+        <h2>Test 1: Check Collapsible Sections</h2>
+        <button class="test-btn" onclick="checkSections()">Check Sections</button>
+        <div id="section-status" class="status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Simulate Generation Flow</h2>
+        <button class="test-btn" onclick="simulateGeneration()">Simulate Generation</button>
+        <div id="generation-status" class="status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Check Demo Datasets in Settings</h2>
+        <button class="test-btn" onclick="checkDemoLocation()">Check Demo Location</button>
+        <div id="demo-status" class="status"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 4: Animation Timing</h2>
+        <button class="test-btn" onclick="testAnimations()">Test Animations</button>
+        <div id="animation-status" class="status"></div>
+    </div>
+
+    <script>
+        async function checkSections() {
+            const status = document.getElementById('section-status');
+            status.innerHTML = 'Checking sections...';
+
+            try {
+                const response = await fetch('http://localhost:8201');
+                const html = await response.text();
+
+                let results = [];
+
+                // Check for details elements
+                if (html.includes('details class="config-section-condensed"')) {
+                    results.push('<span class="success">✓ Config section is collapsible</span>');
+                } else {
+                    results.push('<span class="error">✗ Config section NOT collapsible</span>');
+                }
+
+                if (html.includes('details class="data-editor-section"')) {
+                    results.push('<span class="success">✓ Editor section is collapsible</span>');
+                } else {
+                    results.push('<span class="error">✗ Editor section NOT collapsible</span>');
+                }
+
+                if (html.includes('details class="preview-section"')) {
+                    results.push('<span class="success">✓ Preview section is collapsible</span>');
+                } else {
+                    results.push('<span class="error">✗ Preview section NOT collapsible</span>');
+                }
+
+                // Check demo datasets location
+                if (html.includes('demo-section-compact') && html.includes('Generation Settings') &&
+                    html.indexOf('demo-section-compact') > html.indexOf('Generation Settings')) {
+                    results.push('<span class="success">✓ Demo datasets inside settings</span>');
+                } else {
+                    results.push('<span class="error">✗ Demo datasets NOT in settings</span>');
+                }
+
+                status.innerHTML = results.join('<br>');
+            } catch (e) {
+                status.innerHTML = '<span class="error">Error: ' + e.message + '</span>';
+            }
+        }
+
+        async function simulateGeneration() {
+            const status = document.getElementById('generation-status');
+            status.innerHTML = '<span class="info">Simulating data generation flow...</span>';
+
+            // Create sample data
+            const csv_data = "name,age,city\nJohn,30,NYC\nJane,25,LA";
+            const files = {
+                'file': new Blob([csv_data], { type: 'text/csv' })
+            };
+
+            const formData = new FormData();
+            formData.append('file', files.file, 'test.csv');
+            formData.append('num_rows', '5');
+            formData.append('match_threshold', '0.8');
+            formData.append('output_format', 'csv');
+            formData.append('use_cache', 'true');
+            formData.append('file_count', '1');
+            formData.append('preview_only', 'true');
+
+            try {
+                const response = await fetch('http://localhost:8201/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    status.innerHTML = '<span class="success">✓ Generation successful<br>' +
+                        'Preview rows: ' + (result.preview ? result.preview.length : 0) + '<br>' +
+                        'Generation method: ' + (result.generation_info?.method || 'unknown') + '</span>';
+                } else {
+                    status.innerHTML = '<span class="error">Generation failed: ' + JSON.stringify(result) + '</span>';
+                }
+            } catch (e) {
+                status.innerHTML = '<span class="error">Error: ' + e.message + '</span>';
+            }
+        }
+
+        function checkDemoLocation() {
+            const status = document.getElementById('demo-status');
+            status.innerHTML = '<span class="info">Checking demo datasets location...</span>';
+
+            fetch('http://localhost:8201')
+                .then(response => response.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+
+                    // Check if demo section is inside config details
+                    const configDetails = doc.querySelector('#configSection');
+                    const demoSection = doc.querySelector('.demo-section-compact');
+
+                    if (configDetails && demoSection && configDetails.contains(demoSection)) {
+                        status.innerHTML = '<span class="success">✓ Demo datasets correctly placed inside Generation Settings</span>';
+                    } else {
+                        status.innerHTML = '<span class="error">✗ Demo datasets NOT inside Generation Settings</span>';
+                    }
+                })
+                .catch(e => {
+                    status.innerHTML = '<span class="error">Error: ' + e.message + '</span>';
+                });
+        }
+
+        function testAnimations() {
+            const status = document.getElementById('animation-status');
+            status.innerHTML = '<span class="info">Testing animation CSS...</span>';
+
+            fetch('http://localhost:8201/static/css/style.css')
+                .then(response => response.text())
+                .then(css => {
+                    let results = [];
+
+                    if (css.includes('@keyframes slideDown')) {
+                        results.push('<span class="success">✓ SlideDown animation defined</span>');
+                    } else {
+                        results.push('<span class="error">✗ SlideDown animation missing</span>');
+                    }
+
+                    if (css.includes('@keyframes slideUp')) {
+                        results.push('<span class="success">✓ SlideUp animation defined</span>');
+                    } else {
+                        results.push('<span class="error">✗ SlideUp animation missing</span>');
+                    }
+
+                    if (css.includes('details.animating')) {
+                        results.push('<span class="success">✓ Animation class styles defined</span>');
+                    } else {
+                        results.push('<span class="error">✗ Animation class styles missing</span>');
+                    }
+
+                    if (css.includes('demo-section-compact')) {
+                        results.push('<span class="success">✓ Demo section styles defined</span>');
+                    } else {
+                        results.push('<span class="error">✗ Demo section styles missing</span>');
+                    }
+
+                    status.innerHTML = results.join('<br>');
+                })
+                .catch(e => {
+                    status.innerHTML = '<span class="error">Error: ' + e.message + '</span>';
+                });
+        }
+    </script>
+</body>
+</html>

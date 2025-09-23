@@ -29,23 +29,23 @@ class SyntheticDataGenerator:
         self.openai_client = openai_client
         
     def generate(
-        self, 
-        metadata: Dict[str, Any], 
+        self,
+        metadata: Dict[str, Any],
         num_rows: Optional[int] = None,
         match_threshold: float = 0.8,
         use_cached: bool = True
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Generate synthetic data based on metadata.
-        
+
         Args:
             metadata: Metadata dictionary from MetadataExtractor
             num_rows: Number of rows to generate (defaults to original)
             match_threshold: How closely to match statistical properties (0-1)
             use_cached: Whether to use cached generation scripts
-            
+
         Returns:
-            Generated synthetic DataFrame
+            Tuple of (Generated synthetic DataFrame, generation_info dict)
         """
         self.logger.info(f"Starting synthetic data generation with match_threshold={match_threshold}")
         
@@ -54,33 +54,43 @@ class SyntheticDataGenerator:
             num_rows = metadata["structure"]["shape"]["rows"]
         
         # Generate the Python code using LLM
-        generation_code = self._generate_code_with_llm(metadata, num_rows, match_threshold)
+        generation_code, generation_method = self._generate_code_with_llm(metadata, num_rows, match_threshold)
         
         # Execute the code safely
         synthetic_df = self._execute_generation_code(generation_code)
         
+        # Create generation info
+        generation_info = {
+            "method": generation_method,
+            "num_rows": num_rows,
+            "match_threshold": match_threshold,
+            "use_cached": use_cached
+        }
+
         # Validate the generated data
         if self._validate_synthetic_data(synthetic_df, metadata):
             self.logger.info(f"Successfully generated synthetic data with shape {synthetic_df.shape}")
-            return synthetic_df
+            return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
             # Try again with stricter threshold
-            generation_code = self._generate_code_with_llm(metadata, num_rows, min(match_threshold + 0.1, 1.0))
+            generation_code, generation_method = self._generate_code_with_llm(metadata, num_rows, min(match_threshold + 0.1, 1.0))
             synthetic_df = self._execute_generation_code(generation_code)
-            return synthetic_df
+            generation_info["method"] = generation_method
+            generation_info["regenerated"] = True
+            return synthetic_df, generation_info
     
-    def _generate_code_with_llm(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> str:
+    def _generate_code_with_llm(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> tuple[str, str]:
         """
         Generate Python code using LLM based on metadata.
-        
+
         Args:
             metadata: Metadata dictionary
             num_rows: Number of rows to generate
             match_threshold: Statistical matching threshold
-            
+
         Returns:
-            Python code string for generating synthetic data
+            Tuple of (Python code string, generation method)
         """
         # Construct the prompt
         prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
@@ -99,9 +109,11 @@ class SyntheticDataGenerator:
                 )
 
                 code = response.choices[0].message.content
+                generation_method = "llm"
             except Exception as e:
                 self.logger.warning(f"Azure OpenAI call failed: {e}. Using fallback generation.")
-                return self._generate_fallback_code(metadata, num_rows)
+                code, generation_method = self._generate_fallback_code(metadata, num_rows)
+                return code, generation_method
             
             # Extract code from markdown if present
             if "```python" in code:
@@ -109,10 +121,11 @@ class SyntheticDataGenerator:
             elif "```" in code:
                 code = code.split("```")[1].split("```")[0]
             
-            return code.strip()
+            return code.strip(), generation_method
         else:
             # Fallback to template-based generation when no LLM available
-            return self._generate_fallback_code(metadata, num_rows)
+            code, generation_method = self._generate_fallback_code(metadata, num_rows)
+            return code, generation_method
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for code generation."""
@@ -180,8 +193,12 @@ class SyntheticDataGenerator:
 
         return prompt
     
-    def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> str:
-        """Generate synthetic data using template-based approach (fallback when no LLM)."""
+    def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> tuple[str, str]:
+        """Generate synthetic data using template-based approach (fallback when no LLM).
+
+        Returns:
+            Tuple of (Python code string, generation method 'fallback')
+        """
 
         code_lines = [
             "import pandas as pd",
@@ -364,7 +381,7 @@ class SyntheticDataGenerator:
             "result = generate_synthetic_data()"
         ])
         
-        return "\n".join(code_lines)
+        return "\n".join(code_lines), "fallback"
     
     def _execute_generation_code(self, code: str) -> pd.DataFrame:
         """

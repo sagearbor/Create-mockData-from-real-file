@@ -693,6 +693,9 @@ function displayPreview(data) {
     const previewSection = document.getElementById('previewSection');
     previewSection.style.display = 'block';
 
+    // Display generation badges
+    displayGenerationBadges(data.generation_info, data.dictionary_applied);
+
     // Store data for download
     currentSyntheticData = data;
 
@@ -751,6 +754,52 @@ function displayPreview(data) {
     document.getElementById('downloadZipBtn').onclick = () => downloadGeneratedData(false);
     document.getElementById('regenerateBtn').onclick = regenerateData;
     document.getElementById('newFileBtn').onclick = reset;
+
+    // Scroll to preview
+    previewSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+// Display generation method badges
+function displayGenerationBadges(generationInfo, dictionaryApplied) {
+    const badgesContainer = document.getElementById('generationBadges');
+    if (!badgesContainer) return;
+
+    badgesContainer.innerHTML = '';
+
+    // Add method badge
+    if (generationInfo) {
+        if (generationInfo.method === 'llm') {
+            const badge = createBadge('🤖 LLM', 'badge-llm', 'Generated using AI model');
+            badgesContainer.appendChild(badge);
+        } else if (generationInfo.method === 'cached') {
+            const badge = createBadge('⚡ CACHED', 'badge-cached', 'Using cached generation pipeline');
+            badgesContainer.appendChild(badge);
+        } else if (generationInfo.method === 'fallback') {
+            const badge = createBadge('🔧 FALLBACK', 'badge-fallback', 'Template-based generation');
+            badgesContainer.appendChild(badge);
+        }
+
+        // Add regenerated badge if applicable
+        if (generationInfo.regenerated) {
+            const badge = createBadge('🔄 REGENERATED', 'badge-warning', 'Regenerated for better quality');
+            badgesContainer.appendChild(badge);
+        }
+    }
+
+    // Add dictionary badge if applicable
+    if (dictionaryApplied) {
+        const badge = createBadge('📖 DICTIONARY', 'badge-dictionary', 'Dictionary constraints applied');
+        badgesContainer.appendChild(badge);
+    }
+}
+
+// Create a badge element
+function createBadge(text, className, title) {
+    const badge = document.createElement('span');
+    badge.className = `badge ${className}`;
+    badge.textContent = text;
+    badge.title = title;
+    return badge;
 }
 
 // Download generated data

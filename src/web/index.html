@@ -77,13 +77,89 @@
                     </div>
                 </div>
 
-                <!-- Quick Start Options -->
-                <div class="quick-start">
-                    <button id="generateFromDataBtn" class="btn btn-primary" style="display: none;">🚀 Generate from Data</button>
-                    <button id="generateFromDictBtn" class="btn btn-primary" style="display: none;">🚀 Generate from Dictionary</button>
-                    <button id="generateFromBothBtn" class="btn btn-primary" style="display: none;">🚀 Generate with Both</button>
-                </div>
             </section>
+
+            <!-- Configuration Section - Always visible, collapsible -->
+            <details class="config-section-condensed" id="configSection" open>
+                <summary>
+                    <span class="section-header">⚙️ Generation Settings</span>
+                    <span class="info-tooltip">
+                        <span class="info-tooltip-icon">i</span>
+                        <div class="info-tooltip-content">
+                            <div class="badge-legend">
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-llm">🤖 LLM</span>
+                                    <span>Generated using AI model</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-cached">⚡ CACHED</span>
+                                    <span>Using cached pipeline</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-fallback">🔧 FALLBACK</span>
+                                    <span>Template-based generation</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-dictionary">📖 DICTIONARY</span>
+                                    <span>Dictionary constraints applied</span>
+                                </div>
+                            </div>
+                        </div>
+                    </span>
+                </summary>
+
+                <div class="settings-grid">
+                    <div class="settings-item">
+                        <label for="numRows">Rows to Generate</label>
+                        <input type="number" id="numRows" min="1" max="1000000" placeholder="Match original">
+                    </div>
+
+                    <div class="settings-item slider-item">
+                        <label for="matchThreshold">Match Strictness</label>
+                        <div class="slider-container">
+                            <input type="range" id="matchThreshold" min="0" max="100" value="80">
+                            <span class="slider-value" id="thresholdValue">80%</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-item">
+                        <label for="outputFormat">Format</label>
+                        <select id="outputFormat">
+                            <option value="csv">CSV</option>
+                            <option value="json">JSON</option>
+                            <option value="excel">Excel</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-item">
+                        <label for="fileCount">Files</label>
+                        <select id="fileCount">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="10">10</option>
+                            <option value="15">15</option>
+                            <option value="20">20</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-item checkbox-item">
+                        <input type="checkbox" id="useCache" checked>
+                        <label for="useCache">Use cached</label>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="extractMetadataBtn" class="btn btn-secondary">
+                        📊 Extract Metadata Only
+                    </button>
+                    <button id="generateBtn" class="btn btn-primary">
+                        🚀 Generate Synthetic Data
+                    </button>
+                </div>
+            </details>
 
             <!-- Demo Mode - Compact Single Row -->
             <section class="demo-section-compact">
@@ -96,10 +172,10 @@
                 </div>
             </section>
 
-            <!-- Data Editor Section -->
-            <section class="data-editor-section" id="dataEditorSection" style="display: none;">
-                <div class="editor-header">
-                    <h2>📝 Data Preview & Editor</h2>
+            <!-- Data Editor Section - Collapsible -->
+            <details class="data-editor-section" id="dataEditorSection" style="display: none;" open>
+                <summary class="section-header">📝 Data Preview & Editor</summary>
+                <div class="editor-content">
                     <div class="editor-controls">
                         <button id="addRowBtn" class="btn btn-small">➕ Add Row</button>
                         <button id="addColBtn" class="btn btn-small">➕ Add Column</button>
@@ -127,7 +203,8 @@
                     <button id="saveChangesBtn" class="btn btn-primary">💾 Save Changes</button>
                     <button id="discardChangesBtn" class="btn btn-secondary">❌ Discard Changes</button>
                 </div>
-            </section>
+                </div>
+            </details>
 
             <!-- Dictionary Details (Hidden by default, shown when dictionary loaded) -->
             <section class="dictionary-details" id="dictionaryDetails" style="display: none;">
@@ -136,80 +213,36 @@
                 <button id="clearDictionaryBtn" class="btn btn-small btn-secondary">❌ Clear Dictionary</button>
             </section>
 
-            <!-- Configuration Section -->
-            <section class="config-section" id="configSection" style="display: none;">
-                <h2>Generation Settings</h2>
-                
-                <div class="form-group">
-                    <label for="numRows">Number of Rows to Generate:</label>
-                    <input type="number" id="numRows" min="1" max="1000000" placeholder="Leave empty to match original">
+            <!-- Preview Section - Collapsible -->
+            <details class="preview-section" id="previewSection" style="display: none;" open>
+                <summary class="section-header">
+                    <span>📊 Generated Data Preview</span>
+                </summary>
+                <div class="generation-badges" id="generationBadges">
+                    <span class="info-tooltip" style="margin-left: 0;">
+                        <span class="info-tooltip-icon">i</span>
+                        <div class="info-tooltip-content">
+                            <div class="badge-legend">
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-llm">🤖 LLM</span>
+                                    <span>Generated using AI model</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-cached">⚡ CACHED</span>
+                                    <span>Using cached pipeline</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-fallback">🔧 FALLBACK</span>
+                                    <span>Template-based generation</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-dictionary">📖 DICTIONARY</span>
+                                    <span>Dictionary constraints applied</span>
+                                </div>
+                            </div>
+                        </div>
+                    </span>
                 </div>
-
-                <div class="form-group">
-                    <label for="matchThreshold">
-                        Match Strictness: <span id="thresholdValue">80%</span>
-                    </label>
-                    <input type="range" id="matchThreshold" min="0" max="100" value="80">
-                    <div class="threshold-labels">
-                        <span>Loose Match</span>
-                        <span>Exact Match</span>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="outputFormat">Output Format:</label>
-                    <select id="outputFormat">
-                        <option value="csv">CSV</option>
-                        <option value="json">JSON</option>
-                        <option value="excel">Excel</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="useCache" checked>
-                        Use cached generation (faster)
-                    </label>
-                </div>
-
-                <div class="button-group">
-                    <button id="extractMetadataBtn" class="btn btn-secondary">
-                        📊 Extract Metadata Only
-                    </button>
-                    <button id="generateBtn" class="btn btn-primary">
-                        🚀 Generate Synthetic Data
-                    </button>
-                    <div class="file-count-selector">
-                        <label for="fileCount">Files:</label>
-                        <select id="fileCount">
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                            <option value="6">6</option>
-                            <option value="7">7</option>
-                            <option value="8">8</option>
-                            <option value="9">9</option>
-                            <option value="10">10</option>
-                            <option value="11">11</option>
-                            <option value="12">12</option>
-                            <option value="13">13</option>
-                            <option value="14">14</option>
-                            <option value="15">15</option>
-                            <option value="16">16</option>
-                            <option value="17">17</option>
-                            <option value="18">18</option>
-                            <option value="19">19</option>
-                            <option value="20">20</option>
-                        </select>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Preview Section -->
-            <section class="preview-section" id="previewSection" style="display: none;">
-                <h2>📊 Generated Data Preview</h2>
                 <p id="previewInfo" class="preview-info"></p>
 
                 <div class="table-container" style="max-height: 400px; overflow-y: auto;">
@@ -225,7 +258,7 @@
                     <button id="regenerateBtn" class="btn btn-secondary">🔄 Regenerate</button>
                     <button id="newFileBtn" class="btn btn-secondary">📂 New File</button>
                 </div>
-            </section>
+            </details>
 
             <!-- Results Section -->
             <section class="results-section" id="resultsSection" style="display: none;">

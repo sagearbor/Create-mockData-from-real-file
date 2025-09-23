@@ -309,7 +309,7 @@ async def generate_synthetic_data(
         cached_result = None
         if use_cache:
             cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
-        
+
         # If preview only, generate single file and return preview data
         if preview_only:
             # Generate single synthetic dataset
@@ -317,8 +317,9 @@ async def generate_synthetic_data(
                 logger.info("Using cached generation script for preview")
                 generation_code = cached_result["generation_code"]
                 synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                generation_info = {"method": "cached", "cache_hit": True}
             else:
-                synthetic_df = synthetic_generator.generate(
+                synthetic_df, generation_info = synthetic_generator.generate(
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=match_threshold,
@@ -346,7 +347,7 @@ async def generate_synthetic_data(
                         synthetic_files.append((f"{base_name}_synthetic_{i+1:03d}", synthetic_df))
                     else:
                         # Generate additional files
-                        additional_df = synthetic_generator.generate(
+                        additional_df, _ = synthetic_generator.generate(
                             metadata=metadata,
                             num_rows=num_rows,
                             match_threshold=match_threshold,
@@ -370,7 +371,8 @@ async def generate_synthetic_data(
                 "total_columns": len(synthetic_df.columns),
                 "column_names": list(synthetic_df.columns),
                 "file_count": file_count,
-                "download_info": download_data
+                "download_info": download_data,
+                "generation_info": generation_info
             })
 
         # Generate multiple files if requested
@@ -387,7 +389,7 @@ async def generate_synthetic_data(
                     synthetic_df = synthetic_generator._execute_generation_code(generation_code)
                 else:
                     # Generate new synthetic data
-                    synthetic_df = synthetic_generator.generate(
+                    synthetic_df, _ = synthetic_generator.generate(
                         metadata=metadata,
                         num_rows=num_rows,
                         match_threshold=match_threshold,
@@ -427,9 +429,10 @@ async def generate_synthetic_data(
             logger.info("Using cached generation script")
             generation_code = cached_result["generation_code"]
             synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+            generation_info = {"method": "cached", "cache_hit": True}
         else:
             # Generate new synthetic data
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=match_threshold,
@@ -449,7 +452,8 @@ async def generate_synthetic_data(
                 "status": "success",
                 "data": json.loads(output_data),
                 "shape": list(synthetic_df.shape),
-                "columns": list(synthetic_df.columns)
+                "columns": list(synthetic_df.columns),
+                "generation_info": generation_info
             })
 
         elif output_format == "excel":
@@ -613,7 +617,7 @@ async def generate_with_dictionary(
 
         # Generate synthetic data
         if preview_only:
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=0.9
@@ -629,14 +633,15 @@ async def generate_with_dictionary(
                 "total_columns": len(synthetic_df.columns),
                 "column_names": list(synthetic_df.columns),
                 "file_count": file_count,
-                "dictionary_applied": True
+                "dictionary_applied": True,
+                "generation_info": generation_info
             })
 
         # Generate actual files
         if file_count > 1:
             synthetic_files = []
             for i in range(file_count):
-                synthetic_df = synthetic_generator.generate(
+                synthetic_df, _ = synthetic_generator.generate(
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=0.9
@@ -667,7 +672,7 @@ async def generate_with_dictionary(
             )
         else:
             # Single file
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=0.9
@@ -677,7 +682,8 @@ async def generate_with_dictionary(
                 output_data = synthetic_df.to_json(orient="records")
                 return JSONResponse(content={
                     "status": "success",
-                    "data": json.loads(output_data)
+                    "data": json.loads(output_data),
+                    "generation_info": generation_info
                 })
             elif output_format == "excel":
                 output = io.BytesIO()
@@ -738,7 +744,7 @@ async def process_batch(files, match_threshold, batch_id):
             df = data_loader.load_from_bytes(content, file.filename)
             metadata = metadata_extractor.extract(df)
             
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, _ = synthetic_generator.generate(
                 metadata=metadata,
                 match_threshold=match_threshold
             )

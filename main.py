@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import json
 import io
+import time
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -40,26 +41,36 @@ synthetic_generator = None
 def initialize_openai_client():
     """Initialize OpenAI client if credentials are available."""
     global synthetic_generator
-    
+
+    logger.info(f"Initializing OpenAI client...")
+    logger.info(f"Endpoint configured: {bool(settings.azure_openai_endpoint)}")
+    logger.info(f"API key configured: {bool(settings.azure_openai_api_key)}")
+    logger.info(f"Chat deployment: {settings.azure_openai_chat_deployment}")
+    logger.info(f"API version: {settings.azure_openai_api_version}")
+
     if settings.azure_openai_api_key and settings.azure_openai_endpoint:
         try:
             from openai import AzureOpenAI
-            
+
             client = AzureOpenAI(
                 api_key=settings.azure_openai_api_key,
                 api_version=settings.azure_openai_api_version,
                 azure_endpoint=settings.azure_openai_endpoint
             )
-            
+
             synthetic_generator = SyntheticDataGenerator(openai_client=client)
-            logger.info("OpenAI client initialized successfully")
+            logger.info("✓ OpenAI client initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"✗ Failed to initialize OpenAI client: {type(e).__name__}: {e}")
             synthetic_generator = SyntheticDataGenerator()
             return False
     else:
-        logger.warning("OpenAI credentials not configured, using fallback generation")
+        logger.warning("✗ OpenAI credentials not configured, using fallback generation")
+        if not settings.azure_openai_api_key:
+            logger.warning("  - Missing: AZURE_OPENAI_API_KEY")
+        if not settings.azure_openai_endpoint:
+            logger.warning("  - Missing: AZURE_OPENAI_ENDPOINT")
         synthetic_generator = SyntheticDataGenerator()
         return False
 
@@ -288,10 +299,15 @@ async def generate_synthetic_data(
         preview_only: If True, return preview data instead of file download
     """
     try:
+        # Track overall timing
+        all_timings = {}
+        request_start = time.time()
+
         # Create metadata extractor with specified safety mode
         extractor = MetadataExtractor(safety_mode=safety_mode)
 
         # Get metadata from edited data, file, or JSON
+        metadata_start = time.time()
         if edited_data:
             # Parse edited CSV data
             df = pd.read_csv(io.StringIO(edited_data))
@@ -304,11 +320,15 @@ async def generate_synthetic_data(
             metadata = json.loads(metadata_json)
         else:
             raise HTTPException(status_code=400, detail="Either file or metadata_json must be provided")
+
+        all_timings['metadata_extraction'] = time.time() - metadata_start
         
         # Check cache if enabled
         cached_result = None
+        cache_start = time.time()
         if use_cache:
             cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
+        all_timings['cache_check'] = time.time() - cache_start
 
         # If preview only, generate single file and return preview data
         if preview_only:
@@ -325,6 +345,10 @@ async def generate_synthetic_data(
                     match_threshold=match_threshold,
                     use_cached=use_cache
                 )
+                # Merge timings
+                if 'step_timings' in generation_info:
+                    all_timings.update(generation_info['step_timings'])
+                generation_info['all_timings'] = all_timings
 
             # Prepare preview data (first 10 rows)
             preview_rows = min(10, len(synthetic_df))

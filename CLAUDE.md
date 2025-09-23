@@ -111,3 +111,11 @@ The project follows a modular architecture designed for both local development a
 1. Develop and test locally using minimal Azure services
 2. Use Infrastructure as Code scripts for cloud deployment
 3. Refer to Development_tasklist.rtf for detailed development plan and phases
+
+## File Organization Rules
+
+- **Test files**: All test data files (CSV, JSON, etc.) should be placed in the `tests/` directory
+- **Sample data**: Use `tests/data/` or `tests/samples/` for sample datasets
+- **Never create test files in the root directory** - keep it clean and organized
+- **Temporary files**: Should be created in system temp directories or cleaned up after use
+- **Configuration**: Only `.env` should be in root (and it's gitignored)

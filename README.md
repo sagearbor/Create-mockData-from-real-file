@@ -77,10 +77,21 @@ You should see:
   - **Strict**: Maximum privacy, all categorical data anonymized
   - **Balanced**: Preserves common non-sensitive categories (default)
   - **Permissive**: Preserves more categorical values for better realism
+- **Intelligent Caching**: Reuses generation code for similar data structures
+  - Cache hit indicators: ✓ for hit, − for miss
+  - Significant performance improvement (8s → <0.1s for cached)
+  - Safe matching based on exact column structure
+- **Real-Time Progress Tracking**: Visual generation pipeline with timing
+  - Shows each step: Extract Metadata → Check Cache → AI Response → Execute → Validate
+  - Live timing display for each completed step
+  - Processing time breakdown with hoverable details
+- **Usage Analytics**: Comprehensive logging with automatic rotation
+  - Tracks generation methods (LLM/cached/fallback)
+  - Distinguishes test/demo data from production use
+  - Daily logs with automatic archival after 2 days
 
 ### 🚧 In Development
 - **Statistical Preservation**: Basic distributions maintained (advanced correlations coming)
-- **Intelligent Caching**: Metadata hashing implemented (vector similarity pending)
 - **Clinical Data Support**: Domain-specific value generation planned
 - **Data Dictionary Upload**: Constraint validation feature planned
 

@@ -67,6 +67,16 @@ You should see:
 - **Multi-File Generation**: Generate 1-20 files at once with ZIP download
 - **REST API**: Programmatic access for automation
 - **Local-First**: Works without cloud services
+- **Smart Pattern Detection**: Automatically detects and preserves:
+  - ID patterns with prefixes (e.g., C001, INV-2024)
+  - Email addresses with realistic domains
+  - Phone numbers maintaining format
+  - Currency values with proper decimal places
+  - Datetime formats including timestamps
+- **Configurable Safety Modes**: Three privacy levels:
+  - **Strict**: Maximum privacy, all categorical data anonymized
+  - **Balanced**: Preserves common non-sensitive categories (default)
+  - **Permissive**: Preserves more categorical values for better realism
 
 ### 🚧 In Development
 - **Statistical Preservation**: Basic distributions maintained (advanced correlations coming)
@@ -82,6 +92,7 @@ You should see:
    - **Number of rows**: How many synthetic records to generate
    - **Match strictness**: How closely to match statistical properties (70-85% recommended)
    - **Number of files**: Generate 1-20 synthetic files at once
+   - **Safety mode**: Choose privacy level (strict/balanced/permissive)
 4. Click "Generate Synthetic Data"
 5. Download your synthetic dataset (single file or ZIP for multiple)
 
@@ -96,6 +107,7 @@ curl -X POST "http://localhost:8201/generate" \
   -F "num_rows=1000" \
   -F "match_threshold=0.8" \
   -F "output_format=csv" \
+  -F "safety_mode=balanced" \
   --output synthetic_data.csv
 
 # Multiple file generation (returns ZIP)
@@ -103,6 +115,7 @@ curl -X POST "http://localhost:8201/generate" \
   -F "file=@your_data.csv" \
   -F "file_count=5" \
   -F "output_format=csv" \
+  -F "safety_mode=permissive" \
   --output synthetic_data.zip
 ```
 
@@ -232,10 +245,9 @@ See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for detailed instructio
 
 ## ⚠️ Known Limitations
 
-- **Date Detection**: Some date formats (e.g., 2024-01-10) may not be automatically detected
-- **Domain Knowledge**: Columns like "medication" get random values, not real drug names
 - **Large Files**: Memory-based processing (streaming support planned)
 - **Complex Relationships**: Multi-column correlations not fully preserved yet
+- **Azure OpenAI**: Falls back to template generation if Azure OpenAI is not configured
 
 ## 🛠️ Troubleshooting
 
@@ -285,6 +297,10 @@ This project is proprietary and confidential.
 - ✅ Multi-file generation with ZIP download
 - ✅ About page with architecture documentation
 - ✅ Privacy documentation and FAQ
+- ✅ Enhanced pattern detection for IDs, emails, phones, cities
+- ✅ Smart categorical value preservation based on safety mode
+- ✅ Currency and datetime format detection
+- ✅ Realistic name and location generation
 
 ### Active Development
 - 🔧 Fixing date type detection for medical data

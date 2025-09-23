@@ -124,6 +124,7 @@ Generate synthetic data based on uploaded file or metadata.
 - `match_threshold` (float, optional): Statistical matching threshold (0-1, default: 0.8)
 - `output_format` (string, optional): Output format - "csv", "json", or "excel" (default: "csv")
 - `use_cache` (boolean, optional): Use cached generation scripts (default: true)
+- `safety_mode` (string, optional): Privacy level for categorical data - "strict", "balanced", or "permissive" (default: "balanced")
 
 **Request:**
 ```bash
@@ -133,6 +134,7 @@ curl -X POST "http://localhost:8201/generate" \
   -F "match_threshold=0.85" \
   -F "output_format=csv" \
   -F "use_cache=true" \
+  -F "safety_mode=balanced" \
   --output synthetic_data.csv
 ```
 
@@ -290,7 +292,8 @@ generator = SyntheticGenerator(base_url="http://localhost:8201")
 result = generator.generate(
     file_path="data.csv",
     num_rows=10000,
-    match_threshold=0.85
+    match_threshold=0.85,
+    safety_mode="balanced"  # or "strict", "permissive"
 )
 
 # Save result
@@ -329,6 +332,7 @@ curl -X POST "http://localhost:8201/generate" \
   -F "num_rows=1000" \
   -F "match_threshold=0.9" \
   -F "output_format=json" \
+  -F "safety_mode=permissive" \
   -o synthetic_data.json
 
 # Batch processing
@@ -346,6 +350,10 @@ curl -X POST "http://localhost:8201/generate/batch" \
 3. **Caching**: Enable caching for repeated similar datasets
 4. **Error Handling**: Always check response status codes
 5. **Timeouts**: Set client timeout to at least 60 seconds for large files
+6. **Safety Mode Selection**:
+   - Use `strict` for highly sensitive data (medical, financial PII)
+   - Use `balanced` for general business data (default)
+   - Use `permissive` for non-sensitive test data requiring maximum realism
 
 ## Versioning
 

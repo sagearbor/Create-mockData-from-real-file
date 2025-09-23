@@ -82,6 +82,7 @@ curl -X POST "http://localhost:8201/generate" \
   -F "file=@your_data.csv" \
   -F "match_threshold=0.8" \
   -F "output_format=csv" \
+  -F "safety_mode=balanced" \
   --output synthetic_data.csv
 ```
 
@@ -100,6 +101,10 @@ curl -X POST "http://localhost:8201/generate" \
   - 0% = Loose match (faster, less accurate)
   - 100% = Exact match (slower, highly accurate)
   - Recommended: 70-85% for most use cases
+- **Safety Mode**: Control privacy level for categorical data preservation
+  - **Strict**: Maximum privacy - all categorical values anonymized
+  - **Balanced**: Preserves common non-sensitive categories (default)
+  - **Permissive**: Preserves more categorical values for maximum realism
 
 #### Output Options
 - **CSV**: Standard comma-separated values
@@ -155,6 +160,7 @@ num_rows: 1000
 match_threshold: 0.8
 output_format: csv
 use_cache: true
+safety_mode: balanced
 ```
 
 #### Extract Metadata Only
@@ -177,7 +183,8 @@ with open('data.csv', 'rb') as f:
         data={
             'match_threshold': 0.85,
             'num_rows': 5000,
-            'output_format': 'csv'
+            'output_format': 'csv',
+            'safety_mode': 'balanced'  # or 'strict', 'permissive'
         }
     )
     
@@ -234,9 +241,16 @@ curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 The generator preserves various statistical properties:
 - **Distributions**: Mean, standard deviation, min/max values
 - **Correlations**: Relationships between numeric columns
-- **Patterns**: Email formats, phone numbers, IDs
 - **Categorical**: Frequency distributions of categories
-- **Temporal**: Date ranges and time patterns
+- **Temporal**: Date ranges and time patterns including timestamps
+- **Advanced Pattern Detection**:
+  - **ID Patterns**: Detects and preserves prefixes (e.g., C001, INV-2024)
+  - **Email Addresses**: Generates realistic email formats with proper domains
+  - **Phone Numbers**: Maintains original formatting (e.g., 555-0101, (555) 123-4567)
+  - **Currency Values**: Preserves decimal places for monetary amounts
+  - **Datetime Formats**: Detects and preserves timestamp components
+  - **Cities/Locations**: Uses real city names for location columns
+  - **Names**: Generates realistic first and last name combinations
 
 ### Security Features
 
@@ -324,9 +338,25 @@ medical_data = "patient_records.csv"
 test_data = generate_synthetic(
     file=medical_data,
     match_threshold=0.95,
+    safety_mode='strict',  # Maximum privacy for medical data
     preserve_patterns=True
 )
 # Result: Realistic medical data without PHI exposure
+```
+
+### Example 4: Financial Data Generation
+```python
+# Financial transactions with sensitive account info
+financial_data = "transactions.csv"
+
+# Generate test data with proper currency formatting
+test_data = generate_synthetic(
+    file=financial_data,
+    match_threshold=0.85,
+    safety_mode='balanced',  # Preserve transaction types but anonymize accounts
+    preserve_patterns=True
+)
+# Result: Transactions with proper currency decimals and preserved categories
 ```
 
 ## Best Practices

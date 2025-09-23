@@ -13,15 +13,20 @@ from src.core.clinical_reference import ClinicalReferenceLibrary
 class MetadataExtractor:
     """Extract statistical and structural metadata from pandas DataFrames."""
     
-    def __init__(self, use_clinical_reference: bool = True):
+    def __init__(self, use_clinical_reference: bool = True, safety_mode: str = "balanced"):
         """
         Initialize the MetadataExtractor.
 
         Args:
             use_clinical_reference: Whether to use clinical reference library for medical data
+            safety_mode: Level of data preservation ('strict', 'balanced', 'permissive')
+                - 'strict': Only preserve data types, no actual values
+                - 'balanced': Preserve non-sensitive categorical values (<=10 unique, short strings)
+                - 'permissive': Preserve most categorical values, trust LLM to handle sensitivity
         """
         self.logger = logger
         self.clinical_reference = ClinicalReferenceLibrary() if use_clinical_reference else None
+        self.safety_mode = safety_mode
         
     def extract(self, df: pd.DataFrame, sample_size: int = 1000) -> Dict[str, Any]:
         """
@@ -88,7 +93,7 @@ class MetadataExtractor:
             
             # Numeric columns
             if pd.api.types.is_numeric_dtype(df[col]):
-                col_stats.update(self._extract_numeric_stats(df[col]))
+                col_stats.update(self._extract_numeric_stats(df[col], column_name=col))
             
             # DateTime columns
             elif pd.api.types.is_datetime64_any_dtype(df[col]):
@@ -96,16 +101,41 @@ class MetadataExtractor:
             
             # String/Object columns
             else:
-                col_stats.update(self._extract_string_stats(df[col]))
+                col_stats.update(self._extract_string_stats(df[col], column_name=col))
+                # Add column name context for better type detection
+                col_stats["column_name"] = col
             
             stats[col] = col_stats
         
         return stats
     
-    def _extract_numeric_stats(self, series: pd.Series) -> Dict[str, Any]:
+    def _extract_numeric_stats(self, series: pd.Series, column_name: str = None) -> Dict[str, Any]:
         """Extract statistics for numeric columns."""
         # Remove NaN values for calculation
         clean_series = series.dropna()
+
+        # Check if this might be currency/money
+        is_likely_currency = False
+        decimal_places = None
+        if len(clean_series) > 0:
+            # Check column name for currency hints
+            if column_name:
+                money_keywords = ['amount', 'price', 'cost', 'fee', 'payment', 'balance', 'total', 'subtotal', 'tax', 'discount']
+                is_likely_currency = any(keyword in column_name.lower() for keyword in money_keywords)
+
+            # Check decimal patterns
+            if is_likely_currency or (clean_series % 1).any():  # Has decimals
+                # Check consistent decimal places (like currency)
+                decimal_strs = clean_series.astype(str)
+                decimal_parts = decimal_strs.str.split('.').str[1].fillna('')
+                decimal_lengths = decimal_parts.str.len()
+                # If most values have 2 decimal places, likely currency
+                if (decimal_lengths == 2).sum() > len(decimal_lengths) * 0.8:
+                    is_likely_currency = True
+                    decimal_places = 2
+                elif (decimal_lengths == 0).sum() > len(decimal_lengths) * 0.8:
+                    # Mostly whole numbers but in a money column
+                    decimal_places = 0
         
         if len(clean_series) == 0:
             return {"type": "numeric", "all_null": True}
@@ -140,7 +170,9 @@ class MetadataExtractor:
             "is_integer": bool(pd.api.types.is_integer_dtype(series) or 
                               (clean_series == clean_series.astype(int)).all()),
             "has_negative": bool((clean_series < 0).any()),
-            "has_zero": bool((clean_series == 0).any())
+            "has_zero": bool((clean_series == 0).any()),
+            "is_likely_currency": is_likely_currency,
+            "decimal_places": decimal_places
         }
         
         # Check if it might be a percentage (values between 0 and 1 or 0 and 100)
@@ -169,28 +201,65 @@ class MetadataExtractor:
             "has_time_component": bool(not (pd.to_datetime(clean_series).dt.time == pd.Timestamp("00:00:00").time()).all())
         }
     
-    def _extract_string_stats(self, series: pd.Series) -> Dict[str, Any]:
+    def _extract_string_stats(self, series: pd.Series, column_name: str = None) -> Dict[str, Any]:
         """Extract statistics for string/object columns."""
         clean_series = series.dropna()
-        
+
         if len(clean_series) == 0:
             return {"type": "string", "all_null": True}
-        
+
         # Convert to string for analysis
         str_series = clean_series.astype(str)
-        
+
         value_counts = str_series.value_counts()
         unique_ratio = len(value_counts) / len(clean_series)
-        
+
+        # Check if this might be datetime stored as string
+        is_datetime_string = False
+        datetime_format = None
+        if len(clean_series) > 0:
+            # Try to detect datetime patterns
+            sample_val = str_series.iloc[0]
+            if self._looks_like_datetime(sample_val):
+                is_datetime_string = True
+                # Try to detect the format
+                if ':' in sample_val and '-' in sample_val:
+                    if len(sample_val) > 16:  # Has seconds
+                        datetime_format = '%Y-%m-%d %H:%M:%S'
+                    else:
+                        datetime_format = '%Y-%m-%d %H:%M'
+                elif '-' in sample_val and len(sample_val) == 10:
+                    datetime_format = '%Y-%m-%d'
+
+        # Determine if values are safe to preserve based on safety mode
+        if self.safety_mode == 'strict':
+            # Never preserve actual values in strict mode
+            is_safe_categorical = False
+        elif self.safety_mode == 'permissive':
+            # In permissive mode, preserve most categorical values (up to 50 unique)
+            if len(value_counts) <= 50:
+                is_safe_categorical = True
+            else:
+                is_safe_categorical = False
+        else:  # balanced mode (default)
+            # For categorical data with <= 10 unique values, check if safe
+            if len(value_counts) <= 10:
+                is_safe_categorical = self._is_safe_to_preserve(str_series, value_counts)
+            else:
+                is_safe_categorical = False
+
         stats = {
             "type": "string",
             "unique_values": int(len(value_counts)),
             "unique_ratio": float(unique_ratio),
             "most_common_values": value_counts.head(10).to_dict(),
+            "preserve_values": is_safe_categorical,  # Flag indicating if actual values are preserved
             "avg_length": float(str_series.str.len().mean()),
             "min_length": int(str_series.str.len().min()),
             "max_length": int(str_series.str.len().max()),
             "is_categorical": unique_ratio < 0.5 and len(value_counts) < 100,
+            "is_datetime_string": is_datetime_string,
+            "datetime_format": datetime_format,
             "has_numbers": bool(str_series.str.contains(r'\d', regex=True).any()),
             "has_special_chars": bool(str_series.str.contains(r'[^a-zA-Z0-9\s]', regex=True).any()),
             "is_email_like": bool(str_series.str.contains(r'@.*\.', regex=True).any()),
@@ -202,8 +271,46 @@ class MetadataExtractor:
         unique_lower = {v.lower() for v in value_counts.index[:10]}
         if unique_lower.issubset({'true', 'false', 'yes', 'no', '1', '0', 't', 'f', 'y', 'n'}):
             stats["might_be_boolean"] = True
-        
+
+        # Enhanced detection based on actual values
+        sample_values = list(value_counts.index[:5])  # Get top 5 values
+
+        # Check if all values are emails
+        if all(self._is_email(v) for v in sample_values if v):
+            stats["detected_type"] = "email"
+            stats["preserve_format"] = True
+
+        # Check if all values are phone numbers
+        elif all(self._is_phone(v) for v in sample_values if v):
+            stats["detected_type"] = "phone"
+            stats["preserve_format"] = True
+            # Detect phone format
+            if sample_values:
+                if '-' in sample_values[0]:
+                    stats["phone_format"] = "dash"  # 555-0101 or 555-555-5555
+                elif '.' in sample_values[0]:
+                    stats["phone_format"] = "dot"  # 555.555.5555
+                elif '(' in sample_values[0]:
+                    stats["phone_format"] = "parentheses"  # (555) 555-5555
+
         return stats
+
+    def _is_email(self, value: str) -> bool:
+        """Check if a value looks like an email."""
+        import re
+        return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', value))
+
+    def _is_phone(self, value: str) -> bool:
+        """Check if a value looks like a phone number."""
+        import re
+        phone_patterns = [
+            r'^\+?1?\d{10}$',  # Simple 10 digits
+            r'^\d{3}-\d{3}-\d{4}$',  # 555-555-5555
+            r'^\d{3}\.\d{3}\.\d{4}$',  # 555.555.5555
+            r'^\(\d{3}\)\s?\d{3}-\d{4}$',  # (555) 555-5555
+            r'^\d{3}-\d{4}$',  # 555-5555
+        ]
+        return any(re.match(pattern, value) for pattern in phone_patterns)
     
     def _extract_patterns(self, df: pd.DataFrame, sample_size: int) -> Dict[str, Any]:
         """Extract data patterns and regularities."""
@@ -224,23 +331,24 @@ class MetadataExtractor:
     def _extract_string_patterns(self, series: pd.Series) -> Dict[str, Any]:
         """Extract common patterns from string columns."""
         clean_series = series.dropna().astype(str)
-        
+
         if len(clean_series) == 0:
             return {}
-        
+
         # Sample if too large
         if len(clean_series) > 100:
             clean_series = clean_series.sample(n=100, random_state=42)
-        
+
         patterns = {
             "common_patterns": [],
             "detected_format": None
         }
-        
+
         # Common regex patterns to check
         pattern_checks = {
             "email": r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-            "phone_us": r'^\+?1?\d{10}$|^\d{3}-\d{3}-\d{4}$',
+            "phone_us": r'^\+?1?\d{10}$|^\d{3}-\d{3}-\d{4}$|^\d{3}\.\d{3}\.\d{4}$|^\(\d{3}\)\s?\d{3}-\d{4}$',
+            "phone_simple": r'^\d{3}-\d{4}$',  # Like 555-0101
             "ssn": r'^\d{3}-\d{2}-\d{4}$',
             "zip_code": r'^\d{5}(-\d{4})?$',
             "ipv4": r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$',
@@ -250,30 +358,51 @@ class MetadataExtractor:
             "alphanumeric_id": r'^[A-Z0-9]{6,}$',
             "numeric_id": r'^\d+$'
         }
-        
+
         for pattern_name, pattern_regex in pattern_checks.items():
             matches = clean_series.str.match(pattern_regex, na=False).sum()
             if matches > len(clean_series) * 0.8:  # 80% threshold
                 patterns["detected_format"] = pattern_name
                 patterns["format_confidence"] = float(matches / len(clean_series))
                 break
-        
-        # Extract common prefixes/suffixes
-        if len(clean_series) > 10:
-            # Common prefixes
-            prefixes = [s[:3] for s in clean_series if len(s) >= 3]
-            if prefixes:
-                prefix_counts = pd.Series(prefixes).value_counts()
-                if prefix_counts.iloc[0] > len(prefixes) * 0.3:
-                    patterns["common_prefix"] = prefix_counts.index[0]
-            
+
+        # Enhanced prefix/suffix detection for IDs with patterns
+        if len(clean_series) > 2:
+            # Check for consistent prefix pattern (like C001, C002, P001, ACC001)
+            first_val = clean_series.iloc[0]
+
+            # Try to detect prefix + number pattern
+            import re
+            prefix_match = re.match(r'^([A-Za-z]+[\-_]?)([0-9]+)$', first_val)
+            if prefix_match:
+                prefix = prefix_match.group(1)
+                # Check if all values follow this pattern
+                pattern_matches = clean_series.str.match(f'^{re.escape(prefix)}[0-9]+$', na=False).sum()
+                if pattern_matches > len(clean_series) * 0.9:  # 90% threshold
+                    patterns["id_pattern"] = {
+                        "type": "prefix_sequential",
+                        "prefix": prefix,
+                        "example": first_val,
+                        "confidence": float(pattern_matches / len(clean_series))
+                    }
+
+            # Detect common prefixes (more general)
+            # Get the common prefix length by checking first few characters
+            min_len = clean_series.str.len().min()
+            if min_len >= 2:
+                for prefix_len in range(min(min_len, 10), 0, -1):
+                    potential_prefix = clean_series.iloc[0][:prefix_len]
+                    if clean_series.str.startswith(potential_prefix).sum() > len(clean_series) * 0.9:
+                        patterns["common_prefix"] = potential_prefix
+                        break
+
             # Common suffixes
             suffixes = [s[-3:] for s in clean_series if len(s) >= 3]
             if suffixes:
                 suffix_counts = pd.Series(suffixes).value_counts()
                 if suffix_counts.iloc[0] > len(suffixes) * 0.3:
                     patterns["common_suffix"] = suffix_counts.index[0]
-        
+
         return patterns
     
     def _extract_correlations(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -347,6 +476,67 @@ class MetadataExtractor:
             "memory_usage_mb": float(df.memory_usage(deep=True).sum() / 1024 / 1024)
         }
     
+    def _looks_like_datetime(self, value: str) -> bool:
+        """Check if a string value looks like a datetime."""
+        import re
+        # Common datetime patterns
+        datetime_patterns = [
+            r'^\d{4}-\d{2}-\d{2}$',  # 2024-01-15
+            r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$',  # 2024-01-15 09:30:00
+            r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}',  # ISO format
+            r'^\d{2}/\d{2}/\d{4}',  # 01/15/2024
+            r'^\d{1,2}-[A-Za-z]{3}-\d{4}',  # 15-Jan-2024
+        ]
+        return any(re.match(pattern, value) for pattern in datetime_patterns)
+
+    def _is_safe_to_preserve(self, str_series: pd.Series, value_counts: pd.Series) -> bool:
+        """
+        Determine if categorical values are safe to preserve (non-sensitive).
+
+        Args:
+            str_series: String series to analyze
+            value_counts: Value counts of the series
+
+        Returns:
+            True if values appear non-sensitive and safe to preserve
+        """
+        # Check if all values are short (<=5 chars) - likely codes/abbreviations
+        max_length = str_series.str.len().max()
+        if max_length <= 5:
+            # Special check for ZIP codes (5 digits)
+            if str_series.str.match(r'^\d{5}$').all():
+                return False  # ZIP codes might be sensitive
+            # Special check for SSN fragments
+            if str_series.str.match(r'^\d{3}-\d{2}$|^\d{4}$').any():
+                return False  # Potential SSN fragments
+            return True  # Other short strings are likely safe (M/F, Y/N, state codes)
+
+        # Check if low cardinality (<=6 unique values)
+        if len(value_counts) <= 6:
+            # Additional check: if any value looks like an account number or ID
+            if str_series.str.match(r'^[A-Z0-9]{8,}$').any():
+                return False  # Potential account numbers
+            return True  # Low cardinality likely means non-sensitive categories
+
+        # Check for known safe patterns (common categorical values)
+        safe_patterns = [
+            # Gender variations
+            {'M', 'F'}, {'Male', 'Female'}, {'MALE', 'FEMALE'},
+            # Boolean variations
+            {'Yes', 'No'}, {'Y', 'N'}, {'True', 'False'}, {'T', 'F'},
+            {'0', '1'}, {'Active', 'Inactive'}, {'Enabled', 'Disabled'},
+            # Status variations
+            {'Completed', 'Pending', 'Failed'}, {'Open', 'Closed'},
+            {'Approved', 'Rejected', 'Pending'}
+        ]
+
+        unique_values = set(value_counts.index[:10])  # Check top 10 values
+        for pattern in safe_patterns:
+            if unique_values.issubset(pattern) or pattern.issubset(unique_values):
+                return True
+
+        return False  # Default to not preserving if uncertain
+
     def _get_python_type(self, series: pd.Series) -> str:
         """Get the Python type of a pandas Series."""
         if pd.api.types.is_integer_dtype(series):
@@ -368,24 +558,27 @@ class MetadataExtractor:
         """
         Convert metadata to secure JSON format.
         This ensures no actual data values are included, only statistical properties.
-        
+
         Args:
             metadata: Metadata dictionary
-            
+
         Returns:
             JSON string of secure metadata
         """
         # Create a copy to avoid modifying original
         secure_metadata = json.loads(json.dumps(metadata, default=str))
-        
+
         # Remove any potentially sensitive information
         if "statistics" in secure_metadata:
             for col_stats in secure_metadata["statistics"].values():
                 if "most_common_values" in col_stats:
-                    # Only keep the counts, not the actual values
-                    col_stats["most_common_values"] = {
-                        f"value_{i}": count 
-                        for i, count in enumerate(col_stats["most_common_values"].values())
-                    }
-        
+                    # Check if values should be preserved (non-sensitive)
+                    if not col_stats.get("preserve_values", False):
+                        # Only keep the counts, not the actual values for sensitive data
+                        col_stats["most_common_values"] = {
+                            f"value_{i}": count
+                            for i, count in enumerate(col_stats["most_common_values"].values())
+                        }
+                    # If preserve_values is True, keep the actual values
+
         return json.dumps(secure_metadata, indent=2, default=str)

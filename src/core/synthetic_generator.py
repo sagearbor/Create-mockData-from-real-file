@@ -127,9 +127,11 @@ class SyntheticDataGenerator:
         6. Generate realistic patterns for string data
         7. When clinical_context or suggested_values are provided, use those specific values
         8. For medical columns (medications, lab tests, etc.), use the suggested clinical values
-        9. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
-        10. For any column with 'date' or 'time' in the name, generate dates not random strings
-        11. Return ONLY the Python code, no explanations or markdown formatting
+        9. CRITICAL: For categorical columns where 'preserve_values' is True and 'most_common_values' contains actual values (not 'value_0', 'value_1'), you MUST use those exact values with their distributions
+        10. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
+        11. For any column with 'date' or 'time' in the name, generate dates not random strings
+        12. When you see actual categorical values like 'M', 'F' or 'Male', 'Female' in most_common_values, use those exact values
+        13. Return ONLY the Python code, no explanations or markdown formatting
         """
     
     def _construct_generation_prompt(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> str:
@@ -168,9 +170,11 @@ class SyntheticDataGenerator:
         3. Preserves data types and patterns
         4. Maintains correlations between columns
         5. Generates realistic synthetic values
-        6. IMPORTANT: For columns with type='datetime', generate proper datetime objects using datetime.now() or pd.date_range()
-        7. For date columns with names containing 'date', 'time', 'created', 'updated', generate datetime values
-        8. CRITICAL: If DATA DICTIONARY CONSTRAINTS are provided above, they MUST override any statistical properties
+        6. CRITICAL: When 'preserve_values' is True for a column, use the EXACT values from 'most_common_values' with their distributions
+        7. IMPORTANT: For columns with type='datetime', generate proper datetime objects using datetime.now() or pd.date_range()
+        8. For date columns with names containing 'date', 'time', 'created', 'updated', generate datetime values
+        9. CRITICAL: If DATA DICTIONARY CONSTRAINTS are provided above, they MUST override any statistical properties
+        10. For categorical columns with actual values (not 'value_0', 'value_1'), maintain the exact distribution
 
         Return only the Python code."""
 
@@ -178,7 +182,7 @@ class SyntheticDataGenerator:
     
     def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> str:
         """Generate synthetic data using template-based approach (fallback when no LLM)."""
-        
+
         code_lines = [
             "import pandas as pd",
             "import numpy as np",
@@ -189,6 +193,22 @@ class SyntheticDataGenerator:
             "def generate_synthetic_data():",
             f"    num_rows = {num_rows}",
             "    data = {}",
+            "",
+            "    # Helper functions for realistic data",
+            "    def generate_email(name):",
+            "        domains = ['gmail.com', 'yahoo.com', 'outlook.com', 'email.com', 'company.com']",
+            "        username = name.lower().replace(' ', '.') + str(random.randint(0, 99))",
+            "        return f'{username}@{random.choice(domains)}'",
+            "",
+            "    def generate_phone(format_type='dash'):",
+            "        if format_type == 'dash':",
+            "            return f'{random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}'",
+            "        elif format_type == 'simple':",
+            "            return f'{random.randint(555, 999)}-{random.randint(1000, 9999)}'",
+            "        elif format_type == 'dot':",
+            "            return f'{random.randint(200, 999)}.{random.randint(200, 999)}.{random.randint(1000, 9999)}'",
+            "        else:",
+            "            return f'({random.randint(200, 999)}) {random.randint(200, 999)}-{random.randint(1000, 9999)}'",
             ""
         ]
         
@@ -198,8 +218,15 @@ class SyntheticDataGenerator:
             col_stats = metadata['statistics'].get(col_name, {})
             
             if col_stats.get('type') == 'numeric':
-                # Numeric column generation
-                if col_stats.get('is_integer', False):
+                # Check if this is currency/money
+                if col_stats.get('is_likely_currency', False):
+                    decimal_places = col_stats.get('decimal_places', 2) or 2  # Default to 2 if None
+                    min_val = col_stats.get('min', 0)
+                    max_val = col_stats.get('max', 10000)
+                    code_lines.append(f"    # Generating currency values for '{col_name}'")
+                    code_lines.append(f"    data['{col_name}'] = np.round(np.random.uniform({min_val}, {max_val}, size=num_rows), {decimal_places})")
+                # Regular numeric column generation
+                elif col_stats.get('is_integer', False):
                     min_val = int(col_stats.get('min', 0))
                     max_val = int(col_stats.get('max', 100))
                     code_lines.append(f"    data['{col_name}'] = np.random.randint({min_val}, {max_val + 1}, size=num_rows)")
@@ -207,31 +234,108 @@ class SyntheticDataGenerator:
                     mean = col_stats.get('mean', 0)
                     std = col_stats.get('std', 1)
                     code_lines.append(f"    data['{col_name}'] = np.random.normal({mean}, {std}, size=num_rows)")
-                    
+
                     # Clip to min/max if specified
                     if 'min' in col_stats and 'max' in col_stats:
                         code_lines.append(f"    data['{col_name}'] = np.clip(data['{col_name}'], {col_stats['min']}, {col_stats['max']})")
             
             elif col_stats.get('type') == 'string':
-                # Check if this is actually a date column by name
-                date_keywords = ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp', 'expires', 'started', 'ended', 'completed']
-                is_likely_date = any(keyword in col_name.lower() for keyword in date_keywords)
-
-                if is_likely_date:
+                # First check if this is a datetime stored as string (detected from data)
+                if col_stats.get('is_datetime_string', False):
+                    datetime_format = col_stats.get('datetime_format', '%Y-%m-%d %H:%M:%S')
+                    code_lines.append(f"    # Detected datetime string format: {datetime_format}")
+                    code_lines.append(f"    base_date = datetime.now()")
+                    code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365), hours=random.randint(0, 23), minutes=random.randint(0, 59)) for _ in range(num_rows)]")
+                    if '%H' in datetime_format:  # Has time component
+                        code_lines.append(f"    data['{col_name}'] = [d.strftime('{datetime_format}') for d in date_list]")
+                    else:
+                        code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
+                # Fallback: Check if column name suggests date
+                elif any(keyword in col_name.lower() for keyword in ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp']):
                     # Generate dates even if stored as string
                     code_lines.append(f"    # Detected '{col_name}' as likely date column")
                     code_lines.append(f"    base_date = datetime.now()")
                     code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
                     code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
-                elif col_stats.get('is_categorical', False):
-                    # Categorical values
-                    unique_count = min(col_stats.get('unique_values', 10), 20)
-                    code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
-                    code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
+                # Check for categorical values
+                elif col_stats.get('is_categorical', False) or col_stats.get('unique_values', 100) <= 10:
+                    # Check if we have preserved actual categorical values
+                    if col_stats.get('preserve_values', False) and 'most_common_values' in col_stats:
+                        most_common = col_stats['most_common_values']
+                        # Check if these are actual values (not anonymized)
+                        if not any(k.startswith('value_') for k in most_common.keys()):
+                            # Use actual values with their distributions
+                            values = list(most_common.keys())
+                            counts = list(most_common.values())
+                            # Normalize to probabilities
+                            total = sum(counts)
+                            probabilities = [c/total for c in counts]
+                            code_lines.append(f"    # Using preserved categorical values for '{col_name}'")
+                            code_lines.append(f"    categories_{col_name} = {values}")
+                            code_lines.append(f"    probabilities_{col_name} = {probabilities}")
+                            code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows, p=probabilities_{col_name})")
+                        else:
+                            # Fallback to generic categories if anonymized
+                            unique_count = min(col_stats.get('unique_values', 10), 20)
+                            code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
+                            code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
+                    else:
+                        # No preserved values, use generic categories
+                        unique_count = min(col_stats.get('unique_values', 10), 20)
+                        code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
+                        code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
                 else:
-                    # Random strings
-                    avg_length = int(col_stats.get('avg_length', 10))
-                    code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
+                    # Check for specific detected types and patterns
+                    patterns = metadata.get('patterns', {}).get(col_name, {})
+
+                    # Check for email detection
+                    if col_stats.get('detected_type') == 'email' or col_stats.get('is_email_like'):
+                        code_lines.append(f"    # Generating emails for '{col_name}'")
+                        code_lines.append(f"    data['{col_name}'] = [generate_email(f'user{{i}}') for i in range(num_rows)]")
+
+                    # Check for phone detection
+                    elif col_stats.get('detected_type') == 'phone' or col_stats.get('is_phone_like'):
+                        phone_format = col_stats.get('phone_format', 'dash')
+                        code_lines.append(f"    # Generating phone numbers for '{col_name}'")
+                        code_lines.append(f"    data['{col_name}'] = [generate_phone('{phone_format}') for _ in range(num_rows)]")
+
+                    # Check for ID pattern with prefix
+                    elif patterns.get('id_pattern', {}).get('type') == 'prefix_sequential':
+                        prefix = patterns['id_pattern']['prefix']
+                        code_lines.append(f"    # Generating IDs with prefix '{prefix}' for '{col_name}'")
+                        code_lines.append(f"    data['{col_name}'] = [f'{prefix}{{str(i+1).zfill(3)}}' for i in range(num_rows)]")
+
+                    # Check for suggested values from clinical/reference context
+                    elif 'clinical_context' in col_stats or 'suggested_values' in col_stats:
+                        suggested = col_stats.get('suggested_values', col_stats.get('clinical_context', {}).get('suggested_values', []))
+                        if suggested:
+                            code_lines.append(f"    # Using suggested values for '{col_name}'")
+                            code_lines.append(f"    suggested_{col_name} = {suggested}")
+                            code_lines.append(f"    data['{col_name}'] = [random.choice(suggested_{col_name}) for _ in range(num_rows)]")
+                        else:
+                            # Fallback to random strings
+                            avg_length = int(col_stats.get('avg_length', 10))
+                            code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
+
+                    # Check if column name suggests specific data type
+                    elif 'city' in col_name.lower():
+                        code_lines.append(f"    # Generating city names for '{col_name}'")
+                        cities = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
+                        code_lines.append(f"    cities = {cities}")
+                        code_lines.append(f"    data['{col_name}'] = [random.choice(cities) for _ in range(num_rows)]")
+
+                    elif 'name' in col_name.lower() and 'first' not in col_name.lower() and 'last' not in col_name.lower():
+                        code_lines.append(f"    # Generating full names for '{col_name}'")
+                        first_names = ["John", "Jane", "Bob", "Alice", "Charlie", "Mary", "Michael", "Sarah", "David", "Emily"]
+                        last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
+                        code_lines.append(f"    first_names = {first_names}")
+                        code_lines.append(f"    last_names = {last_names}")
+                        code_lines.append(f"    data['{col_name}'] = [f'{{random.choice(first_names)}} {{random.choice(last_names)}}' for _ in range(num_rows)]")
+
+                    else:
+                        # Default random strings
+                        avg_length = int(col_stats.get('avg_length', 10))
+                        code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
             
             elif col_stats.get('type') == 'datetime':
                 # DateTime column generation

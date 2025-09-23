@@ -30,7 +30,7 @@ from src.utils.logger import logger
 
 # Initialize components
 data_loader = DataLoader()
-metadata_extractor = MetadataExtractor()
+metadata_extractor = None  # Will be created with safety_mode per request
 cache_manager = CacheManager()
 data_dictionary = DataDictionary()
 
@@ -200,9 +200,10 @@ async def upload_file(
         
         # Load data using DataLoader
         df = data_loader.load_from_bytes(content, file.filename)
-        
-        # Extract metadata
-        metadata = metadata_extractor.extract(df)
+
+        # Extract metadata with default safety mode
+        extractor = MetadataExtractor(safety_mode="balanced")
+        metadata = extractor.extract(df)
         
         if extract_metadata_only:
             # Return only metadata
@@ -242,12 +243,13 @@ async def extract_metadata(file: UploadFile = File(...)):
         
         # Load data
         df = data_loader.load_from_bytes(content, file.filename)
-        
+
         # Extract metadata
-        metadata = metadata_extractor.extract(df)
-        
+        extractor = MetadataExtractor(safety_mode="balanced")
+        metadata = extractor.extract(df)
+
         # Convert to secure JSON
-        secure_metadata = metadata_extractor.to_secure_json(metadata)
+        secure_metadata = extractor.to_secure_json(metadata)
         
         return JSONResponse(content={
             "status": "success",
@@ -269,7 +271,8 @@ async def generate_synthetic_data(
     output_format: str = Form("csv"),
     use_cache: bool = Form(True),
     file_count: int = Form(1),
-    preview_only: bool = Form(False)
+    preview_only: bool = Form(False),
+    safety_mode: str = Form("balanced")
 ):
     """
     Generate synthetic data based on uploaded file or metadata.
@@ -285,15 +288,18 @@ async def generate_synthetic_data(
         preview_only: If True, return preview data instead of file download
     """
     try:
+        # Create metadata extractor with specified safety mode
+        extractor = MetadataExtractor(safety_mode=safety_mode)
+
         # Get metadata from edited data, file, or JSON
         if edited_data:
             # Parse edited CSV data
             df = pd.read_csv(io.StringIO(edited_data))
-            metadata = metadata_extractor.extract(df)
+            metadata = extractor.extract(df)
         elif file:
             content = await file.read()
             df = data_loader.load_from_bytes(content, file.filename)
-            metadata = metadata_extractor.extract(df)
+            metadata = extractor.extract(df)
         elif metadata_json:
             metadata = json.loads(metadata_json)
         else:

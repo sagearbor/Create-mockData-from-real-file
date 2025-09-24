@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 When working on this project, follow these rules:
 
-1. **Check `developer_tasklist.md`** - This is the single source of truth for pending work
+1. **Check `docs/developer_tasklist.md`** - This is the single source of truth for pending work
 2. **Update task status** - Mark tasks as completed when done
 3. **Move completed tasks** - Transfer finished items to `archived/developer_tasklist_ARCHIVED.md`
 4. **Update documentation** - Keep README.md and architecture diagrams current
@@ -14,9 +14,9 @@ When working on this project, follow these rules:
 
 ### Task Workflow
 ```
-1. Read developer_tasklist.md → Pick a HIGH PRIORITY task
+1. Read docs/developer_tasklist.md → Pick a HIGH PRIORITY task
 2. Implement the solution → Test thoroughly
-3. Update developer_tasklist.md → Mark as completed
+3. Update docs/developer_tasklist.md → Mark as completed
 4. Move to archived/developer_tasklist_ARCHIVED.md
 5. Update README.md and docs/ if needed
 ```
@@ -111,3 +111,11 @@ The project follows a modular architecture designed for both local development a
 1. Develop and test locally using minimal Azure services
 2. Use Infrastructure as Code scripts for cloud deployment
 3. Refer to Development_tasklist.rtf for detailed development plan and phases
+
+## File Organization Rules
+
+- **Test files**: All test data files (CSV, JSON, etc.) should be placed in the `tests/` directory
+- **Sample data**: Use `tests/data/` or `tests/samples/` for sample datasets
+- **Never create test files in the root directory** - keep it clean and organized
+- **Temporary files**: Should be created in system temp directories or cleaned up after use
+- **Configuration**: Only `.env` should be in root (and it's gitignored)

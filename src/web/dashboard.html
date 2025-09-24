@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usage Dashboard - BYOD Synthetic Data Generator</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <style>
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .dashboard-header {
+            margin-bottom: 2rem;
+        }
+
+        .dashboard-header h1 {
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .date-range-selector {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .date-input {
+            padding: 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: 0.25rem;
+            background: var(--surface);
+            color: var(--text-primary);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+        }
+
+        .stat-card h3 {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-change {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-change.positive {
+            color: #10b981;
+        }
+
+        .stat-change.negative {
+            color: #ef4444;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .chart-card {
+            background: var(--surface);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+        }
+
+        .chart-card h2 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            font-size: 1.25rem;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        .full-width-chart {
+            grid-column: 1 / -1;
+        }
+
+        .logs-table {
+            background: var(--surface);
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .logs-table h2 {
+            padding: 1.5rem;
+            margin: 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            background: var(--background);
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .data-table tr:hover {
+            background: var(--background);
+        }
+
+        .cache-hit {
+            background: #10b981;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .cache-miss {
+            background: #f59e0b;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }
+
+        .error-message {
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin: 1rem 0;
+        }
+
+        .refresh-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        /* Cache Section Styles */
+        .cache-section {
+            background: var(--surface);
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .cache-section h2 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+
+        .cache-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .cache-stat-card {
+            background: var(--background);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+
+        .cache-stat-card h4 {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .cache-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .clear-cache-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .clear-cache-btn:hover {
+            background: #dc2626;
+        }
+
+        .cache-entries {
+            margin-top: 1.5rem;
+        }
+
+        .cache-entries h3 {
+            color: var(--text-primary);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .cache-entries-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--background);
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+
+        .cache-entry-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .cache-entry-item:last-child {
+            border-bottom: none;
+        }
+
+        .cache-entry-columns {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-brand">🧬 BYOD Synthetic Data Generator</h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-btn active">
+                        Info
+                        <svg class="dropdown-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="nav-dropdown-content">
+                        <a href="/about">About</a>
+                        <a href="/dashboard" class="active">Usage Dashboard</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="dashboard-container">
+        <div class="dashboard-header">
+            <h1>📊 Usage Analytics Dashboard</h1>
+            <p style="color: var(--text-secondary);">Monitor system performance and usage metrics</p>
+        </div>
+
+        <div class="date-range-selector">
+            <label>Date Range:</label>
+            <input type="date" id="startDate" class="date-input">
+            <span>to</span>
+            <input type="date" id="endDate" class="date-input">
+            <label style="margin-left: 1rem;">Granularity:</label>
+            <select id="timeGranularity" class="date-input">
+                <option value="hour">Hourly</option>
+                <option value="day" selected>Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
+            </select>
+            <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
+        </div>
+
+        <!-- Key Metrics Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Requests</h3>
+                <div class="stat-value" id="totalRequests">-</div>
+                <div class="stat-change" id="requestsChange">Loading...</div>
+            </div>
+            <div class="stat-card">
+                <h3>Cache Hit Rate</h3>
+                <div class="stat-value" id="cacheHitRate">-</div>
+                <div class="stat-change" id="cacheChange">Loading...</div>
+            </div>
+            <div class="stat-card">
+                <h3>Avg Response Time</h3>
+                <div class="stat-value" id="avgResponseTime">-</div>
+                <div class="stat-change" id="responseTimeChange">Loading...</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Rows Generated</h3>
+                <div class="stat-value" id="totalRows">-</div>
+                <div class="stat-change" id="rowsChange">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+            <!-- Usage Over Time Chart -->
+            <div class="chart-card full-width-chart">
+                <h2>📈 Usage Over Time</h2>
+                <div class="chart-container">
+                    <canvas id="usageChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Response Time Distribution -->
+            <div class="chart-card">
+                <h2>⏱️ Response Time Distribution</h2>
+                <div class="chart-container">
+                    <canvas id="responseTimeChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Cache Performance -->
+            <div class="chart-card">
+                <h2>💾 Cache Performance</h2>
+                <div class="chart-container">
+                    <canvas id="cacheChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Column Types -->
+            <div class="chart-card">
+                <h2>📊 Most Generated Column Types</h2>
+                <div class="chart-container">
+                    <canvas id="columnTypesChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Generation Methods -->
+            <div class="chart-card">
+                <h2>🔧 Generation Methods</h2>
+                <div class="chart-container">
+                    <canvas id="methodsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cache Statistics Section -->
+        <div class="cache-section">
+            <h2>💾 Cache Library</h2>
+            <div class="cache-stats-grid">
+                <div class="cache-stat-card">
+                    <h4>Cached Programs</h4>
+                    <div class="cache-value" id="cachedPrograms">-</div>
+                </div>
+                <div class="cache-stat-card">
+                    <h4>Unique Formats</h4>
+                    <div class="cache-value" id="uniqueFormats">-</div>
+                </div>
+                <div class="cache-stat-card">
+                    <h4>Cache Size</h4>
+                    <div class="cache-value" id="cacheSize">-</div>
+                </div>
+                <div class="cache-stat-card">
+                    <button class="clear-cache-btn" onclick="clearCache()">🗑️ Clear Cache</button>
+                </div>
+            </div>
+            <div class="cache-entries">
+                <h3>Recent Cached Patterns</h3>
+                <div id="cacheEntriesList" class="cache-entries-list">
+                    <p>Loading cache entries...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Logs Table -->
+        <div class="logs-table">
+            <h2>📋 Recent Generation Logs</h2>
+            <div class="table-wrapper">
+                <table class="data-table" id="logsTable">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Method</th>
+                            <th>Rows</th>
+                            <th>Columns</th>
+                            <th>Response Time</th>
+                            <th>Cache</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                        <tr>
+                            <td colspan="6" class="loading">Loading logs...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart.js default configuration
+        Chart.defaults.color = '#64748b';
+        Chart.defaults.borderColor = '#e2e8f0';
+
+        let charts = {};
+
+        // Initialize date range to last 7 days
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 7);
+
+        document.getElementById('startDate').valueAsDate = startDate;
+        document.getElementById('endDate').valueAsDate = endDate;
+
+        // Fetch cache information
+        async function fetchCacheInfo() {
+            try {
+                const response = await fetch('/api/cache-info');
+                if (!response.ok) throw new Error('Failed to fetch cache info');
+
+                const data = await response.json();
+                updateCacheSection(data);
+            } catch (error) {
+                console.error('Error fetching cache info:', error);
+            }
+        }
+
+        // Update cache section
+        function updateCacheSection(data) {
+            // Update stats
+            document.getElementById('cachedPrograms').textContent = data.statistics.total_entries || '0';
+            document.getElementById('uniqueFormats').textContent = data.statistics.unique_formats || '0';
+            document.getElementById('cacheSize').textContent = `${data.statistics.cache_size_mb || 0} MB`;
+
+            // Update entries list
+            const entriesList = document.getElementById('cacheEntriesList');
+            if (data.entries && data.entries.length > 0) {
+                entriesList.innerHTML = data.entries.slice(0, 10).map(entry => `
+                    <div class="cache-entry-item">
+                        <div>${new Date(entry.timestamp).toLocaleString()}</div>
+                        <div class="cache-entry-columns">
+                            ${entry.columns.join(', ') || 'No columns info'}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                entriesList.innerHTML = '<p>No cached programs yet</p>';
+            }
+        }
+
+        // Clear cache function
+        async function clearCache() {
+            if (confirm('Are you sure you want to clear all cached programs?')) {
+                try {
+                    const response = await fetch('/api/cache/clear', { method: 'DELETE' });
+                    if (!response.ok) throw new Error('Failed to clear cache');
+
+                    const result = await response.json();
+                    alert(result.message);
+                    fetchCacheInfo(); // Refresh cache info
+                } catch (error) {
+                    console.error('Error clearing cache:', error);
+                    alert('Failed to clear cache');
+                }
+            }
+        }
+
+        // Fetch and process log data
+        async function fetchLogs() {
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const granularity = document.getElementById('timeGranularity').value;
+
+            try {
+                const response = await fetch(`/api/usage-logs?start=${start}&end=${end}`);
+                if (!response.ok) throw new Error('Failed to fetch logs');
+
+                const data = await response.json();
+
+                // Process data based on granularity
+                data.aggregated = aggregateDataByGranularity(data.logs, granularity);
+
+                updateDashboard(data);
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                showError('Failed to fetch usage logs. Please try again.');
+            }
+        }
+
+        // Aggregate data based on selected granularity
+        function aggregateDataByGranularity(logs, granularity) {
+            const grouped = {};
+
+            logs.forEach(log => {
+                const date = new Date(log.timestamp);
+                let key;
+
+                switch(granularity) {
+                    case 'hour':
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`;
+                        break;
+                    case 'day':
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                        break;
+                    case 'week':
+                        const weekStart = new Date(date);
+                        weekStart.setDate(date.getDate() - date.getDay());
+                        key = `Week of ${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
+                        break;
+                    case 'month':
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                        break;
+                    default:
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                }
+
+                if (!grouped[key]) {
+                    grouped[key] = { requests: 0, cache_hits: 0, date: key };
+                }
+
+                grouped[key].requests++;
+                if (log.cache_hit || log.method === 'cached') {
+                    grouped[key].cache_hits++;
+                }
+            });
+
+            return Object.values(grouped).sort((a, b) => new Date(a.date) - new Date(b.date));
+        }
+
+        function updateDashboard(data) {
+            // Update metrics cards
+            updateMetrics(data.metrics);
+
+            // Update charts - use aggregated data if available, otherwise use daily
+            updateUsageChart(data.aggregated || data.daily);
+            updateResponseTimeChart(data.logs);
+            updateCacheChart(data.metrics);
+            updateColumnTypesChart(data.logs);
+            updateMethodsChart(data.logs);
+
+            // Update logs table
+            updateLogsTable(data.logs);
+        }
+
+        function updateMetrics(metrics) {
+            document.getElementById('totalRequests').textContent = metrics.total_requests || '0';
+            document.getElementById('cacheHitRate').textContent =
+                `${((metrics.cache_hits / metrics.total_requests) * 100).toFixed(1)}%`;
+            document.getElementById('avgResponseTime').textContent =
+                `${metrics.avg_response_time.toFixed(2)}s`;
+            document.getElementById('totalRows').textContent =
+                metrics.total_rows.toLocaleString();
+
+            // Add change indicators (mock data for now)
+            document.getElementById('requestsChange').textContent = '+12% from last week';
+            document.getElementById('requestsChange').className = 'stat-change positive';
+        }
+
+        function updateUsageChart(dailyData) {
+            const ctx = document.getElementById('usageChart').getContext('2d');
+
+            if (charts.usage) charts.usage.destroy();
+
+            charts.usage = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dailyData.map(d => d.date),
+                    datasets: [{
+                        label: 'Requests',
+                        data: dailyData.map(d => d.requests),
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        tension: 0.3
+                    }, {
+                        label: 'Cache Hits',
+                        data: dailyData.map(d => d.cache_hits),
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateResponseTimeChart(logs) {
+            const ctx = document.getElementById('responseTimeChart').getContext('2d');
+
+            // Create histogram bins
+            const bins = [0, 2, 4, 6, 8, 10, 15, 20];
+            const cachedCounts = new Array(bins.length - 1).fill(0);
+            const llmCounts = new Array(bins.length - 1).fill(0);
+
+            // Separate logs by method (cached vs LLM)
+            logs.forEach(log => {
+                const time = log.total_time;
+                const isCached = log.method === 'cached' || log.cache_hit === true;
+
+                for (let i = 0; i < bins.length - 1; i++) {
+                    if (time >= bins[i] && time < bins[i + 1]) {
+                        if (isCached) {
+                            cachedCounts[i]++;
+                        } else {
+                            llmCounts[i]++;
+                        }
+                        break;
+                    }
+                }
+            });
+
+            if (charts.responseTime) charts.responseTime.destroy();
+
+            charts.responseTime = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: bins.slice(0, -1).map((b, i) => `${b}-${bins[i+1]}s`),
+                    datasets: [
+                        {
+                            label: 'Cached',
+                            data: cachedCounts,
+                            backgroundColor: '#10b981',
+                            stack: 'Stack 0'
+                        },
+                        {
+                            label: 'LLM Generated',
+                            data: llmCounts,
+                            backgroundColor: '#6366f1',
+                            stack: 'Stack 0'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            onClick: function(e, legendItem, legend) {
+                                // Default behavior - toggle visibility
+                                const index = legendItem.datasetIndex;
+                                const chart = legend.chart;
+                                const meta = chart.getDatasetMeta(index);
+                                meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
+                                chart.update();
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: true
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateCacheChart(metrics) {
+            const ctx = document.getElementById('cacheChart').getContext('2d');
+
+            if (charts.cache) charts.cache.destroy();
+
+            charts.cache = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Cache Hits', 'Cache Misses'],
+                    datasets: [{
+                        data: [metrics.cache_hits, metrics.total_requests - metrics.cache_hits],
+                        backgroundColor: ['#10b981', '#f59e0b']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        function updateColumnTypesChart(logs) {
+            const ctx = document.getElementById('columnTypesChart').getContext('2d');
+
+            // Count column occurrences
+            const columnCounts = {};
+            logs.forEach(log => {
+                if (log.column_names) {
+                    log.column_names.forEach(col => {
+                        columnCounts[col] = (columnCounts[col] || 0) + 1;
+                    });
+                }
+            });
+
+            // Sort and take top 10
+            const sorted = Object.entries(columnCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10);
+
+            if (charts.columnTypes) charts.columnTypes.destroy();
+
+            charts.columnTypes = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sorted.map(([col, _]) => col),
+                    datasets: [{
+                        label: 'Frequency',
+                        data: sorted.map(([_, count]) => count),
+                        backgroundColor: '#8b5cf6'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    scales: {
+                        x: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateMethodsChart(logs) {
+            const ctx = document.getElementById('methodsChart').getContext('2d');
+
+            // Count methods
+            const methodCounts = {};
+            logs.forEach(log => {
+                methodCounts[log.method] = (methodCounts[log.method] || 0) + 1;
+            });
+
+            if (charts.methods) charts.methods.destroy();
+
+            charts.methods = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(methodCounts),
+                    datasets: [{
+                        data: Object.values(methodCounts),
+                        backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ef4444']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+        }
+
+        function updateLogsTable(logs) {
+            const tbody = document.getElementById('logsTableBody');
+
+            if (!logs || logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="loading">No logs found</td></tr>';
+                return;
+            }
+
+            // Sort by timestamp descending and take first 20
+            const recentLogs = logs
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, 20);
+
+            tbody.innerHTML = recentLogs.map(log => `
+                <tr>
+                    <td>${new Date(log.timestamp).toLocaleString()}</td>
+                    <td>${log.method}</td>
+                    <td>${log.num_rows}</td>
+                    <td>${log.num_columns}</td>
+                    <td>${log.total_time.toFixed(2)}s</td>
+                    <td>
+                        <span class="${log.cache_hit ? 'cache-hit' : 'cache-miss'}">
+                            ${log.cache_hit ? 'HIT' : 'MISS'}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function showError(message) {
+            const container = document.querySelector('.dashboard-container');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = message;
+            container.insertBefore(errorDiv, container.firstChild);
+
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        // Event listeners
+        document.getElementById('refreshBtn').addEventListener('click', fetchLogs);
+        document.getElementById('startDate').addEventListener('change', fetchLogs);
+        document.getElementById('endDate').addEventListener('change', fetchLogs);
+        document.getElementById('timeGranularity').addEventListener('change', fetchLogs);
+
+        // Initial load
+        fetchLogs();
+        fetchCacheInfo();
+
+        // Auto-refresh every 30 seconds
+        setInterval(fetchLogs, 30000);
+        setInterval(fetchCacheInfo, 30000);
+    </script>
+</body>
+</html>

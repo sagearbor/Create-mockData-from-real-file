@@ -1,0 +1,222 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 5,
+      "columns": 4
+    },
+    "columns": [
+      {
+        "name": "id",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "name",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "age",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "salary",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 586,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "id": {
+      "name": "id",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 3.0,
+      "median": 3.0,
+      "std": 1.5811388300841898,
+      "min": 1.0,
+      "max": 5.0,
+      "q25": 2.0,
+      "q75": 4.0,
+      "skewness": 0.0,
+      "kurtosis": -1.2000000000000002,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "name": {
+      "name": "name",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "John Doe": 1,
+        "Jane Smith": 1,
+        "Bob Johnson": 1,
+        "Alice Brown": 1,
+        "Charlie Davis": 1
+      },
+      "preserve_values": true,
+      "avg_length": 10.6,
+      "min_length": 8,
+      "max_length": 13,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "name",
+      "clinical_context": {
+        "type": "full_name",
+        "suggested_values": [
+          "Carol Scott",
+          "Jason Garcia",
+          "Barbara Walker",
+          "Steven Walker",
+          "Donna Young",
+          "George Green",
+          "Hayden Lewis",
+          "Amanda Allen",
+          "Edward Rodriguez",
+          "Riley Jones",
+          "Angela Rivera",
+          "Gary King",
+          "James Rivera",
+          "Nicholas Johnson",
+          "Nicholas Thomas",
+          "Nancy Gonzalez",
+          "Sage Jones",
+          "Jamie Moore",
+          "John Scott",
+          "Casey Hall"
+        ],
+        "category": "personal"
+      },
+      "suggested_values": [
+        "Carol Scott",
+        "Jason Garcia",
+        "Barbara Walker",
+        "Steven Walker",
+        "Donna Young",
+        "George Green",
+        "Hayden Lewis",
+        "Amanda Allen",
+        "Edward Rodriguez",
+        "Riley Jones"
+      ],
+      "is_clinical": true
+    },
+    "age": {
+      "name": "age",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 35.0,
+      "median": 35.0,
+      "std": 5.70087712549569,
+      "min": 28.0,
+      "max": 42.0,
+      "q25": 31.0,
+      "q75": 39.0,
+      "skewness": 0.0,
+      "kurtosis": -1.7112426035502954,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "salary": {
+      "name": "salary",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 74000.0,
+      "median": 75000.0,
+      "std": 9380.83151964686,
+      "min": 60000.0,
+      "max": 85000.0,
+      "q25": 71000.0,
+      "q75": 79000.0,
+      "skewness": -0.6632238193448677,
+      "kurtosis": 0.6783316115702487,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null
+    }
+  },
+  "patterns": {
+    "name": {
+      "common_patterns": [],
+      "detected_format": null
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [
+        {
+          "column1": "age",
+          "column2": "salary",
+          "correlation": 0.9676701346587531
+        }
+      ],
+      "correlation_matrix": {
+        "id": {
+          "id": 1.0,
+          "age": -0.305085107923876,
+          "salary": -0.23596995186213462
+        },
+        "age": {
+          "id": -0.305085107923876,
+          "age": 1.0,
+          "salary": 0.9676701346587531
+        },
+        "salary": {
+          "id": -0.23596995186213462,
+          "age": 0.9676701346587531,
+          "salary": 1.0
+        }
+      }
+    },
+    "categorical_associations": {},
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.0005588531494140625
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T18:16:34.174262"
+}

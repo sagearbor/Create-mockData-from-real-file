@@ -1,0 +1,193 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 3,
+      "columns": 4
+    },
+    "columns": [
+      {
+        "name": "id",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "timestamp_col",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "datetime_col",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "value",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 635,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "id": {
+      "name": "id",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 2.0,
+      "median": 2.0,
+      "std": 1.0,
+      "min": 1.0,
+      "max": 3.0,
+      "q25": 1.5,
+      "q75": 2.5,
+      "skewness": 0.0,
+      "kurtosis": 0.0,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "timestamp_col": {
+      "name": "timestamp_col",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 3,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "2024-01-15 10:30:00": 1,
+        "2024-02-20 14:45:30": 1,
+        "2024-03-25 09:15:45": 1
+      },
+      "preserve_values": true,
+      "avg_length": 19.0,
+      "min_length": 19,
+      "max_length": 19,
+      "is_categorical": false,
+      "is_datetime_string": true,
+      "datetime_format": "%Y-%m-%d %H:%M:%S",
+      "has_numbers": true,
+      "has_special_chars": true,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "timestamp_col"
+    },
+    "datetime_col": {
+      "name": "datetime_col",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 3,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "2024-01-15T10:30:00Z": 1,
+        "2024-02-20T14:45:30Z": 1,
+        "2024-03-25T09:15:45Z": 1
+      },
+      "preserve_values": true,
+      "avg_length": 20.0,
+      "min_length": 20,
+      "max_length": 20,
+      "is_categorical": false,
+      "is_datetime_string": true,
+      "datetime_format": "%Y-%m-%d %H:%M:%S",
+      "has_numbers": true,
+      "has_special_chars": true,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "datetime_col"
+    },
+    "value": {
+      "name": "value",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 200.0,
+      "median": 200.0,
+      "std": 100.0,
+      "min": 100.0,
+      "max": 300.0,
+      "q25": 150.0,
+      "q75": 250.0,
+      "skewness": 0.0,
+      "kurtosis": 0.0,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null
+    }
+  },
+  "patterns": {
+    "timestamp_col": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_prefix": "2024-0",
+      "common_suffix": ":00"
+    },
+    "datetime_col": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_prefix": "2024-0",
+      "common_suffix": "00Z"
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [
+        {
+          "column1": "id",
+          "column2": "value",
+          "correlation": 1.0
+        }
+      ],
+      "correlation_matrix": {
+        "id": {
+          "id": 1.0,
+          "value": 1.0
+        },
+        "value": {
+          "id": 1.0,
+          "value": 1.0
+        }
+      }
+    },
+    "categorical_associations": [
+      {
+        "column1": "timestamp_col",
+        "column2": "datetime_col",
+        "association_strength": 0.6666666666666667
+      }
+    ],
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.0006055831909179688
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T19:59:07.072125"
+}

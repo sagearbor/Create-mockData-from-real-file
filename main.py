@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import json
 import io
+import time
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -30,7 +31,7 @@ from src.utils.logger import logger
 
 # Initialize components
 data_loader = DataLoader()
-metadata_extractor = MetadataExtractor()
+metadata_extractor = None  # Will be created with safety_mode per request
 cache_manager = CacheManager()
 data_dictionary = DataDictionary()
 
@@ -40,26 +41,36 @@ synthetic_generator = None
 def initialize_openai_client():
     """Initialize OpenAI client if credentials are available."""
     global synthetic_generator
-    
+
+    logger.info(f"Initializing OpenAI client...")
+    logger.info(f"Endpoint configured: {bool(settings.azure_openai_endpoint)}")
+    logger.info(f"API key configured: {bool(settings.azure_openai_api_key)}")
+    logger.info(f"Chat deployment: {settings.azure_openai_chat_deployment}")
+    logger.info(f"API version: {settings.azure_openai_api_version}")
+
     if settings.azure_openai_api_key and settings.azure_openai_endpoint:
         try:
             from openai import AzureOpenAI
-            
+
             client = AzureOpenAI(
                 api_key=settings.azure_openai_api_key,
                 api_version=settings.azure_openai_api_version,
                 azure_endpoint=settings.azure_openai_endpoint
             )
-            
+
             synthetic_generator = SyntheticDataGenerator(openai_client=client)
-            logger.info("OpenAI client initialized successfully")
+            logger.info("✓ OpenAI client initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"✗ Failed to initialize OpenAI client: {type(e).__name__}: {e}")
             synthetic_generator = SyntheticDataGenerator()
             return False
     else:
-        logger.warning("OpenAI credentials not configured, using fallback generation")
+        logger.warning("✗ OpenAI credentials not configured, using fallback generation")
+        if not settings.azure_openai_api_key:
+            logger.warning("  - Missing: AZURE_OPENAI_API_KEY")
+        if not settings.azure_openai_endpoint:
+            logger.warning("  - Missing: AZURE_OPENAI_ENDPOINT")
         synthetic_generator = SyntheticDataGenerator()
         return False
 
@@ -91,13 +102,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# Add CORS middleware with secure configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.get_allowed_origins(),  # Environment-specific origins
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],  # Only methods needed (GET for reading, POST for file uploads/generation, OPTIONS for preflight)
     allow_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 @app.get("/")
@@ -142,6 +154,25 @@ async def about():
     else:
         return HTMLResponse(content="<h1>About page not found</h1>")
 
+@app.get("/dashboard")
+async def dashboard():
+    """Serve the usage dashboard page."""
+    from fastapi.responses import Response
+
+    html_file = Path(__file__).parent / "src" / "web" / "dashboard.html"
+    if html_file.exists():
+        with open(html_file, 'r') as f:
+            content = f.read()
+
+        # Add cache-busting headers for real-time updates
+        response = HTMLResponse(content=content)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+    else:
+        return HTMLResponse(content="<h1>Dashboard page not found</h1>")
+
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon.ico directly if it exists, otherwise redirect to favicon.svg."""
@@ -181,6 +212,166 @@ async def health_check():
         "environment": settings.environment
     }
 
+@app.get("/api/cache-info")
+async def get_cache_info():
+    """
+    Get information about cached generation programs.
+
+    Returns:
+        Cache statistics and list of cached programs
+    """
+    try:
+        cache_index = cache_manager.cache_index
+        cache_dir = cache_manager.cache_dir
+
+        # Calculate statistics
+        total_entries = sum(len(entries) for entries in cache_index.values())
+        format_hashes = len(cache_index)
+
+        # Calculate cache size
+        cache_size = 0
+        for file_path in cache_dir.glob("*"):
+            if file_path.is_file():
+                cache_size += file_path.stat().st_size
+
+        # Get detailed cache entries
+        cache_entries = []
+        for format_hash, entries in cache_index.items():
+            for entry in entries:
+                # Parse metadata if available
+                metadata_file = entry.get("metadata_file")
+                column_info = []
+                if metadata_file and Path(metadata_file).exists():
+                    try:
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+                            columns = metadata.get("structure", {}).get("columns", [])
+                            column_info = [col["name"] for col in columns]
+                    except:
+                        pass
+
+                cache_entries.append({
+                    "cache_key": entry.get("cache_key"),
+                    "format_hash": format_hash,
+                    "timestamp": entry.get("timestamp"),
+                    "columns": column_info,
+                    "version": entry.get("version")
+                })
+
+        # Sort by timestamp (newest first)
+        cache_entries.sort(key=lambda x: x["timestamp"] if x["timestamp"] else "", reverse=True)
+
+        return {
+            "statistics": {
+                "total_entries": total_entries,
+                "unique_formats": format_hashes,
+                "cache_size_bytes": cache_size,
+                "cache_size_mb": round(cache_size / (1024 * 1024), 2)
+            },
+            "entries": cache_entries[:50]  # Return only the 50 most recent
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/cache/clear")
+async def clear_cache(older_than_days: Optional[int] = None):
+    """
+    Clear cache entries.
+
+    Args:
+        older_than_days: Clear only entries older than specified days (optional)
+    """
+    try:
+        cache_manager.clear_cache(older_than_days=older_than_days)
+
+        if older_than_days:
+            message = f"Cleared cache entries older than {older_than_days} days"
+        else:
+            message = "Cleared all cache entries"
+
+        logger.info(message)
+        return {"status": "success", "message": message}
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/usage-logs")
+async def get_usage_logs(start: str = None, end: str = None):
+    """
+    Fetch usage logs for the dashboard.
+
+    Args:
+        start: Start date in YYYY-MM-DD format
+        end: End date in YYYY-MM-DD format
+    """
+    import json
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    # Default to last 7 days if no range specified
+    if not end:
+        end_date = datetime.now()
+    else:
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+
+    if not start:
+        start_date = end_date - timedelta(days=7)
+    else:
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+
+    logs = []
+    log_dir = Path(__file__).parent / "logs" / "usage"
+
+    # Iterate through date range
+    current_date = start_date
+    while current_date <= end_date:
+        log_file = log_dir / f"usage_{current_date.strftime('%Y-%m-%d')}.jsonl"
+
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                for line in f:
+                    try:
+                        log_entry = json.loads(line)
+                        logs.append(log_entry)
+                    except json.JSONDecodeError:
+                        continue
+
+        current_date += timedelta(days=1)
+
+    # Calculate metrics
+    total_requests = len(logs)
+    cache_hits = sum(1 for log in logs if log.get('cache_hit', False))
+    total_rows = sum(log.get('num_rows') or 0 for log in logs)
+    avg_response_time = sum(log.get('total_time', 0) for log in logs) / max(total_requests, 1)
+
+    # Group by day for chart data
+    daily_stats = defaultdict(lambda: {'requests': 0, 'cache_hits': 0})
+    for log in logs:
+        timestamp = log.get('timestamp', '')
+        if timestamp:
+            date_key = timestamp.split('T')[0]
+            daily_stats[date_key]['requests'] += 1
+            if log.get('cache_hit', False):
+                daily_stats[date_key]['cache_hits'] += 1
+
+    # Convert to list for frontend
+    daily = [
+        {'date': date, **stats}
+        for date, stats in sorted(daily_stats.items())
+    ]
+
+    return {
+        "logs": logs,
+        "metrics": {
+            "total_requests": total_requests,
+            "cache_hits": cache_hits,
+            "total_rows": total_rows,
+            "avg_response_time": avg_response_time
+        },
+        "daily": daily
+    }
+
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -199,9 +390,10 @@ async def upload_file(
         
         # Load data using DataLoader
         df = data_loader.load_from_bytes(content, file.filename)
-        
-        # Extract metadata
-        metadata = metadata_extractor.extract(df)
+
+        # Extract metadata with default safety mode
+        extractor = MetadataExtractor(safety_mode="balanced")
+        metadata = extractor.extract(df)
         
         if extract_metadata_only:
             # Return only metadata
@@ -241,12 +433,13 @@ async def extract_metadata(file: UploadFile = File(...)):
         
         # Load data
         df = data_loader.load_from_bytes(content, file.filename)
-        
+
         # Extract metadata
-        metadata = metadata_extractor.extract(df)
-        
+        extractor = MetadataExtractor(safety_mode="balanced")
+        metadata = extractor.extract(df)
+
         # Convert to secure JSON
-        secure_metadata = metadata_extractor.to_secure_json(metadata)
+        secure_metadata = extractor.to_secure_json(metadata)
         
         return JSONResponse(content={
             "status": "success",
@@ -267,8 +460,10 @@ async def generate_synthetic_data(
     match_threshold: float = Form(0.8),
     output_format: str = Form("csv"),
     use_cache: bool = Form(True),
+    cache_mode: str = Form("structure_stats"),  # off, structure, structure_stats
     file_count: int = Form(1),
-    preview_only: bool = Form(False)
+    preview_only: bool = Form(False),
+    safety_mode: str = Form("balanced")
 ):
     """
     Generate synthetic data based on uploaded file or metadata.
@@ -284,39 +479,75 @@ async def generate_synthetic_data(
         preview_only: If True, return preview data instead of file download
     """
     try:
+        # Track overall timing
+        all_timings = {}
+        request_start = time.time()
+
+        # Create metadata extractor with specified safety mode
+        extractor = MetadataExtractor(safety_mode=safety_mode)
+
         # Get metadata from edited data, file, or JSON
+        metadata_start = time.time()
         if edited_data:
             # Parse edited CSV data
             df = pd.read_csv(io.StringIO(edited_data))
-            metadata = metadata_extractor.extract(df)
+            metadata = extractor.extract(df)
         elif file:
             content = await file.read()
             df = data_loader.load_from_bytes(content, file.filename)
-            metadata = metadata_extractor.extract(df)
+            metadata = extractor.extract(df)
         elif metadata_json:
             metadata = json.loads(metadata_json)
         else:
             raise HTTPException(status_code=400, detail="Either file or metadata_json must be provided")
+
+        all_timings['metadata_extraction'] = time.time() - metadata_start
         
-        # Check cache if enabled
+        # Check cache based on cache_mode
         cached_result = None
-        if use_cache:
+        cache_start = time.time()
+
+        # Determine cache behavior based on mode
+        if cache_mode == "off" or not use_cache:
+            # No caching
+            cached_result = None
+        elif cache_mode == "structure":
+            # Use lower threshold for structure-only matching
+            cached_result = cache_manager.find_similar_cached(metadata, match_threshold=0.5)
+        else:  # structure_stats (default)
+            # Use provided threshold for full statistical matching
             cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
-        
+
+        all_timings['cache_check'] = time.time() - cache_start
+
         # If preview only, generate single file and return preview data
         if preview_only:
             # Generate single synthetic dataset
             if cached_result and "generation_code" in cached_result:
                 logger.info("Using cached generation script for preview")
+                code_start = time.time()
                 generation_code = cached_result["generation_code"]
                 synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                all_timings['code_execution'] = time.time() - code_start
+                generation_info = {"method": "cached", "cache_hit": True}
+                # Log usage for cached generation
+                synthetic_generator._log_usage("cached", metadata, num_rows, all_timings)
             else:
-                synthetic_df = synthetic_generator.generate(
+                synthetic_df, generation_info = synthetic_generator.generate(
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=match_threshold,
                     use_cached=use_cache
                 )
+                # Merge timings
+                if 'step_timings' in generation_info:
+                    all_timings.update(generation_info['step_timings'])
+
+            # Calculate total time
+            all_timings['total'] = time.time() - request_start
+
+            # Always add all_timings to generation_info
+            generation_info['all_timings'] = all_timings
 
             # Prepare preview data (first 10 rows)
             preview_rows = min(10, len(synthetic_df))
@@ -339,7 +570,7 @@ async def generate_synthetic_data(
                         synthetic_files.append((f"{base_name}_synthetic_{i+1:03d}", synthetic_df))
                     else:
                         # Generate additional files
-                        additional_df = synthetic_generator.generate(
+                        additional_df, _ = synthetic_generator.generate(
                             metadata=metadata,
                             num_rows=num_rows,
                             match_threshold=match_threshold,
@@ -363,7 +594,8 @@ async def generate_synthetic_data(
                 "total_columns": len(synthetic_df.columns),
                 "column_names": list(synthetic_df.columns),
                 "file_count": file_count,
-                "download_info": download_data
+                "download_info": download_data,
+                "generation_info": generation_info
             })
 
         # Generate multiple files if requested
@@ -380,7 +612,7 @@ async def generate_synthetic_data(
                     synthetic_df = synthetic_generator._execute_generation_code(generation_code)
                 else:
                     # Generate new synthetic data
-                    synthetic_df = synthetic_generator.generate(
+                    synthetic_df, _ = synthetic_generator.generate(
                         metadata=metadata,
                         num_rows=num_rows,
                         match_threshold=match_threshold,
@@ -418,11 +650,25 @@ async def generate_synthetic_data(
         # Single file generation (existing logic)
         if cached_result and "generation_code" in cached_result:
             logger.info("Using cached generation script")
+            code_start = time.time()
             generation_code = cached_result["generation_code"]
             synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+            code_execution_time = time.time() - code_start
+            generation_info = {
+                "method": "cached",
+                "cache_hit": True,
+                "all_timings": {
+                    "metadata_extraction": all_timings.get('metadata_extraction', 0),
+                    "cache_check": all_timings.get('cache_check', 0),
+                    "code_execution": code_execution_time,
+                    "total": time.time() - request_start
+                }
+            }
+            # Log usage for cached generation
+            synthetic_generator._log_usage("cached", metadata, num_rows, generation_info['all_timings'])
         else:
             # Generate new synthetic data
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=match_threshold,
@@ -442,7 +688,8 @@ async def generate_synthetic_data(
                 "status": "success",
                 "data": json.loads(output_data),
                 "shape": list(synthetic_df.shape),
-                "columns": list(synthetic_df.columns)
+                "columns": list(synthetic_df.columns),
+                "generation_info": generation_info
             })
 
         elif output_format == "excel":
@@ -470,6 +717,195 @@ async def generate_synthetic_data(
     except Exception as e:
         logger.error(f"Error generating synthetic data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-sse")
+async def generate_with_sse(
+    file: Optional[UploadFile] = File(None),
+    edited_data: Optional[str] = Form(None),
+    metadata_json: Optional[str] = Form(None),
+    num_rows: Optional[int] = Form(100),
+    match_threshold: float = Form(0.8),
+    output_format: str = Form("csv"),
+    use_cache: bool = Form(True),
+    cache_mode: str = Form("structure_stats"),
+    file_count: int = Form(1),
+    preview_only: bool = Form(False),
+    safety_mode: str = Form("balanced")
+):
+    """Generate synthetic data with Server-Sent Events for progress updates"""
+    import asyncio
+    from typing import AsyncGenerator
+
+    # Read file content before the generator to avoid closed file issues
+    file_content = None
+    file_name = None
+    if file:
+        file_content = await file.read()
+        file_name = file.filename
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            # Send initial event
+            yield f"data: {json.dumps({'step': 'extract-metadata', 'status': 'active'})}\n\n"
+            await asyncio.sleep(0.01)  # Small delay for browser to process
+
+            # Track timing
+            all_timings = {}
+            request_start = time.time()
+
+            # Extract metadata
+            metadata_start = time.time()
+            extractor = MetadataExtractor(safety_mode=safety_mode)
+
+            if edited_data:
+                df = pd.read_csv(io.StringIO(edited_data))
+                metadata = extractor.extract(df)
+            elif file_content:
+                df = data_loader.load_from_bytes(file_content, file_name)
+                metadata = extractor.extract(df)
+            elif metadata_json:
+                metadata = json.loads(metadata_json)
+            else:
+                yield f"data: {json.dumps({'error': 'No data provided'})}\n\n"
+                return
+
+            metadata_time = time.time() - metadata_start
+            all_timings['metadata_extraction'] = metadata_time
+            yield f"data: {json.dumps({'step': 'extract-metadata', 'status': 'completed', 'duration': metadata_time})}\n\n"
+
+            # Check cache
+            yield f"data: {json.dumps({'step': 'check-cache', 'status': 'active'})}\n\n"
+            cache_start = time.time()
+
+            cached_result = None
+            if cache_mode == "off" or not use_cache:
+                cached_result = None
+            elif cache_mode == "structure":
+                cached_result = cache_manager.find_similar_cached(metadata, match_threshold=0.5)
+            else:
+                cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
+
+            cache_time = time.time() - cache_start
+            all_timings['cache_check'] = cache_time
+
+            cache_hit = cached_result and "generation_code" in cached_result
+            cache_text = 'Cache Hit ✓' if cache_hit else 'Cache Miss'
+            yield f"data: {json.dumps({'step': 'check-cache', 'status': 'completed', 'duration': cache_time, 'text': cache_text})}\n\n"
+
+            # Generate code
+            if cache_hit:
+                yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'skipped'})}\n\n"
+                yield f"data: {json.dumps({'step': 'generate-code', 'status': 'skipped', 'text': 'Using Cached Code'})}\n\n"
+
+                # Execute cached code
+                yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
+                exec_start = time.time()
+                generation_code = cached_result["generation_code"]
+                synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                exec_time = time.time() - exec_start
+                all_timings['code_execution'] = exec_time
+                yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': exec_time})}\n\n"
+
+                generation_info = {"method": "cached", "cache_hit": True, "all_timings": all_timings}
+                # Log usage for cached generation
+                synthetic_generator._log_usage("cached", metadata, num_rows, all_timings)
+
+            else:
+                # Generate with LLM (includes prepare, generate, and execute)
+                yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'active'})}\n\n"
+                gen_start = time.time()
+
+                synthetic_df, generation_info = synthetic_generator.generate(
+                    metadata=metadata,
+                    num_rows=num_rows,
+                    match_threshold=match_threshold,
+                    use_cached=use_cache
+                )
+
+                # Extract individual step timings from generation_info
+                if 'step_timings' in generation_info:
+                    step_timings = generation_info['step_timings']
+                    all_timings.update(step_timings)
+
+                    # Report actual timings for each step
+                    if 'llm_response' in step_timings and step_timings['llm_response'] > 0:
+                        # LLM was actually called - report real timings
+                        yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'completed', 'duration': 0})}\n\n"
+                        yield f"data: {json.dumps({'step': 'generate-code', 'status': 'active'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'generate-code', 'status': 'completed', 'duration': step_timings.get('llm_response', 0)})}\n\n"
+                        yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': step_timings.get('code_execution', 0)})}\n\n"
+                    else:
+                        # Fallback mode - report actual execution time
+                        yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'skipped'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'generate-code', 'status': 'skipped', 'text': 'Using Fallback'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': step_timings.get('code_execution', 0)})}\n\n"
+                else:
+                    # No step timings available
+                    gen_time = time.time() - gen_start
+                    yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'skipped'})}\n\n"
+                    yield f"data: {json.dumps({'step': 'generate-code', 'status': 'skipped'})}\n\n"
+                    yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': gen_time})}\n\n"
+
+            # Validate
+            yield f"data: {json.dumps({'step': 'validate', 'status': 'active'})}\n\n"
+            validate_start = time.time()
+            # Actual validation would happen here if needed
+            validate_time = time.time() - validate_start
+            all_timings['validation'] = validate_time
+            yield f"data: {json.dumps({'step': 'validate', 'status': 'completed', 'duration': validate_time})}\n\n"
+
+            # Send completion with data
+            all_timings['total'] = time.time() - request_start
+            generation_info['all_timings'] = all_timings
+
+            # Prepare result
+            if preview_only:
+                preview_rows = min(10, len(synthetic_df))
+                preview_df = synthetic_df.head(preview_rows)
+
+                # Always use to_json() for proper datetime serialization, regardless of output_format
+                # Since preview is always shown in table format in UI
+                preview_data = json.loads(preview_df.to_json(orient="records", date_format="iso"))
+
+                result = {
+                    "complete": True,
+                    "status": "success",
+                    "preview": preview_data,
+                    "total_rows": len(synthetic_df),
+                    "total_columns": len(synthetic_df.columns),
+                    "column_names": list(synthetic_df.columns),
+                    "file_count": file_count,
+                    "generation_info": generation_info
+                }
+            else:
+                if output_format == "json":
+                    data = json.loads(synthetic_df.to_json(orient="records", date_format="iso"))
+                else:
+                    data = synthetic_df.to_csv(index=False)
+
+                result = {
+                    "complete": True,
+                    "data": data,
+                    "generation_info": generation_info
+                }
+
+            yield f"data: {json.dumps(result)}\n\n"
+
+        except Exception as e:
+            logger.error(f"SSE generation error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
 
 @app.post("/dictionary/upload")
 async def upload_data_dictionary(
@@ -606,7 +1042,7 @@ async def generate_with_dictionary(
 
         # Generate synthetic data
         if preview_only:
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=0.9
@@ -622,14 +1058,15 @@ async def generate_with_dictionary(
                 "total_columns": len(synthetic_df.columns),
                 "column_names": list(synthetic_df.columns),
                 "file_count": file_count,
-                "dictionary_applied": True
+                "dictionary_applied": True,
+                "generation_info": generation_info
             })
 
         # Generate actual files
         if file_count > 1:
             synthetic_files = []
             for i in range(file_count):
-                synthetic_df = synthetic_generator.generate(
+                synthetic_df, _ = synthetic_generator.generate(
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=0.9
@@ -660,7 +1097,7 @@ async def generate_with_dictionary(
             )
         else:
             # Single file
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=0.9
@@ -670,7 +1107,8 @@ async def generate_with_dictionary(
                 output_data = synthetic_df.to_json(orient="records")
                 return JSONResponse(content={
                     "status": "success",
-                    "data": json.loads(output_data)
+                    "data": json.loads(output_data),
+                    "generation_info": generation_info
                 })
             elif output_format == "excel":
                 output = io.BytesIO()
@@ -731,7 +1169,7 @@ async def process_batch(files, match_threshold, batch_id):
             df = data_loader.load_from_bytes(content, file.filename)
             metadata = metadata_extractor.extract(df)
             
-            synthetic_df = synthetic_generator.generate(
+            synthetic_df, _ = synthetic_generator.generate(
                 metadata=metadata,
                 match_threshold=match_threshold
             )

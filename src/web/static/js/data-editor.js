@@ -161,7 +161,14 @@ function displayDataTable(data) {
     
     // Show the editor section
     dataEditorSection.style.display = 'block';
-    document.getElementById('configSection').style.display = 'block';
+    if (dataEditorSection.tagName === 'DETAILS') {
+        dataEditorSection.open = true;
+    }
+    // Config section is always visible, ensure it's open
+    const configDetails = document.getElementById('configSection');
+    if (configDetails) {
+        configDetails.open = true;
+    }
 }
 
 // Edit cell

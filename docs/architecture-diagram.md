@@ -11,7 +11,7 @@ graph TB
 
     subgraph "Metadata Extraction - No PHI Exposure"
         B --> C[Metadata Extractor ✅]
-        C --> D[Statistical Analysis ⚠️<br/>- Column Types 🔧<br/>- Distributions ✅<br/>- Correlations ⚠️<br/>- Patterns ⚠️]
+        C --> D[Statistical Analysis ✅<br/>- Column Types ✅<br/>- Distributions ✅<br/>- Correlations ⚠️<br/>- Patterns ✅]
         D --> E[Secure JSON Metadata ✅<br/>NO actual data values]
         VAL -.-> C
     end
@@ -20,14 +20,14 @@ graph TB
         E --> F{Cache Check ⚠️}
         F -->|Cache Hit| G[Reuse Existing<br/>Generation Script ⚠️]
         F -->|Cache Miss| H[Send Metadata to LLM ✅<br/>ONLY statistics, NO PHI]
-        H --> I[LLM Creates Python Code ⚠️<br/>Needs Domain Knowledge]
-        REF[Clinical Reference Library<br/>🚧 PLANNED] -.-> I
+        H --> I[LLM Creates Python Code ✅<br/>Enhanced Pattern Generation]
+        REF[Reference Data Library ✅<br/>Names, Cities, Categories] --> I
     end
 
     subgraph "Synthetic Data Creation"
         G --> J[Execute Python Code ✅]
         I --> J
-        J --> K[Generate Synthetic Data ⚠️<br/>Date Issues Present]
+        J --> K[Generate Synthetic Data ✅<br/>Pattern Detection Fixed]
         K --> L[Validate Against<br/>Original Metadata 🚧]
         L -->|Valid| M[Return Synthetic Data ✅<br/>Multi-file ZIP Support ✅]
         L -->|Invalid| N[Regenerate with<br/>Stricter Parameters ⚠️]
@@ -43,16 +43,16 @@ graph TB
     style J fill:#90EE90
     style M fill:#90EE90
 
-    style D fill:#FFE4B5
+    style D fill:#90EE90
     style F fill:#FFE4B5
     style G fill:#FFE4B5
-    style I fill:#FFE4B5
-    style K fill:#FFE4B5
+    style I fill:#90EE90
+    style K fill:#90EE90
     style N fill:#FFE4B5
 
     style DD fill:#FFB6C1
     style VAL fill:#FFB6C1
-    style REF fill:#FFB6C1
+    style REF fill:#90EE90
     style L fill:#FFB6C1
 
     %% Legend
@@ -82,9 +82,17 @@ graph TB
 
 The system detects column types through:
 - Pandas dtype inference
-- Pattern matching (dates, emails, phones)
+- Enhanced pattern matching:
+  - ID patterns with prefixes (C001, INV-2024)
+  - Email addresses with domain validation
+  - Phone numbers with format preservation
+  - Datetime patterns including timestamps
+  - Currency values with proper decimals
 - Statistical analysis (numeric distributions)
-- Value frequency analysis (categorical detection)
+- Smart categorical detection with safety modes:
+  - Strict: Maximum privacy
+  - Balanced: Preserves common non-sensitive categories
+  - Permissive: Maximum realism
 
 ## Caching Mechanism
 
@@ -96,13 +104,18 @@ When you upload a file:
 
 ## Known Limitations
 
-- **Date Detection**: Currently relies on pandas inference which may miss custom date formats
-- **Semantic Understanding**: The system doesn't understand domain context (e.g., "medication" columns)
 - **Complex Relationships**: Multi-column dependencies may not be fully preserved
+- **Large Files**: Memory-based processing (streaming support planned)
+
+## Recent Improvements (September 2025)
+
+- ✅ Enhanced pattern detection for common data types
+- ✅ Smart categorical value preservation with safety modes
+- ✅ Reference data library for realistic value generation
+- ✅ Currency and datetime format detection
 
 ## Future Improvements
 
-- Domain-specific value lists (medications, diagnoses, etc.)
-- Better date/time format detection
-- Semantic column understanding
+- Domain-specific medical value lists (medications, diagnoses)
 - Multi-column relationship preservation
+- Streaming support for large files

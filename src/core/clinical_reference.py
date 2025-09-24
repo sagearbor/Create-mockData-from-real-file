@@ -10,7 +10,7 @@ class ClinicalReferenceLibrary:
     """Provides clinical reference data for realistic synthetic data generation."""
 
     def __init__(self):
-        """Initialize with common clinical reference data."""
+        """Initialize with common clinical and general reference data."""
         self.medications = self._load_medications()
         self.lab_tests = self._load_lab_tests()
         self.units = self._load_units()
@@ -18,6 +18,18 @@ class ClinicalReferenceLibrary:
         self.procedures = self._load_procedures()
         self.body_sites = self._load_body_sites()
         self.clinical_terms = self._load_clinical_terms()
+        # Add general categorical reference data
+        self.gender_values = self._load_gender_values()
+        self.ethnicity_values = self._load_ethnicity_values()
+        self.states = self._load_states()
+        self.countries = self._load_countries()
+        self.marital_status = self._load_marital_status()
+        self.employment_status = self._load_employment_status()
+        self.education_levels = self._load_education_levels()
+        self.blood_types = self._load_blood_types()
+        self.cities = self._load_cities()
+        self.first_names = self._load_first_names()
+        self.last_names = self._load_last_names()
 
     def _load_medications(self) -> List[str]:
         """Load common medication names."""
@@ -187,6 +199,125 @@ class ClinicalReferenceLibrary:
             "glasgow_coma": ["3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
         }
 
+    def _load_gender_values(self) -> List[Dict[str, List[str]]]:
+        """Load common gender value variations."""
+        return [
+            {"short": ["M", "F"], "long": ["Male", "Female"]},
+            {"short": ["M", "F", "O"], "long": ["Male", "Female", "Other"]},
+            {"numeric": ["0", "1"], "meaning": ["Female", "Male"]}  # Common in some systems
+        ]
+
+    def _load_ethnicity_values(self) -> List[str]:
+        """Load common ethnicity categories."""
+        return [
+            "White", "Black or African American", "Asian",
+            "Hispanic or Latino", "Native American", "Pacific Islander",
+            "Middle Eastern", "Mixed/Multiple", "Other", "Prefer not to say"
+        ]
+
+    def _load_states(self) -> Dict[str, str]:
+        """Load US state codes and names."""
+        return {
+            "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+            "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+            "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+            "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+            "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+            "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+            "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+            "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+            "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+            "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+            "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+            "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+            "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"
+        }
+
+    def _load_countries(self) -> List[str]:
+        """Load common country names and codes."""
+        return [
+            "USA", "United States", "Canada", "Mexico", "United Kingdom", "UK",
+            "Germany", "France", "Spain", "Italy", "Japan", "China", "India",
+            "Australia", "Brazil", "Russia", "South Korea", "Netherlands",
+            "Switzerland", "Sweden", "Norway", "Denmark", "Finland", "Belgium"
+        ]
+
+    def _load_marital_status(self) -> List[str]:
+        """Load marital status options."""
+        return [
+            "Single", "Married", "Divorced", "Widowed", "Separated",
+            "Domestic Partnership", "Civil Union"
+        ]
+
+    def _load_employment_status(self) -> List[str]:
+        """Load employment status options."""
+        return [
+            "Employed Full-time", "Employed Part-time", "Self-employed",
+            "Unemployed", "Retired", "Student", "Disabled", "Homemaker"
+        ]
+
+    def _load_education_levels(self) -> List[str]:
+        """Load education level options."""
+        return [
+            "No formal education", "Elementary", "Middle School", "High School",
+            "Some College", "Associate Degree", "Bachelor's Degree",
+            "Master's Degree", "Doctorate", "Professional Degree"
+        ]
+
+    def _load_blood_types(self) -> List[str]:
+        """Load blood type options."""
+        return ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+
+    def _load_cities(self) -> List[str]:
+        """Load common US city names."""
+        return [
+            "New York", "Los Angeles", "Chicago", "Houston", "Phoenix",
+            "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose",
+            "Austin", "Jacksonville", "Fort Worth", "Columbus", "Indianapolis",
+            "Charlotte", "San Francisco", "Seattle", "Denver", "Washington",
+            "Boston", "El Paso", "Nashville", "Detroit", "Oklahoma City",
+            "Portland", "Las Vegas", "Memphis", "Louisville", "Baltimore",
+            "Milwaukee", "Albuquerque", "Tucson", "Fresno", "Mesa",
+            "Sacramento", "Atlanta", "Kansas City", "Colorado Springs", "Miami",
+            "Raleigh", "Omaha", "Long Beach", "Virginia Beach", "Oakland",
+            "Minneapolis", "Tulsa", "Arlington", "Tampa", "New Orleans"
+        ]
+
+    def _load_first_names(self) -> Dict[str, List[str]]:
+        """Load common first names."""
+        return {
+            "male": [
+                "James", "John", "Robert", "Michael", "William", "David", "Richard",
+                "Joseph", "Thomas", "Christopher", "Charles", "Daniel", "Matthew",
+                "Anthony", "Mark", "Donald", "Steven", "Kenneth", "Paul", "Joshua",
+                "Kevin", "Brian", "George", "Edward", "Ronald", "Timothy", "Jason",
+                "Jeffrey", "Ryan", "Jacob", "Gary", "Nicholas", "Eric", "Jonathan"
+            ],
+            "female": [
+                "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Barbara",
+                "Susan", "Jessica", "Sarah", "Karen", "Nancy", "Lisa", "Betty",
+                "Margaret", "Sandra", "Ashley", "Kimberly", "Emily", "Donna",
+                "Michelle", "Carol", "Amanda", "Dorothy", "Melissa", "Deborah",
+                "Stephanie", "Rebecca", "Laura", "Sharon", "Cynthia", "Amy", "Angela"
+            ],
+            "neutral": [
+                "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Jamie",
+                "Avery", "Cameron", "Quinn", "Blake", "Hayden", "Parker", "Sage"
+            ]
+        }
+
+    def _load_last_names(self) -> List[str]:
+        """Load common last names."""
+        return [
+            "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+            "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez",
+            "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin",
+            "Lee", "Perez", "Thompson", "White", "Harris", "Sanchez", "Clark",
+            "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King",
+            "Wright", "Scott", "Torres", "Nguyen", "Hill", "Flores", "Green",
+            "Adams", "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell"
+        ]
+
     def get_random_medications(self, n: int = 1) -> List[str]:
         """Get random medication names."""
         return random.sample(self.medications, min(n, len(self.medications)))
@@ -212,15 +343,125 @@ class ClinicalReferenceLibrary:
 
     def detect_clinical_column_type(self, column_name: str) -> Optional[Dict[str, Any]]:
         """
-        Detect if a column name represents clinical data and suggest appropriate values.
+        Detect if a column name represents clinical or categorical data and suggest appropriate values.
 
         Args:
             column_name: Name of the column
 
         Returns:
-            Dictionary with detected type and suggested values, or None if not clinical
+            Dictionary with detected type and suggested values, or None if not detected
         """
         col_lower = column_name.lower()
+
+        # Gender-related
+        gender_keywords = ['gender', 'sex', 'male_female', 'm_f']
+        if any(keyword in col_lower for keyword in gender_keywords):
+            return {
+                "type": "gender",
+                "suggested_values": ["M", "F"],
+                "alternate_values": ["Male", "Female"],
+                "category": "demographic"
+            }
+
+        # Ethnicity-related
+        ethnicity_keywords = ['ethnicity', 'race', 'ethnic']
+        if any(keyword in col_lower for keyword in ethnicity_keywords):
+            return {
+                "type": "ethnicity",
+                "suggested_values": self.ethnicity_values[:10],
+                "category": "demographic"
+            }
+
+        # State-related
+        state_keywords = ['state', 'province', 'region']
+        if any(keyword in col_lower for keyword in state_keywords):
+            return {
+                "type": "state",
+                "suggested_values": list(self.states.keys())[:20],  # State codes
+                "alternate_values": list(self.states.values())[:20],  # State names
+                "category": "geographic"
+            }
+
+        # Country-related
+        country_keywords = ['country', 'nation', 'nationality']
+        if any(keyword in col_lower for keyword in country_keywords):
+            return {
+                "type": "country",
+                "suggested_values": self.countries[:10],
+                "category": "geographic"
+            }
+
+        # Marital status-related
+        marital_keywords = ['marital', 'marriage', 'married']
+        if any(keyword in col_lower for keyword in marital_keywords):
+            return {
+                "type": "marital_status",
+                "suggested_values": self.marital_status,
+                "category": "demographic"
+            }
+
+        # Employment-related
+        employment_keywords = ['employment', 'employed', 'job_status', 'work_status']
+        if any(keyword in col_lower for keyword in employment_keywords):
+            return {
+                "type": "employment_status",
+                "suggested_values": self.employment_status,
+                "category": "demographic"
+            }
+
+        # Education-related
+        education_keywords = ['education', 'degree', 'schooling', 'qualification']
+        if any(keyword in col_lower for keyword in education_keywords):
+            return {
+                "type": "education_level",
+                "suggested_values": self.education_levels,
+                "category": "demographic"
+            }
+
+        # City-related
+        city_keywords = ['city', 'town', 'location', 'place', 'municipality']
+        if any(keyword in col_lower for keyword in city_keywords):
+            return {
+                "type": "city",
+                "suggested_values": self.cities[:20],
+                "category": "geographic"
+            }
+
+        # Name-related
+        name_keywords = ['name', 'firstname', 'first_name', 'lastname', 'last_name', 'full_name']
+        if any(keyword in col_lower for keyword in name_keywords):
+            # Determine if it's first, last, or full name
+            if 'first' in col_lower:
+                return {
+                    "type": "first_name",
+                    "suggested_values": (
+                        self.first_names.get("male", [])[:10] +
+                        self.first_names.get("female", [])[:10]
+                    ),
+                    "category": "personal"
+                }
+            elif 'last' in col_lower:
+                return {
+                    "type": "last_name",
+                    "suggested_values": self.last_names[:20],
+                    "category": "personal"
+                }
+            else:
+                # Full name - combine first and last
+                full_names = []
+                for _ in range(20):
+                    first = random.choice(
+                        self.first_names.get("male", []) +
+                        self.first_names.get("female", []) +
+                        self.first_names.get("neutral", [])
+                    )
+                    last = random.choice(self.last_names)
+                    full_names.append(f"{first} {last}")
+                return {
+                    "type": "full_name",
+                    "suggested_values": full_names,
+                    "category": "personal"
+                }
 
         # Medication-related
         medication_keywords = ['medication', 'drug', 'medicine', 'rx', 'prescription', 'med']

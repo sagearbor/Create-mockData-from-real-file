@@ -16,16 +16,23 @@
             <h1 class="nav-brand">🧬 BYOD Synthetic Data Generator</h1>
             <div class="nav-links">
                 <a href="/" class="active">Home</a>
-                <a href="/about">About</a>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-btn">
+                        Info
+                        <svg class="dropdown-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="nav-dropdown-content">
+                        <a href="/about">About</a>
+                        <a href="/dashboard">Usage Dashboard</a>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>
 
     <div class="container">
-        <header>
-            <h1>🔐 BYOD Synthetic Data Generator</h1>
-            <p class="tagline">Generate privacy-safe synthetic data that preserves statistical properties</p>
-        </header>
 
         <main>
             <!-- Dual Upload Section -->
@@ -33,7 +40,23 @@
                 <div class="upload-grid">
                     <!-- Data File Upload -->
                     <div class="upload-box">
-                        <h3>📊 Upload Data File</h3>
+                        <h3><svg class="inline-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg> Upload Data File
+                        <span class="info-tooltip info-tooltip-upload">
+                            <span class="info-tooltip-icon">i</span>
+                            <div class="info-tooltip-content">
+                                <strong>🔒 Privacy-First Design</strong><br><br>
+                                ✅ Safe to upload sensitive/PHI data<br>
+                                ✅ Data never leaves your browser<br>
+                                ✅ Only metadata is sent to LLM<br>
+                                ✅ Original data is never exposed<br><br>
+                                See <a href="/about" style="color: #93c5fd;">About</a> for details
+                            </div>
+                        </span>
+                        </h3>
                         <div class="upload-area" id="uploadArea" tabindex="0">
                             <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -43,10 +66,6 @@
                             <p>Drop your data file here</p>
                             <p class="file-types">CSV, JSON, Excel, Parquet, TSV</p>
                             <input type="file" id="fileInput" accept=".csv,.json,.xlsx,.xls,.parquet,.tsv,.txt" hidden>
-                        </div>
-                        <div id="fileInfo" class="file-info" style="display: none;">
-                            <strong>Loaded:</strong> <span id="fileName"></span>
-                            <div id="fileStats"></div>
                         </div>
                     </div>
 
@@ -77,29 +96,189 @@
                     </div>
                 </div>
 
-                <!-- Quick Start Options -->
-                <div class="quick-start">
-                    <button id="generateFromDataBtn" class="btn btn-primary" style="display: none;">🚀 Generate from Data</button>
-                    <button id="generateFromDictBtn" class="btn btn-primary" style="display: none;">🚀 Generate from Dictionary</button>
-                    <button id="generateFromBothBtn" class="btn btn-primary" style="display: none;">🚀 Generate with Both</button>
+                <!-- Action Buttons - Moved here -->
+                <div class="action-buttons-section">
+                    <button id="extractMetadataBtn" class="btn btn-secondary">
+                        📊 Extract Metadata Only
+                    </button>
+                    <button id="generateBtn" class="btn btn-primary">
+                        🚀 Generate Synthetic Data
+                    </button>
                 </div>
             </section>
 
-            <!-- Demo Mode - Compact Single Row -->
-            <section class="demo-section-compact">
-                <h3>Try Demo Datasets:</h3>
-                <div class="demo-buttons-row">
-                    <button class="demo-btn-compact" data-demo="sales" title="Sales Data">💰 Sales</button>
-                    <button class="demo-btn-compact" data-demo="customer" title="Customer Data">👥 Customer</button>
-                    <button class="demo-btn-compact" data-demo="medical" title="Medical Records">🏥 Medical</button>
-                    <button class="demo-btn-compact" data-demo="financial" title="Financial Transactions">💳 Financial</button>
+            <!-- Preview Section - Collapsible (positioned here to be right below upload) -->
+            <details class="preview-section" id="previewSection" style="display: none;">
+                <summary class="section-header">
+                    <span>📊 Generated Data Preview</span>
+                </summary>
+                <div class="generation-badges" id="generationBadges">
+                    <span class="info-tooltip" style="margin-left: 0;">
+                        <span class="info-tooltip-icon">i</span>
+                        <div class="info-tooltip-content">
+                            <div class="badge-legend">
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-llm">🤖 LLM</span>
+                                    <span>Generated using AI model</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-cached">⚡ CACHED</span>
+                                    <span>Using cached pipeline</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-fallback">🔧 FALLBACK</span>
+                                    <span>Template-based generation</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-dictionary">📖 DICTIONARY</span>
+                                    <span>Dictionary constraints applied</span>
+                                </div>
+                            </div>
+                        </div>
+                    </span>
                 </div>
-            </section>
+                <p id="previewInfo" class="preview-info"></p>
 
-            <!-- Data Editor Section -->
-            <section class="data-editor-section" id="dataEditorSection" style="display: none;">
-                <div class="editor-header">
-                    <h2>📝 Data Preview & Editor</h2>
+                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table id="previewTable" class="data-table">
+                        <thead id="previewHead"></thead>
+                        <tbody id="previewBody"></tbody>
+                    </table>
+                </div>
+
+                <div class="button-group" style="margin-top: 20px;">
+                    <button id="downloadFileBtn" class="btn btn-primary">📥 Download File</button>
+                    <button id="downloadZipBtn" class="btn btn-primary" style="display: none;">📦 Download ZIP</button>
+                    <button id="regenerateBtn" class="btn btn-secondary">🔄 Regenerate</button>
+                    <button id="newFileBtn" class="btn btn-secondary">📂 New File</button>
+                </div>
+            </details>
+
+            <!-- Configuration Section - Always visible, collapsible -->
+            <details class="config-section-condensed" id="configSection" open>
+                <summary>
+                    <div class="summary-left">
+                        <span class="section-header">⚙️ Generation Settings</span>
+                    </div>
+                    <div class="summary-right">
+                        <span class="info-tooltip info-tooltip-settings" onclick="event.stopPropagation()">
+                            <span class="info-tooltip-icon">i</span>
+                            <div class="info-tooltip-content">
+                            <div class="badge-legend">
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-llm">🤖 LLM</span>
+                                    <span>Generated using AI model</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-cached">⚡ CACHED</span>
+                                    <span>Using cached pipeline</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-fallback">🔧 FALLBACK</span>
+                                    <span>Template-based generation</span>
+                                </div>
+                                <div class="badge-legend-item">
+                                    <span class="badge badge-dictionary">📖 DICTIONARY</span>
+                                    <span>Dictionary constraints applied</span>
+                                </div>
+                            </div>
+                        </div>
+                    </span>
+                    </div>
+                </summary>
+
+                <div class="settings-grid-compact">
+                    <div class="settings-row">
+                        <div class="settings-item">
+                            <label for="numRows">Rows</label>
+                            <input type="number" id="numRows" min="1" max="1000000" placeholder="Match">
+                        </div>
+
+                        <div class="settings-item slider-item">
+                            <label for="matchThreshold">Strictness
+                                <span class="info-tooltip info-tooltip-inline">
+                                    <span class="info-tooltip-icon">i</span>
+                                    <div class="info-tooltip-content">
+                                        <strong>Match Strictness</strong><br><br>
+                                        Controls how closely synthetic data matches original patterns:<br><br>
+                                        🎆 <strong>0-30%</strong>: Loose - More variation<br>
+                                        🎯 <strong>40-70%</strong>: Balanced - Good mix<br>
+                                        🎖️ <strong>80-100%</strong>: Strict - Close match
+                                    </div>
+                                </span>
+                            </label>
+                            <div class="slider-container">
+                                <input type="range" id="matchThreshold" min="0" max="100" value="80">
+                                <span class="slider-value" id="thresholdValue">80%</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-item">
+                            <label for="outputFormat">Format</label>
+                            <select id="outputFormat">
+                                <option value="csv">CSV</option>
+                                <option value="json">JSON</option>
+                                <option value="excel">Excel</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item">
+                            <label for="fileCount">Files</label>
+                            <select id="fileCount">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="10">10</option>
+                                <option value="15">15</option>
+                                <option value="20">20</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item">
+                            <label for="cacheMode">Cache
+                                <span class="info-tooltip">
+                                    <span class="info-tooltip-icon">i</span>
+                                    <div class="info-tooltip-content">
+                                        <strong>Cache Mode</strong><br><br>
+                                        🚫 <strong>Off</strong>: Always generate new code<br>
+                                        📐 <strong>Structure</strong>: Match column names/types only<br>
+                                        📊 <strong>Full</strong>: Match columns + statistics
+                                    </div>
+                                </span>
+                            </label>
+                            <select id="cacheMode">
+                                <option value="structure_stats">📊 Full Match</option>
+                                <option value="structure">📐 Structure Only</option>
+                                <option value="off">🚫 Off</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item">
+                            <label for="demoDataset">Demo</label>
+                            <select id="demoDataset">
+                                <option value="">None</option>
+                                <option value="sales">💰 Sales</option>
+                                <option value="customer">👥 Customer</option>
+                                <option value="medical">🏥 Medical</option>
+                                <option value="financial">💳 Financial</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item checkbox-item">
+                            <input type="checkbox" id="useCache" checked>
+                            <label for="useCache">Cache</label>
+                        </div>
+                    </div>
+                </div>
+
+            </details>
+
+            <!-- Data Editor Section - Collapsible -->
+            <details class="data-editor-section" id="dataEditorSection" style="display: none;" open>
+                <summary class="section-header">📝 Data Preview & Editor</summary>
+                <div class="editor-content">
                     <div class="editor-controls">
                         <button id="addRowBtn" class="btn btn-small">➕ Add Row</button>
                         <button id="addColBtn" class="btn btn-small">➕ Add Column</button>
@@ -127,7 +306,8 @@
                     <button id="saveChangesBtn" class="btn btn-primary">💾 Save Changes</button>
                     <button id="discardChangesBtn" class="btn btn-secondary">❌ Discard Changes</button>
                 </div>
-            </section>
+                </div>
+            </details>
 
             <!-- Dictionary Details (Hidden by default, shown when dictionary loaded) -->
             <section class="dictionary-details" id="dictionaryDetails" style="display: none;">
@@ -136,96 +316,6 @@
                 <button id="clearDictionaryBtn" class="btn btn-small btn-secondary">❌ Clear Dictionary</button>
             </section>
 
-            <!-- Configuration Section -->
-            <section class="config-section" id="configSection" style="display: none;">
-                <h2>Generation Settings</h2>
-                
-                <div class="form-group">
-                    <label for="numRows">Number of Rows to Generate:</label>
-                    <input type="number" id="numRows" min="1" max="1000000" placeholder="Leave empty to match original">
-                </div>
-
-                <div class="form-group">
-                    <label for="matchThreshold">
-                        Match Strictness: <span id="thresholdValue">80%</span>
-                    </label>
-                    <input type="range" id="matchThreshold" min="0" max="100" value="80">
-                    <div class="threshold-labels">
-                        <span>Loose Match</span>
-                        <span>Exact Match</span>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="outputFormat">Output Format:</label>
-                    <select id="outputFormat">
-                        <option value="csv">CSV</option>
-                        <option value="json">JSON</option>
-                        <option value="excel">Excel</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="useCache" checked>
-                        Use cached generation (faster)
-                    </label>
-                </div>
-
-                <div class="button-group">
-                    <button id="extractMetadataBtn" class="btn btn-secondary">
-                        📊 Extract Metadata Only
-                    </button>
-                    <button id="generateBtn" class="btn btn-primary">
-                        🚀 Generate Synthetic Data
-                    </button>
-                    <div class="file-count-selector">
-                        <label for="fileCount">Files:</label>
-                        <select id="fileCount">
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                            <option value="6">6</option>
-                            <option value="7">7</option>
-                            <option value="8">8</option>
-                            <option value="9">9</option>
-                            <option value="10">10</option>
-                            <option value="11">11</option>
-                            <option value="12">12</option>
-                            <option value="13">13</option>
-                            <option value="14">14</option>
-                            <option value="15">15</option>
-                            <option value="16">16</option>
-                            <option value="17">17</option>
-                            <option value="18">18</option>
-                            <option value="19">19</option>
-                            <option value="20">20</option>
-                        </select>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Preview Section -->
-            <section class="preview-section" id="previewSection" style="display: none;">
-                <h2>📊 Generated Data Preview</h2>
-                <p id="previewInfo" class="preview-info"></p>
-
-                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
-                    <table id="previewTable" class="data-table">
-                        <thead id="previewHead"></thead>
-                        <tbody id="previewBody"></tbody>
-                    </table>
-                </div>
-
-                <div class="button-group" style="margin-top: 20px;">
-                    <button id="downloadFileBtn" class="btn btn-primary">📥 Download File</button>
-                    <button id="downloadZipBtn" class="btn btn-primary" style="display: none;">📦 Download ZIP</button>
-                    <button id="regenerateBtn" class="btn btn-secondary">🔄 Regenerate</button>
-                    <button id="newFileBtn" class="btn btn-secondary">📂 New File</button>
-                </div>
-            </section>
 
             <!-- Results Section -->
             <section class="results-section" id="resultsSection" style="display: none;">
@@ -287,6 +377,38 @@
         <div id="loadingOverlay" class="loading-overlay" style="display: none;">
             <div class="spinner"></div>
             <p id="loadingMessage">Processing...</p>
+            <div id="progressFlow" class="progress-flow" style="display: none;">
+                <div class="progress-step" data-step="extract-metadata">
+                    <span class="step-icon">📊</span>
+                    <span class="step-text">Extract Metadata</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="check-cache">
+                    <span class="step-icon">🔍</span>
+                    <span class="step-text">Check Cache</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="prepare-llm">
+                    <span class="step-icon">🧠</span>
+                    <span class="step-text">AI Response</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="generate-code">
+                    <span class="step-icon">💻</span>
+                    <span class="step-text">Generate Code</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="execute-code">
+                    <span class="step-icon">⚡</span>
+                    <span class="step-text">Create Data</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="validate">
+                    <span class="step-icon">✅</span>
+                    <span class="step-text">Validate Output</span>
+                    <span class="step-status"></span>
+                </div>
+            </div>
         </div>
 
         <!-- Error Modal -->

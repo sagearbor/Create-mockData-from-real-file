@@ -1,4 +1,4 @@
-# Quick Start Commands
+sta# Quick Start Commands
 
 ## Option 1: Direct Python Run (Simplest)
 ```bash

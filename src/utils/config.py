@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from dotenv import load_dotenv
@@ -13,7 +13,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     # Azure Configuration
     azure_tenant_id: Optional[str] = Field(default=None, env="AZURE_TENANT_ID")
     azure_client_id: Optional[str] = Field(default=None, env="AZURE_CLIENT_ID")
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Azure OpenAI Configuration
     azure_openai_endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
     azure_openai_api_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_API_KEY")
-    azure_openai_chat_deployment: str = Field(default="gpt-4", env="AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
+    azure_openai_chat_deployment: str = Field(default="gpt-4o-mini", env="AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
     azure_openai_embedding_deployment: str = Field(default="text-embedding-ada-002", env="AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
     azure_openai_api_version: str = Field(default="2024-02-01", env="AZURE_OPENAI_API_VERSION")
     
@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     environment: str = Field(default="local", env="ENVIRONMENT")
     app_port: int = Field(default=8201, env="APP_PORT")
     app_host: str = Field(default="0.0.0.0", env="APP_HOST")
+
+    # CORS Security Settings
+    allowed_origins: Optional[str] = Field(default=None, env="ALLOWED_ORIGINS")
     
     # Local Storage Settings
     use_local_storage: bool = Field(default=True, env="USE_LOCAL_STORAGE")
@@ -69,6 +72,42 @@ class Settings(BaseSettings):
             Path(self.local_cache_path).mkdir(parents=True, exist_ok=True)
             Path("./data/samples").mkdir(parents=True, exist_ok=True)
             Path("./logs").mkdir(parents=True, exist_ok=True)
+
+    def get_allowed_origins(self) -> List[str]:
+        """Get list of allowed origins for CORS based on environment."""
+        # If explicitly set in environment, use that
+        if self.allowed_origins:
+            return [origin.strip() for origin in self.allowed_origins.split(",")]
+
+        # Otherwise, use defaults based on environment
+        if self.environment == "production":
+            # Production: Only allow production URLs
+            return [
+                "https://byod-synthetic-data-service.azurewebsites.net",
+                # Add your production domain here when available
+            ]
+        elif self.environment == "development":
+            # Development: Allow dev URLs
+            return [
+                "https://byod-synthetic-data-service-dev.azurewebsites.net",
+                "http://localhost:8201",
+                "http://localhost:3000",
+            ]
+        else:  # local
+            # Local development: Allow localhost variations and WSL/SSH scenarios
+            return [
+                "http://localhost:8201",
+                "http://localhost:3000",
+                "http://127.0.0.1:8201",
+                "http://127.0.0.1:3000",
+                "http://0.0.0.0:8201",  # WSL binding
+                "http://0.0.0.0:3000",
+                # Add your VM's IP if it's static, or use ALLOWED_ORIGINS env var
+                # "http://your-vm-ip:8201",
+                # Port forwarding scenarios (add as needed)
+                "http://localhost:8080",  # Common forwarded port
+                "http://localhost:8000",  # Another common port
+            ]
 
 
 # Global settings instance

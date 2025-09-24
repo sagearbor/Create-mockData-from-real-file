@@ -3,84 +3,151 @@
 import json
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, Tuple
 import tempfile
 import subprocess
 import sys
 from pathlib import Path
 import ast
 import io
+import time
+from datetime import datetime
 
 from src.utils.logger import logger
 from src.utils.config import settings
+from src.core.cache_manager import CacheManager
 
 
 class SyntheticDataGenerator:
     """Generate synthetic data based on metadata using LLM."""
-    
+
     def __init__(self, openai_client=None):
         """
         Initialize the generator.
-        
+
         Args:
             openai_client: Optional OpenAI client instance
         """
         self.logger = logger
+        self.cache_manager = CacheManager()
         self.openai_client = openai_client
         
     def generate(
-        self, 
-        metadata: Dict[str, Any], 
+        self,
+        metadata: Dict[str, Any],
         num_rows: Optional[int] = None,
         match_threshold: float = 0.8,
         use_cached: bool = True
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Generate synthetic data based on metadata.
-        
+
         Args:
             metadata: Metadata dictionary from MetadataExtractor
             num_rows: Number of rows to generate (defaults to original)
             match_threshold: How closely to match statistical properties (0-1)
             use_cached: Whether to use cached generation scripts
-            
+
         Returns:
-            Generated synthetic DataFrame
+            Tuple of (Generated synthetic DataFrame, generation_info dict)
         """
         self.logger.info(f"Starting synthetic data generation with match_threshold={match_threshold}")
-        
+
+        # Track timing for each step
+        step_timings = {}
+        total_start = time.time()
+
         # Determine number of rows
         if num_rows is None:
             num_rows = metadata["structure"]["shape"]["rows"]
-        
-        # Generate the Python code using LLM
-        generation_code = self._generate_code_with_llm(metadata, num_rows, match_threshold)
+
+        # Check cache first if enabled
+        cache_check_time = 0
+        if use_cached:
+            cache_start = time.time()
+            try:
+                cached_entry = self.cache_manager.find_similar_cached(metadata, match_threshold=0.95)
+                cache_check_time = time.time() - cache_start
+                step_timings['cache_check'] = cache_check_time
+
+                if cached_entry:
+                    self.logger.info(f"Cache hit! Using cached code (check took {cache_check_time:.3f}s)")
+                    generation_code = cached_entry['generation_code']
+                    generation_method = 'cached'
+                    step_timings['llm_response'] = 0  # No LLM call needed
+                else:
+                    self.logger.info(f"No cache hit (check took {cache_check_time:.3f}s)")
+                    generation_code = None
+            except Exception as e:
+                self.logger.warning(f"Cache check failed: {e}")
+                generation_code = None
+        else:
+            step_timings['cache_check'] = 0
+            generation_code = None
+
+        # Generate code if not cached
+        if generation_code is None:
+            code_gen_start = time.time()
+            generation_code, generation_method, llm_response_time = self._generate_code_with_llm(metadata, num_rows, match_threshold)
+            # Only track llm_response time (code_generation is redundant as it's the same)
+            if llm_response_time:
+                step_timings['llm_response'] = llm_response_time
+            else:
+                # Track time even if no LLM was called
+                if generation_method != 'cached':
+                    step_timings['llm_response'] = time.time() - code_gen_start
+        else:
+            # Cache hit - already set llm_response to 0 above
+            pass
         
         # Execute the code safely
+        exec_start = time.time()
         synthetic_df = self._execute_generation_code(generation_code)
+        step_timings['code_execution'] = time.time() - exec_start
         
         # Validate the generated data
-        if self._validate_synthetic_data(synthetic_df, metadata):
+        validation_start = time.time()
+        validation_passed = self._validate_synthetic_data(synthetic_df, metadata)
+        step_timings['validation'] = time.time() - validation_start
+
+        # Total time
+        step_timings['total'] = time.time() - total_start
+
+        # Create generation info with timing
+        generation_info = {
+            "method": generation_method,
+            "num_rows": num_rows,
+            "match_threshold": match_threshold,
+            "use_cached": use_cached,
+            "step_timings": step_timings
+        }
+
+        # Log usage for analytics
+        self._log_usage(generation_method, metadata, num_rows, step_timings)
+
+        if validation_passed:
             self.logger.info(f"Successfully generated synthetic data with shape {synthetic_df.shape}")
-            return synthetic_df
+            return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
             # Try again with stricter threshold
-            generation_code = self._generate_code_with_llm(metadata, num_rows, min(match_threshold + 0.1, 1.0))
+            generation_code, generation_method = self._generate_code_with_llm(metadata, num_rows, min(match_threshold + 0.1, 1.0))
             synthetic_df = self._execute_generation_code(generation_code)
-            return synthetic_df
+            generation_info["method"] = generation_method
+            generation_info["regenerated"] = True
+            return synthetic_df, generation_info
     
-    def _generate_code_with_llm(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> str:
+    def _generate_code_with_llm(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> Tuple[str, str, Optional[float]]:
         """
         Generate Python code using LLM based on metadata.
-        
+
         Args:
             metadata: Metadata dictionary
             num_rows: Number of rows to generate
             match_threshold: Statistical matching threshold
-            
+
         Returns:
-            Python code string for generating synthetic data
+            Tuple of (Python code string, generation method)
         """
         # Construct the prompt
         prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
@@ -88,6 +155,10 @@ class SyntheticDataGenerator:
         if self.openai_client:
             # Use actual OpenAI API
             try:
+                self.logger.info(f"Calling Azure OpenAI with model: {settings.azure_openai_chat_deployment}")
+                self.logger.debug(f"Prompt length: {len(prompt)} characters")
+
+                llm_start = time.time()
                 response = self.openai_client.chat.completions.create(
                     model=settings.azure_openai_chat_deployment,
                     messages=[
@@ -99,9 +170,21 @@ class SyntheticDataGenerator:
                 )
 
                 code = response.choices[0].message.content
+                generation_method = "llm"
+                llm_response_time = time.time() - llm_start
+                self.logger.info(f"Successfully received LLM response ({len(code)} characters) in {llm_response_time:.2f}s")
+
+                # Cache the generated code
+                try:
+                    self.cache_manager.cache_generation(metadata, code)
+                    self.logger.info("Cached generation code for future use")
+                except Exception as e:
+                    self.logger.warning(f"Failed to cache: {e}")
             except Exception as e:
-                self.logger.warning(f"Azure OpenAI call failed: {e}. Using fallback generation.")
-                return self._generate_fallback_code(metadata, num_rows)
+                self.logger.error(f"Azure OpenAI call failed: {type(e).__name__}: {str(e)}")
+                self.logger.warning("Falling back to template-based generation")
+                code, generation_method = self._generate_fallback_code(metadata, num_rows)
+                return code, generation_method, None
             
             # Extract code from markdown if present
             if "```python" in code:
@@ -109,10 +192,12 @@ class SyntheticDataGenerator:
             elif "```" in code:
                 code = code.split("```")[1].split("```")[0]
             
-            return code.strip()
+            return code.strip(), generation_method, llm_response_time
         else:
             # Fallback to template-based generation when no LLM available
-            return self._generate_fallback_code(metadata, num_rows)
+            self.logger.warning("No OpenAI client available, using fallback template-based generation")
+            code, generation_method = self._generate_fallback_code(metadata, num_rows)
+            return code, generation_method, None
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for code generation."""
@@ -121,15 +206,19 @@ class SyntheticDataGenerator:
         The code should:
         1. Import necessary libraries (pandas, numpy, random, datetime, etc.)
         2. Define a function called generate_synthetic_data() that returns a pandas DataFrame
-        3. Match the statistical properties and patterns described in the metadata
-        4. Use appropriate distributions for numeric data
-        5. Maintain correlations between columns where specified
-        6. Generate realistic patterns for string data
-        7. When clinical_context or suggested_values are provided, use those specific values
-        8. For medical columns (medications, lab tests, etc.), use the suggested clinical values
-        9. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
-        10. For any column with 'date' or 'time' in the name, generate dates not random strings
-        11. Return ONLY the Python code, no explanations or markdown formatting
+        3. IMPORTANT: After defining the function, call it and assign to 'result' variable: result = generate_synthetic_data()
+        4. Match the statistical properties and patterns described in the metadata
+        5. Use appropriate distributions for numeric data
+        6. Maintain correlations between columns where specified
+        7. Generate realistic patterns for string data
+        8. When clinical_context or suggested_values are provided, use those specific values
+        9. For medical columns (medications, lab tests, etc.), use the suggested clinical values
+        10. CRITICAL: For categorical columns where 'preserve_values' is True and 'most_common_values' contains actual values (not 'value_0', 'value_1'), you MUST use those exact values with their distributions
+        11. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
+        12. For any column with 'date' or 'time' in the name, generate dates not random strings
+        13. When you see actual categorical values like 'M', 'F' or 'Male', 'Female' in most_common_values, use those exact values
+        14. Return ONLY the Python code, no explanations or markdown formatting
+        15. The code must end with: result = generate_synthetic_data()
         """
     
     def _construct_generation_prompt(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> str:
@@ -168,17 +257,23 @@ class SyntheticDataGenerator:
         3. Preserves data types and patterns
         4. Maintains correlations between columns
         5. Generates realistic synthetic values
-        6. IMPORTANT: For columns with type='datetime', generate proper datetime objects using datetime.now() or pd.date_range()
-        7. For date columns with names containing 'date', 'time', 'created', 'updated', generate datetime values
-        8. CRITICAL: If DATA DICTIONARY CONSTRAINTS are provided above, they MUST override any statistical properties
+        6. CRITICAL: When 'preserve_values' is True for a column, use the EXACT values from 'most_common_values' with their distributions
+        7. IMPORTANT: For columns with type='datetime', generate proper datetime objects using datetime.now() or pd.date_range()
+        8. For date columns with names containing 'date', 'time', 'created', 'updated', generate datetime values
+        9. CRITICAL: If DATA DICTIONARY CONSTRAINTS are provided above, they MUST override any statistical properties
+        10. For categorical columns with actual values (not 'value_0', 'value_1'), maintain the exact distribution
 
         Return only the Python code."""
 
         return prompt
     
-    def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> str:
-        """Generate synthetic data using template-based approach (fallback when no LLM)."""
-        
+    def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> tuple[str, str]:
+        """Generate synthetic data using template-based approach (fallback when no LLM).
+
+        Returns:
+            Tuple of (Python code string, generation method 'fallback')
+        """
+
         code_lines = [
             "import pandas as pd",
             "import numpy as np",
@@ -189,6 +284,22 @@ class SyntheticDataGenerator:
             "def generate_synthetic_data():",
             f"    num_rows = {num_rows}",
             "    data = {}",
+            "",
+            "    # Helper functions for realistic data",
+            "    def generate_email(name):",
+            "        domains = ['gmail.com', 'yahoo.com', 'outlook.com', 'email.com', 'company.com']",
+            "        username = name.lower().replace(' ', '.') + str(random.randint(0, 99))",
+            "        return f'{username}@{random.choice(domains)}'",
+            "",
+            "    def generate_phone(format_type='dash'):",
+            "        if format_type == 'dash':",
+            "            return f'{random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}'",
+            "        elif format_type == 'simple':",
+            "            return f'{random.randint(555, 999)}-{random.randint(1000, 9999)}'",
+            "        elif format_type == 'dot':",
+            "            return f'{random.randint(200, 999)}.{random.randint(200, 999)}.{random.randint(1000, 9999)}'",
+            "        else:",
+            "            return f'({random.randint(200, 999)}) {random.randint(200, 999)}-{random.randint(1000, 9999)}'",
             ""
         ]
         
@@ -198,8 +309,15 @@ class SyntheticDataGenerator:
             col_stats = metadata['statistics'].get(col_name, {})
             
             if col_stats.get('type') == 'numeric':
-                # Numeric column generation
-                if col_stats.get('is_integer', False):
+                # Check if this is currency/money
+                if col_stats.get('is_likely_currency', False):
+                    decimal_places = col_stats.get('decimal_places', 2) or 2  # Default to 2 if None
+                    min_val = col_stats.get('min', 0)
+                    max_val = col_stats.get('max', 10000)
+                    code_lines.append(f"    # Generating currency values for '{col_name}'")
+                    code_lines.append(f"    data['{col_name}'] = np.round(np.random.uniform({min_val}, {max_val}, size=num_rows), {decimal_places})")
+                # Regular numeric column generation
+                elif col_stats.get('is_integer', False):
                     min_val = int(col_stats.get('min', 0))
                     max_val = int(col_stats.get('max', 100))
                     code_lines.append(f"    data['{col_name}'] = np.random.randint({min_val}, {max_val + 1}, size=num_rows)")
@@ -207,31 +325,108 @@ class SyntheticDataGenerator:
                     mean = col_stats.get('mean', 0)
                     std = col_stats.get('std', 1)
                     code_lines.append(f"    data['{col_name}'] = np.random.normal({mean}, {std}, size=num_rows)")
-                    
+
                     # Clip to min/max if specified
                     if 'min' in col_stats and 'max' in col_stats:
                         code_lines.append(f"    data['{col_name}'] = np.clip(data['{col_name}'], {col_stats['min']}, {col_stats['max']})")
             
             elif col_stats.get('type') == 'string':
-                # Check if this is actually a date column by name
-                date_keywords = ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp', 'expires', 'started', 'ended', 'completed']
-                is_likely_date = any(keyword in col_name.lower() for keyword in date_keywords)
-
-                if is_likely_date:
+                # First check if this is a datetime stored as string (detected from data)
+                if col_stats.get('is_datetime_string', False):
+                    datetime_format = col_stats.get('datetime_format', '%Y-%m-%d %H:%M:%S')
+                    code_lines.append(f"    # Detected datetime string format: {datetime_format}")
+                    code_lines.append(f"    base_date = datetime.now()")
+                    code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365), hours=random.randint(0, 23), minutes=random.randint(0, 59)) for _ in range(num_rows)]")
+                    if '%H' in datetime_format:  # Has time component
+                        code_lines.append(f"    data['{col_name}'] = [d.strftime('{datetime_format}') for d in date_list]")
+                    else:
+                        code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
+                # Fallback: Check if column name suggests date
+                elif any(keyword in col_name.lower() for keyword in ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp']):
                     # Generate dates even if stored as string
                     code_lines.append(f"    # Detected '{col_name}' as likely date column")
                     code_lines.append(f"    base_date = datetime.now()")
                     code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
                     code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
-                elif col_stats.get('is_categorical', False):
-                    # Categorical values
-                    unique_count = min(col_stats.get('unique_values', 10), 20)
-                    code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
-                    code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
+                # Check for categorical values
+                elif col_stats.get('is_categorical', False) or col_stats.get('unique_values', 100) <= 10:
+                    # Check if we have preserved actual categorical values
+                    if col_stats.get('preserve_values', False) and 'most_common_values' in col_stats:
+                        most_common = col_stats['most_common_values']
+                        # Check if these are actual values (not anonymized)
+                        if not any(k.startswith('value_') for k in most_common.keys()):
+                            # Use actual values with their distributions
+                            values = list(most_common.keys())
+                            counts = list(most_common.values())
+                            # Normalize to probabilities
+                            total = sum(counts)
+                            probabilities = [c/total for c in counts]
+                            code_lines.append(f"    # Using preserved categorical values for '{col_name}'")
+                            code_lines.append(f"    categories_{col_name} = {values}")
+                            code_lines.append(f"    probabilities_{col_name} = {probabilities}")
+                            code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows, p=probabilities_{col_name})")
+                        else:
+                            # Fallback to generic categories if anonymized
+                            unique_count = min(col_stats.get('unique_values', 10), 20)
+                            code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
+                            code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
+                    else:
+                        # No preserved values, use generic categories
+                        unique_count = min(col_stats.get('unique_values', 10), 20)
+                        code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
+                        code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
                 else:
-                    # Random strings
-                    avg_length = int(col_stats.get('avg_length', 10))
-                    code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
+                    # Check for specific detected types and patterns
+                    patterns = metadata.get('patterns', {}).get(col_name, {})
+
+                    # Check for email detection
+                    if col_stats.get('detected_type') == 'email' or col_stats.get('is_email_like'):
+                        code_lines.append(f"    # Generating emails for '{col_name}'")
+                        code_lines.append(f"    data['{col_name}'] = [generate_email(f'user{{i}}') for i in range(num_rows)]")
+
+                    # Check for phone detection
+                    elif col_stats.get('detected_type') == 'phone' or col_stats.get('is_phone_like'):
+                        phone_format = col_stats.get('phone_format', 'dash')
+                        code_lines.append(f"    # Generating phone numbers for '{col_name}'")
+                        code_lines.append(f"    data['{col_name}'] = [generate_phone('{phone_format}') for _ in range(num_rows)]")
+
+                    # Check for ID pattern with prefix
+                    elif patterns.get('id_pattern', {}).get('type') == 'prefix_sequential':
+                        prefix = patterns['id_pattern']['prefix']
+                        code_lines.append(f"    # Generating IDs with prefix '{prefix}' for '{col_name}'")
+                        code_lines.append(f"    data['{col_name}'] = [f'{prefix}{{str(i+1).zfill(3)}}' for i in range(num_rows)]")
+
+                    # Check for suggested values from clinical/reference context
+                    elif 'clinical_context' in col_stats or 'suggested_values' in col_stats:
+                        suggested = col_stats.get('suggested_values', col_stats.get('clinical_context', {}).get('suggested_values', []))
+                        if suggested:
+                            code_lines.append(f"    # Using suggested values for '{col_name}'")
+                            code_lines.append(f"    suggested_{col_name} = {suggested}")
+                            code_lines.append(f"    data['{col_name}'] = [random.choice(suggested_{col_name}) for _ in range(num_rows)]")
+                        else:
+                            # Fallback to random strings
+                            avg_length = int(col_stats.get('avg_length', 10))
+                            code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
+
+                    # Check if column name suggests specific data type
+                    elif 'city' in col_name.lower():
+                        code_lines.append(f"    # Generating city names for '{col_name}'")
+                        cities = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
+                        code_lines.append(f"    cities = {cities}")
+                        code_lines.append(f"    data['{col_name}'] = [random.choice(cities) for _ in range(num_rows)]")
+
+                    elif 'name' in col_name.lower() and 'first' not in col_name.lower() and 'last' not in col_name.lower():
+                        code_lines.append(f"    # Generating full names for '{col_name}'")
+                        first_names = ["John", "Jane", "Bob", "Alice", "Charlie", "Mary", "Michael", "Sarah", "David", "Emily"]
+                        last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
+                        code_lines.append(f"    first_names = {first_names}")
+                        code_lines.append(f"    last_names = {last_names}")
+                        code_lines.append(f"    data['{col_name}'] = [f'{{random.choice(first_names)}} {{random.choice(last_names)}}' for _ in range(num_rows)]")
+
+                    else:
+                        # Default random strings
+                        avg_length = int(col_stats.get('avg_length', 10))
+                        code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
             
             elif col_stats.get('type') == 'datetime':
                 # DateTime column generation
@@ -260,19 +455,80 @@ class SyntheticDataGenerator:
             "result = generate_synthetic_data()"
         ])
         
-        return "\n".join(code_lines)
-    
-    def _execute_generation_code(self, code: str) -> pd.DataFrame:
+        return "\n".join(code_lines), "fallback"
+
+    def _inject_random_seed(self, code: str, seed: int) -> str:
+        """
+        Inject or replace random seed in the code to ensure variety.
+
+        Args:
+            code: Original code string
+            seed: New seed value
+
+        Returns:
+            Modified code with new seed
+        """
+        import re
+
+        # Pattern to find seed assignments
+        seed_patterns = [
+            (r'random\.seed\(\d+\)', f'random.seed({seed})'),
+            (r'np\.random\.seed\(\d+\)', f'np.random.seed({seed})'),
+            (r'fake = Faker\(\)', f'fake = Faker()\n    fake.seed_instance({seed})'),
+            (r'Faker\(seed=\d+\)', f'Faker(seed={seed})')
+        ]
+
+        modified_code = code
+        seed_found = False
+
+        for pattern, replacement in seed_patterns:
+            if re.search(pattern, modified_code):
+                modified_code = re.sub(pattern, replacement, modified_code)
+                seed_found = True
+
+        # If no seed found, add one at the beginning of the function
+        if not seed_found:
+            # Find the function definition
+            if 'def generate_synthetic_data' in modified_code:
+                lines = modified_code.split('\n')
+                for i, line in enumerate(lines):
+                    if 'def generate_synthetic_data' in line and i + 1 < len(lines):
+                        # Add seed after imports within the function
+                        indent = '    '
+                        seed_lines = [
+                            f'{indent}import random',
+                            f'{indent}import numpy as np',
+                            f'{indent}random.seed({seed})',
+                            f'{indent}np.random.seed({seed})',
+                            ''
+                        ]
+                        # Insert after the function definition
+                        lines = lines[:i+1] + seed_lines + lines[i+1:]
+                        modified_code = '\n'.join(lines)
+                        break
+
+        return modified_code
+
+    def _execute_generation_code(self, code: str, randomize_seed: bool = True) -> pd.DataFrame:
         """
         Safely execute the generated Python code.
-        
+
         Args:
             code: Python code string
-            
+            randomize_seed: Whether to inject a random seed for variety
+
         Returns:
             Generated DataFrame
         """
         self.logger.info("Executing generated code in sandbox")
+
+        # Inject random seed to ensure variety even with cached code
+        if randomize_seed:
+            import random
+            new_seed = random.randint(1, 1000000)
+            self.logger.info(f"Injecting random seed {new_seed} for variety")
+            # Try to update any existing seed calls
+            code = self._inject_random_seed(code, new_seed)
         
         # Create a temporary file for the code
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -334,13 +590,17 @@ class SyntheticDataGenerator:
         self.logger.warning("Executing code directly (fallback mode)")
         
         # Create a restricted namespace
+        import random
+        import string
+        from datetime import datetime, timedelta
+
         namespace = {
             'pd': pd,
             'np': np,
-            'random': __import__('random'),
-            'datetime': __import__('datetime').datetime,
-            'timedelta': __import__('datetime').timedelta,
-            'string': __import__('string'),
+            'random': random,
+            'datetime': datetime,
+            'timedelta': timedelta,
+            'string': string,
             '__builtins__': {
                 'range': range,
                 'len': len,
@@ -353,7 +613,20 @@ class SyntheticDataGenerator:
                 'max': max,
                 'sum': sum,
                 'zip': zip,
-                'enumerate': enumerate
+                'enumerate': enumerate,
+                'print': print,
+                'abs': abs,
+                'round': round,
+                'sorted': sorted,
+                'reversed': reversed,
+                '__import__': __import__,
+                'set': set,
+                'tuple': tuple,
+                'bool': bool,
+                'type': type,
+                'isinstance': isinstance,
+                'any': any,
+                'all': all
             }
         }
         
@@ -404,3 +677,54 @@ class SyntheticDataGenerator:
         except Exception as e:
             self.logger.error(f"Validation error: {e}")
             return False
+
+    def _log_usage(self, method: str, metadata: Dict[str, Any], num_rows: int, timings: Dict[str, float]):
+        """Log usage information for analytics with concurrent access handling."""
+        try:
+            # Try to use safe logging with file locking
+            try:
+                from src.utils.log_rotation import safe_append_log
+                use_safe_logging = True
+            except ImportError:
+                use_safe_logging = False
+
+            log_dir = Path("logs/usage")
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            # Check if this is a test/demo dataset
+            is_test_data = False
+            if "file_info" in metadata:
+                filename = metadata["file_info"].get("filename", "").lower()
+                is_test_data = any(test_name in filename for test_name in [
+                    "test", "demo", "sample", "example", "mock"
+                ])
+
+            # Get column names to help identify datasets
+            column_names = [col["name"] for col in metadata["structure"]["columns"]]
+
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "method": method,
+                "num_rows": num_rows,
+                "num_columns": len(metadata["structure"]["columns"]),
+                "column_names": column_names,
+                "timings": timings,
+                "total_time": timings.get('total', sum(v for k, v in timings.items() if k != 'total')),
+                "cache_hit": method == "cached",
+                "is_test_data": is_test_data
+            }
+
+            # Append to daily log file
+            log_file = log_dir / f"usage_{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+
+            if use_safe_logging:
+                # Use file locking for concurrent access
+                safe_append_log(log_file, log_entry)
+            else:
+                # Fallback to simple append
+                with open(log_file, 'a') as f:
+                    f.write(json.dumps(log_entry) + '\n')
+
+            self.logger.debug(f"Usage logged to {log_file}")
+        except Exception as e:
+            self.logger.warning(f"Failed to log usage: {e}")

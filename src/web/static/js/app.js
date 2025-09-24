@@ -97,19 +97,22 @@ function init() {
         generateFromDataBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
             document.getElementById('dictionaryDetails').style.display = 'none';
-            configSection.scrollIntoView({ behavior: 'smooth' });
+            // Don't scroll, just show
+            configSection.style.display = 'block';
         });
     }
     if (generateFromDictBtn) {
         generateFromDictBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
-            configSection.scrollIntoView({ behavior: 'smooth' });
+            // Don't scroll, just show
+            configSection.style.display = 'block';
         });
     }
     if (generateFromBothBtn) {
         generateFromBothBtn.addEventListener('click', () => {
             configSection.style.display = 'block';
-            configSection.scrollIntoView({ behavior: 'smooth' });
+            // Don't scroll, just show
+            configSection.style.display = 'block';
         });
     }
 
@@ -147,15 +150,22 @@ function init() {
     if (extractMetadataBtn) extractMetadataBtn.addEventListener('click', extractMetadata);
     if (resetBtn) resetBtn.addEventListener('click', reset);
 
-    // Demo buttons - updated for compact layout
-    document.querySelectorAll('.demo-btn-compact').forEach(btn => {
-        btn.addEventListener('click', loadDemoData);
-    });
-
-    // Legacy demo buttons (if any remain)
-    document.querySelectorAll('.demo-btn').forEach(btn => {
-        btn.addEventListener('click', loadDemoData);
-    });
+    // Demo dropdown handler
+    const demoDropdown = document.getElementById('demoDataset');
+    if (demoDropdown) {
+        demoDropdown.addEventListener('change', (e) => {
+            if (e.target.value) {
+                // Create a mock event object that matches what loadDemoData expects
+                const mockEvent = {
+                    target: {
+                        dataset: { demo: e.target.value }
+                    }
+                };
+                loadDemoData(mockEvent);
+                // Keep the selection visible - don't reset
+            }
+        });
+    }
 }
 
 // File handling
@@ -213,8 +223,11 @@ function processFile(file) {
     if (fileStatsEl) fileStatsEl.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
     if (fileInfoEl) fileInfoEl.style.display = 'block';
 
-    // Update sections
-    if (configSection) configSection.style.display = 'block';
+    // Update sections - keep config visible and open
+    if (configSection) {
+        configSection.style.display = 'block';
+        configSection.setAttribute('open', 'open');
+    }
     if (resultsSection) resultsSection.style.display = 'none';
     if (metadataSection) metadataSection.style.display = 'none';
 
@@ -228,24 +241,20 @@ function processFile(file) {
 
 // Helper function to update quick action buttons
 function updateQuickActionButtons() {
-    const generateFromDataBtn = document.getElementById('generateFromDataBtn');
-    const generateFromDictBtn = document.getElementById('generateFromDictBtn');
-    const generateFromBothBtn = document.getElementById('generateFromBothBtn');
-
-    // Hide all buttons first
-    if (generateFromDataBtn) generateFromDataBtn.style.display = 'none';
-    if (generateFromDictBtn) generateFromDictBtn.style.display = 'none';
-    if (generateFromBothBtn) generateFromBothBtn.style.display = 'none';
-
-    // Show appropriate buttons based on what's loaded
-    if (currentFile && currentDictionary) {
-        if (generateFromBothBtn) generateFromBothBtn.style.display = 'inline-block';
-    } else if (currentFile) {
-        if (generateFromDataBtn) generateFromDataBtn.style.display = 'inline-block';
-    } else if (currentDictionary) {
-        if (generateFromDictBtn) generateFromDictBtn.style.display = 'inline-block';
-    }
+    // Deprecated - using single generate button
 }
+
+// Smooth collapse/expand helper
+function smoothToggleSection(section, open) {
+    if (!section || section.tagName !== 'DETAILS') return;
+
+    section.classList.add('animating');
+    section.open = open;
+    setTimeout(() => section.classList.remove('animating'), 400);
+}
+
+// Global variable for step timings
+let stepTimings = {};
 
 // API calls
 async function generateSyntheticData() {
@@ -255,7 +264,13 @@ async function generateSyntheticData() {
     }
 
     const fileCount = parseInt(document.getElementById('fileCount').value);
-    showLoading(`Generating ${fileCount} synthetic data file${fileCount > 1 ? 's' : ''}...`);
+    showLoading(`Generating ${fileCount} synthetic data file${fileCount > 1 ? 's' : ''}...`, true);
+
+    // Track which steps are active for real-time duration display
+    window.activeProgressStep = {
+        step: 'extract-metadata',
+        startTime: Date.now()
+    };
 
     const formData = new FormData();
     
@@ -282,6 +297,13 @@ async function generateSyntheticData() {
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
+
+    // Add cache mode
+    const cacheMode = document.getElementById('cacheMode');
+    if (cacheMode) {
+        formData.append('cache_mode', cacheMode.value);
+    }
+
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'true');  // Request preview mode
     
@@ -293,12 +315,83 @@ async function generateSyntheticData() {
             console.log(`  ${key}:`, value);
         }
     }
-    
+
+    // Use the SSE endpoint with POST for real-time progress
+    // First, send the request to the SSE endpoint
     try {
-        const response = await fetch(`${API_BASE}/generate`, {
+        const response = await fetch(`${API_BASE}/generate-sse`, {
             method: 'POST',
             body: formData
         });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        // Read the streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete SSE messages
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = JSON.parse(line.slice(6));
+
+                    // Handle progress updates
+                    if (data.step) {
+                        if (data.status === 'active') {
+                            updateProgressStep(data.step, 'active');
+                        } else if (data.status === 'completed') {
+                            updateProgressStep(data.step, 'completed', data.duration);
+                        } else if (data.status === 'skipped') {
+                            updateProgressStep(data.step, 'skipped');
+                        }
+
+                        // Update step text if provided
+                        if (data.text) {
+                            const stepEl = document.querySelector(`[data-step="${data.step}"]`);
+                            if (stepEl) {
+                                const stepText = stepEl.querySelector('.step-text');
+                                if (stepText) {
+                                    stepText.textContent = data.text;
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle completion
+                    if (data.complete) {
+                        if (data.preview) {
+                            displayPreview(data);
+                            setTimeout(() => {
+                                hideLoading();
+                            }, 2000);
+                        } else {
+                            displayResults(data);
+                            hideLoading();
+                        }
+                        return; // Exit the function
+                    }
+
+                    // Handle errors
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                }
+            }
+        }
+        return; // SSE handled everything, exit here
         
         if (!response.ok) {
             let errorMessage = 'Generation failed';
@@ -330,11 +423,99 @@ async function generateSyntheticData() {
 
         if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
+
+            // Clear any scheduled progress updates
+            if (window.progressTimeouts) {
+                window.progressTimeouts.forEach(timeout => clearTimeout(timeout));
+                window.progressTimeouts = null;
+            }
+
+            // Update progress steps with real timings from backend
+            if (data.generation_info && data.generation_info.all_timings) {
+                const timings = data.generation_info.all_timings;
+
+                // Mark all steps complete with their actual timings
+                if (timings.metadata_extraction) {
+                    updateProgressStep('extract-metadata', 'completed', timings.metadata_extraction);
+                }
+                if (timings.cache_check !== undefined) {
+                    updateProgressStep('check-cache', 'completed', timings.cache_check);
+                }
+
+                // Handle cache check result
+                const cacheHit = data.generation_info.method === 'cached';
+                if (timings.cache_check !== undefined) {
+                    // Update cache step text to show hit/miss
+                    const cacheStep = document.querySelector('[data-step="check-cache"]');
+                    if (cacheStep) {
+                        const stepText = cacheStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = cacheHit ? 'Cache Hit ✓' : 'Cache Miss';
+                        }
+                    }
+                    updateProgressStep('check-cache', 'completed', timings.cache_check);
+                }
+
+                // Handle code generation step (LLM/cached/fallback)
+                const genStep = document.querySelector('[data-step="generate-code"]');
+                if (cacheHit) {
+                    // Using cached code - skip both AI and generate steps
+                    updateProgressStep('prepare-llm', 'skipped');
+                    if (genStep) {
+                        const stepText = genStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = 'Using Cached Code';
+                        }
+                    }
+                    updateProgressStep('generate-code', 'completed', 0);
+                } else if (data.generation_info.method === 'llm') {
+                    // LLM generated code - show full generation time
+                    if (timings.llm_response) {
+                        updateProgressStep('prepare-llm', 'completed', timings.llm_response * 0.1); // Small portion for prep
+                        updateProgressStep('generate-code', 'completed', timings.llm_response * 0.9); // Most time is generation
+                    }
+                } else if (data.generation_info.method === 'fallback') {
+                    // Fallback template
+                    const llmStep = document.querySelector('[data-step="prepare-llm"]');
+                    if (llmStep) {
+                        const stepText = llmStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = 'Template';
+                        }
+                    }
+                    updateProgressStep('prepare-llm', 'skipped');
+                    if (genStep) {
+                        const stepText = genStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = 'Template Code';
+                        }
+                    }
+                    updateProgressStep('generate-code', 'completed', timings.llm_response || 0.1);
+                }
+
+                // Always show execution time
+                if (timings.code_execution) {
+                    updateProgressStep('execute-code', 'completed', timings.code_execution);
+                }
+                if (timings.validation) {
+                    updateProgressStep('validate', 'completed', timings.validation);
+                }
+
+                // Store timings for later display
+                window.lastGenerationTimings = timings;
+            }
+
             if (data.preview) {
                 // Show preview instead of auto-download
                 displayPreview(data);
+
+                // Keep progress visible for a bit longer to show final timings
+                setTimeout(() => {
+                    hideLoading();
+                }, 2000);
             } else {
                 displayResults(data);
+                hideLoading();
             }
         } else if (contentType && contentType.includes('application/zip')) {
             // ZIP file download (multiple files)
@@ -371,7 +552,6 @@ async function generateSyntheticData() {
         console.error('Full URL:', `${API_BASE}/generate`);
         const errorMsg = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
         showError(errorMsg || 'An unexpected error occurred');
-    } finally {
         hideLoading();
     }
 }
@@ -488,15 +668,34 @@ function displayMetadata(metadata) {
 // Demo data
 async function loadDemoData(e) {
     const demoType = e.target.dataset.demo;
-    
+
     showLoading(`Loading ${demoType} demo data...`);
-    
+
     // Create sample data based on type
     const demoData = generateDemoData(demoType);
     const blob = new Blob([demoData], {type: 'text/csv'});
     const file = new File([blob], `${demoType}_demo.csv`, {type: 'text/csv'});
-    
+
+    // Process file and update upload area
     processFile(file);
+
+    // Also update the upload area to show the demo file is loaded
+    const uploadArea = document.getElementById('uploadArea');
+    if (uploadArea) {
+        uploadArea.classList.add('file-loaded');
+        uploadArea.innerHTML = `
+            <svg class="file-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <div class="file-loaded-info">
+                <strong>Loaded: ${demoType}_demo.csv</strong>
+                <span>Demo Data | Type: CSV</span>
+            </div>
+            <button class="clear-file-btn" onclick="clearDataFile(event)" title="Remove file">×</button>
+        `;
+    }
+
     hideLoading();
 }
 
@@ -580,13 +779,121 @@ function downloadFile(blob, filename) {
     document.body.removeChild(a);
 }
 
-function showLoading(message = 'Processing...') {
+function showLoading(message = 'Processing...', showProgress = false) {
     loadingMessage.textContent = message;
     loadingOverlay.style.display = 'flex';
+
+    const progressFlow = document.getElementById('progressFlow');
+    if (showProgress && progressFlow) {
+        progressFlow.style.display = 'flex';
+        // Reset all steps
+        document.querySelectorAll('.progress-step').forEach(step => {
+            step.classList.remove('active', 'completed', 'error');
+            step.querySelector('.step-status').textContent = '';
+        });
+    } else if (progressFlow) {
+        progressFlow.style.display = 'none';
+    }
 }
 
 function hideLoading() {
     loadingOverlay.style.display = 'none';
+    const progressFlow = document.getElementById('progressFlow');
+    if (progressFlow) {
+        progressFlow.style.display = 'none';
+    }
+}
+
+// Update progress step with optional timing (in seconds) and active timer
+function updateProgressStep(stepName, status, durationSeconds) {
+    const step = document.querySelector(`[data-step="${stepName}"]`);
+    if (!step) return;
+
+    // Remove all status classes
+    step.classList.remove('active', 'completed', 'error', 'skipped');
+
+    // Add appropriate class and status icon
+    const statusEl = step.querySelector('.step-status');
+
+    // Handle active step timer
+    if (status === 'active') {
+        // Start tracking this step
+        window.activeProgressStep = {
+            step: stepName,
+            startTime: Date.now()
+        };
+
+        // Start live timer update
+        if (window.progressTimerInterval) {
+            clearInterval(window.progressTimerInterval);
+        }
+
+        window.progressTimerInterval = setInterval(() => {
+            if (window.activeProgressStep && window.activeProgressStep.step === stepName) {
+                const elapsed = (Date.now() - window.activeProgressStep.startTime) / 1000;
+                const durationText = elapsed < 1 ? `${Math.round(elapsed * 1000)}ms` : `${elapsed.toFixed(1)}s`;
+
+                let durationEl = step.querySelector('.step-duration');
+                if (!durationEl) {
+                    durationEl = document.createElement('span');
+                    durationEl.className = 'step-duration';
+                    step.appendChild(durationEl);
+                }
+                durationEl.textContent = durationText;
+            }
+        }, 100); // Update every 100ms
+    } else {
+        // Clear timer if this was the active step
+        if (window.activeProgressStep && window.activeProgressStep.step === stepName) {
+            if (window.progressTimerInterval) {
+                clearInterval(window.progressTimerInterval);
+                window.progressTimerInterval = null;
+            }
+            window.activeProgressStep = null;
+        }
+    }
+
+    // Add duration if provided (convert from seconds)
+    if ((status === 'completed' || status === 'error') && durationSeconds !== undefined) {
+        const durationText = durationSeconds < 1 ? `${Math.round(durationSeconds * 1000)}ms` : `${durationSeconds.toFixed(2)}s`;
+
+        // Add or update duration element
+        let durationEl = step.querySelector('.step-duration');
+        if (!durationEl) {
+            durationEl = document.createElement('span');
+            durationEl.className = 'step-duration';
+            step.appendChild(durationEl);
+        }
+        durationEl.textContent = durationText;
+    }
+
+    switch(status) {
+        case 'active':
+            step.classList.add('active');
+            statusEl.textContent = '🔄'; // rotating arrows
+            break;
+        case 'completed':
+            step.classList.add('completed');
+            statusEl.textContent = '✓'; // checkmark
+            break;
+        case 'error':
+            step.classList.add('error');
+            statusEl.textContent = '✗'; // X mark
+            break;
+        case 'skipped':
+            step.classList.add('skipped');
+            statusEl.textContent = '−'; // dash (skipped)
+
+            // Add skipped indicator
+            let durationEl = step.querySelector('.step-duration');
+            if (!durationEl) {
+                durationEl = document.createElement('span');
+                durationEl.className = 'step-duration';
+                step.appendChild(durationEl);
+            }
+            durationEl.textContent = 'skipped';
+            break;
+    }
 }
 
 function showError(message) {
@@ -653,7 +960,32 @@ function reset() {
     currentMetadata = null;
     fileInput.value = '';
     fileInfo.style.display = 'none';
-    configSection.style.display = 'none';
+
+    // Reset upload area to original state
+    const uploadArea = document.getElementById('uploadArea');
+    if (uploadArea) {
+        uploadArea.classList.remove('file-loaded');
+        uploadArea.innerHTML = `
+            <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>Drop your data file here</p>
+            <p class="file-types">CSV, JSON, Excel, Parquet, TSV</p>
+        `;
+    }
+
+    // Reset demo dropdown
+    const demoDropdown = document.getElementById('demoDataset');
+    if (demoDropdown) {
+        demoDropdown.value = '';
+    }
+
+    // Keep config visible and open it
+    if (configSection) {
+        configSection.setAttribute('open', 'open');
+    }
     resultsSection.style.display = 'none';
     metadataSection.style.display = 'none';
     downloadBtn.style.display = 'none';
@@ -685,13 +1017,19 @@ if (typeof convertToCSV === 'undefined') {
 
 // Display preview of generated data
 function displayPreview(data) {
-    // Hide other sections
-    configSection.style.display = 'none';
+    // Keep settings visible but collapse it
+    const configDetails = document.getElementById('configSection');
+    if (configDetails) {
+        configDetails.removeAttribute('open');
+    }
     resultsSection.style.display = 'none';
 
     // Show preview section
     const previewSection = document.getElementById('previewSection');
     previewSection.style.display = 'block';
+
+    // Display generation badges
+    displayGenerationBadges(data.generation_info, data.dictionary_applied);
 
     // Store data for download
     currentSyntheticData = data;
@@ -751,6 +1089,285 @@ function displayPreview(data) {
     document.getElementById('downloadZipBtn').onclick = () => downloadGeneratedData(false);
     document.getElementById('regenerateBtn').onclick = regenerateData;
     document.getElementById('newFileBtn').onclick = reset;
+
+    // Smoothly open the preview section without scrolling (slower animation)
+    setTimeout(() => {
+        previewSection.style.display = 'block';
+        setTimeout(() => {
+            previewSection.setAttribute('open', 'open');
+        }, 50);
+    }, 100);
+}
+
+// Display generation method badges
+function displayGenerationBadges(generationInfo, dictionaryApplied) {
+    const badgesContainer = document.getElementById('generationBadges');
+    if (!badgesContainer) return;
+
+    badgesContainer.innerHTML = '';
+
+    // Add method badge (make it hoverable like the timing badge)
+    if (generationInfo) {
+        let methodBadge;
+        if (generationInfo.method === 'llm') {
+            methodBadge = createHoverableBadge('🤖 LLM', 'badge-llm', 'Generated using AI model');
+        } else if (generationInfo.method === 'cached') {
+            methodBadge = createHoverableBadge('⚡ CACHED', 'badge-cached', 'Using cached generation pipeline');
+        } else if (generationInfo.method === 'fallback') {
+            methodBadge = createHoverableBadge('🔧 FALLBACK', 'badge-fallback', 'Template-based generation');
+        }
+        if (methodBadge) {
+            badgesContainer.appendChild(methodBadge);
+        }
+
+        // Add processing time badge if timings are available
+        if (generationInfo.all_timings && generationInfo.all_timings.total) {
+            const totalTime = generationInfo.all_timings.total;
+            const timeText = totalTime < 1 ? `${Math.round(totalTime * 1000)}ms` : `${totalTime.toFixed(1)}s`;
+            const processingBadge = createProcessingTimeBadge(timeText, generationInfo.all_timings, generationInfo.method);
+            badgesContainer.appendChild(processingBadge);
+        }
+
+        // Add regenerated badge if applicable
+        if (generationInfo.regenerated) {
+            const badge = createBadge('🔄 REGENERATED', 'badge-warning', 'Regenerated for better quality');
+            badgesContainer.appendChild(badge);
+        }
+    }
+
+    // Add dictionary badge if applicable
+    if (dictionaryApplied) {
+        const badge = createBadge('📖 DICTIONARY', 'badge-dictionary', 'Dictionary constraints applied');
+        badgesContainer.appendChild(badge);
+    }
+}
+
+// Create a simple badge element
+function createBadge(text, className, title) {
+    const badge = document.createElement('span');
+    badge.className = `badge ${className}`;
+    badge.textContent = text;
+    badge.title = title;
+    return badge;
+}
+
+// Create a hoverable badge (like the timing badge)
+function createHoverableBadge(text, className, title) {
+    const badge = document.createElement('span');
+    badge.className = `badge ${className} hoverable-badge`;
+    badge.textContent = text;
+    badge.title = title;
+    badge.style.cursor = 'pointer';
+
+    // Make badge hoverable to show generation methods tooltip
+    let hoverTimeout;
+    badge.onmouseenter = (e) => {
+        hoverTimeout = setTimeout(() => {
+            showGenerationMethodsTooltip(e.target);
+        }, 300);
+    };
+
+    badge.onmouseleave = () => {
+        clearTimeout(hoverTimeout);
+    };
+
+    badge.onclick = (e) => {
+        e.stopPropagation();
+        clearTimeout(hoverTimeout);
+        showGenerationMethodsTooltip(e.target);
+    };
+
+    return badge;
+}
+
+// Create processing time badge with hover details
+function createProcessingTimeBadge(timeText, timings, generationMethod) {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-time hoverable-badge';
+    badge.innerHTML = `⏱️ ${timeText}`;
+    badge.title = 'Hover for timing breakdown';
+
+    // Make entire badge hoverable
+    let hoverTimeout;
+    badge.onmouseenter = (e) => {
+        hoverTimeout = setTimeout(() => {
+            showTimingBreakdown(e.target, timings, generationMethod);
+        }, 300);
+    };
+
+    badge.onmouseleave = () => {
+        clearTimeout(hoverTimeout);
+    };
+
+    badge.onclick = (e) => {
+        e.stopPropagation();
+        clearTimeout(hoverTimeout);
+        showTimingBreakdown(e.target, timings);
+    };
+
+    return badge;
+}
+
+// Show timing breakdown tooltip
+function showTimingBreakdown(target, timings, generationMethod) {
+    // Remove any existing floating tooltip
+    const existingTooltip = document.getElementById('timing-tooltip');
+    if (existingTooltip) {
+        existingTooltip.remove();
+    }
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'timing-tooltip';
+    tooltip.className = 'floating-tooltip timing-breakdown';
+
+    // Build timing breakdown HTML
+    let html = '<div class="timing-breakdown-content"><h4>Processing Time Breakdown</h4><div class="timing-items">';
+
+    // Determine cache hit/miss and method for consistent display
+    const cacheHit = generationMethod === 'cached';
+    const isFallback = generationMethod === 'fallback';
+
+    const timingLabels = {
+        'metadata_extraction': '📊 Extract Metadata',
+        'cache_check': cacheHit ? '🔍 Check Cache [✓]' : '🔍 Check Cache [−]',
+        'llm_response': cacheHit ? '🤖 AI (cached)' : (isFallback ? '🔧 Fallback' : '🤖 AI Response'),
+        'code_execution': '⚡ Execute Code',
+        'validation': '✅ Validate Output',
+        'total': '⏱️ Total Time'
+    };
+
+    for (const [key, value] of Object.entries(timings)) {
+        // Skip code_generation as it's redundant with llm_response
+        if (key === 'code_generation') continue;
+
+        if (value !== undefined && value !== null) {
+            const label = timingLabels[key] || key;
+            const timeStr = value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(2)}s`;
+            const cssClass = key === 'total' ? 'timing-total' : '';
+            html += `<div class="timing-item ${cssClass}">
+                <span class="timing-label">${label}</span>
+                <span class="timing-value">${timeStr}</span>
+            </div>`;
+        }
+    }
+
+    html += '</div></div>';
+    tooltip.innerHTML = html;
+
+    // Position the tooltip
+    document.body.appendChild(tooltip);
+    const rect = target.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+    tooltip.style.position = 'absolute';
+    tooltip.style.left = `${rect.left + scrollLeft}px`;
+    tooltip.style.top = `${rect.bottom + scrollTop + 5}px`;
+    tooltip.style.zIndex = '10000';
+
+    // Ensure tooltip is within viewport
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (tooltipRect.right > window.innerWidth) {
+        tooltip.style.left = `${window.innerWidth - tooltipRect.width - 10}px`;
+    }
+    if (tooltipRect.bottom > window.innerHeight) {
+        tooltip.style.top = `${rect.top + scrollTop - tooltipRect.height - 5}px`;
+    }
+
+    // Close handlers
+    const closeTooltip = (e) => {
+        if (!tooltip.contains(e.target) && e.target !== target) {
+            tooltip.remove();
+            document.removeEventListener('click', closeTooltip);
+        }
+    };
+
+    setTimeout(() => {
+        document.addEventListener('click', closeTooltip);
+    }, 100);
+}
+
+// Show the generation methods tooltip
+function showGenerationMethodsTooltip(target) {
+    // Remove any existing floating tooltip
+    const existingTooltip = document.getElementById('floating-tooltip');
+    if (existingTooltip) {
+        existingTooltip.remove();
+    }
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'floating-tooltip';
+    tooltip.className = 'floating-tooltip';
+
+    // Create the same content as the Generation Settings tooltip
+    tooltip.innerHTML = `
+        <div class="tooltip-content">
+            <h4>Generation Methods</h4>
+            <div class="badge-legend">
+                <div class="badge-legend-item">
+                    <span class="badge badge-llm">🤖 LLM</span>
+                    <span>AI-powered generation using Azure OpenAI</span>
+                </div>
+                <div class="badge-legend-item">
+                    <span class="badge badge-cached">⚡ CACHED</span>
+                    <span>Using previously generated code for similar data</span>
+                </div>
+                <div class="badge-legend-item">
+                    <span class="badge badge-fallback">🔧 FALLBACK</span>
+                    <span>Template-based generation when LLM is unavailable</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Append to body and position
+    document.body.appendChild(tooltip);
+
+    const rect = target.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+    // Position with scroll compensation
+    tooltip.style.position = 'absolute';
+    tooltip.style.left = `${rect.left + scrollLeft}px`;
+    tooltip.style.top = `${rect.bottom + scrollTop + 5}px`;
+    tooltip.style.zIndex = '10000';
+
+    // Ensure tooltip is within viewport
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (tooltipRect.right > window.innerWidth) {
+        tooltip.style.left = `${window.innerWidth - tooltipRect.width - 10}px`;
+    }
+    if (tooltipRect.bottom > window.innerHeight) {
+        tooltip.style.top = `${rect.top + scrollTop - tooltipRect.height - 5}px`;
+    }
+
+    // Close on mouse leave or click outside
+    const closeTooltip = (e) => {
+        if (!tooltip.contains(e.target) && e.target !== target) {
+            tooltip.remove();
+            document.removeEventListener('click', closeTooltip);
+            document.removeEventListener('mousemove', checkMouseDistance);
+        }
+    };
+
+    // Check mouse distance for auto-close
+    const checkMouseDistance = (e) => {
+        const distance = Math.sqrt(
+            Math.pow(e.clientX - (rect.left + rect.width / 2), 2) +
+            Math.pow(e.clientY - (rect.top + rect.height / 2), 2)
+        );
+        if (distance > 200) { // Close if mouse moves far away
+            tooltip.remove();
+            document.removeEventListener('mousemove', checkMouseDistance);
+            document.removeEventListener('click', closeTooltip);
+        }
+    };
+
+    setTimeout(() => {
+        document.addEventListener('click', closeTooltip);
+        document.addEventListener('mousemove', checkMouseDistance);
+    }, 100);
 }
 
 // Download generated data
@@ -779,6 +1396,13 @@ async function downloadGeneratedData(preview = false) {
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
+
+    // Add cache mode
+    const cacheMode = document.getElementById('cacheMode');
+    if (cacheMode) {
+        formData.append('cache_mode', cacheMode.value);
+    }
+
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');  // Request actual download
 
@@ -919,9 +1543,10 @@ async function processDictionaryFile(file) {
             }
         }
 
-        // Show configuration section
+        // Show configuration section and open it
         if (configSection) {
             configSection.style.display = 'block';
+            configSection.setAttribute('open', 'open');
         }
 
         // Update quick action buttons
@@ -1018,8 +1643,116 @@ function initDictionaryHandlers() {
 
 }
 
+// Clear data file function
+function clearDataFile(event) {
+    event.stopPropagation();
+    reset();
+}
+
+// Robust append-to-body tooltip solution
+function initTooltips() {
+    // Create a single tooltip element that will be moved to body
+    let globalTooltip = document.getElementById('global-tooltip');
+    if (!globalTooltip) {
+        globalTooltip = document.createElement('div');
+        globalTooltip.id = 'global-tooltip';
+        globalTooltip.className = 'global-tooltip';
+        document.body.appendChild(globalTooltip);
+    }
+
+    let activeTrigger = null;
+    let isTouch = false;
+
+    // Function to show tooltip
+    const showTooltip = (trigger, event) => {
+        // Get tooltip content from the trigger's tooltip element
+        const tooltipContent = trigger.closest('.info-tooltip')?.querySelector('.info-tooltip-content');
+        if (!tooltipContent) return;
+
+        activeTrigger = trigger;
+
+        // Clone the content HTML
+        globalTooltip.innerHTML = tooltipContent.innerHTML;
+        globalTooltip.style.display = 'block';
+
+        // Calculate position relative to viewport
+        const triggerRect = trigger.getBoundingClientRect();
+        const tooltipRect = globalTooltip.getBoundingClientRect();
+
+        let top = triggerRect.bottom + window.scrollY + 10; // 10px below trigger
+        let left = triggerRect.left + window.scrollX + (triggerRect.width / 2) - (tooltipRect.width / 2);
+
+        // Prevent going off-screen horizontally
+        const padding = 10;
+        if (left < padding) left = padding;
+        if (left + tooltipRect.width > window.innerWidth - padding) {
+            left = window.innerWidth - tooltipRect.width - padding;
+        }
+
+        // If not enough space below, show above
+        if (triggerRect.bottom + tooltipRect.height + 10 > window.innerHeight) {
+            top = triggerRect.top + window.scrollY - tooltipRect.height - 10;
+        }
+
+        globalTooltip.style.position = 'absolute';
+        globalTooltip.style.left = `${left}px`;
+        globalTooltip.style.top = `${top}px`;
+        globalTooltip.classList.add('visible');
+    };
+
+    // Function to hide tooltip
+    const hideTooltip = () => {
+        if (globalTooltip) {
+            globalTooltip.classList.remove('visible');
+            setTimeout(() => {
+                if (!globalTooltip.classList.contains('visible')) {
+                    globalTooltip.style.display = 'none';
+                }
+            }, 200);
+        }
+        activeTrigger = null;
+    };
+
+    // Add event listeners to all tooltip triggers
+    document.querySelectorAll('.info-tooltip-icon').forEach(trigger => {
+        // Desktop: hover
+        trigger.addEventListener('mouseenter', (e) => {
+            if (!isTouch) showTooltip(trigger, e);
+        });
+        trigger.addEventListener('mouseleave', () => {
+            if (!isTouch) hideTooltip();
+        });
+
+        // Mobile: click/tap
+        trigger.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (activeTrigger === trigger) {
+                hideTooltip();
+            } else {
+                hideTooltip(); // Hide any existing tooltip
+                showTooltip(trigger, e);
+                isTouch = true;
+            }
+        });
+    });
+
+    // Hide tooltip on click/tap outside
+    document.addEventListener('click', (e) => {
+        if (activeTrigger && !activeTrigger.contains(e.target) && !globalTooltip.contains(e.target)) {
+            hideTooltip();
+        }
+    });
+
+    // Detect touch vs mouse
+    document.addEventListener('touchstart', () => { isTouch = true; });
+    document.addEventListener('mousemove', () => { isTouch = false; });
+}
+
 // Initialize on load
 document.addEventListener('DOMContentLoaded', function() {
     init();
     initDictionaryHandlers();
+    initTooltips();
 });

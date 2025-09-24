@@ -1,0 +1,8 @@
+# Ignore screenshot files
+screenshots/*.png
+screenshots/*.jpg
+screenshots/*.jpeg
+screenshots/*.gif
+
+# Keep the directory structure
+!screenshots/.gitkeep

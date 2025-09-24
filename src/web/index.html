@@ -237,6 +237,25 @@
                         </div>
 
                         <div class="settings-item">
+                            <label for="cacheMode">Cache
+                                <span class="info-tooltip">
+                                    <span class="info-tooltip-icon">i</span>
+                                    <div class="info-tooltip-content">
+                                        <strong>Cache Mode</strong><br><br>
+                                        🚫 <strong>Off</strong>: Always generate new code<br>
+                                        📐 <strong>Structure</strong>: Match column names/types only<br>
+                                        📊 <strong>Full</strong>: Match columns + statistics
+                                    </div>
+                                </span>
+                            </label>
+                            <select id="cacheMode">
+                                <option value="structure_stats">📊 Full Match</option>
+                                <option value="structure">📐 Structure Only</option>
+                                <option value="off">🚫 Off</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item">
                             <label for="demoDataset">Demo</label>
                             <select id="demoDataset">
                                 <option value="">None</option>

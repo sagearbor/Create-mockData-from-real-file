@@ -1,0 +1,145 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 5,
+      "columns": 3
+    },
+    "columns": [
+      {
+        "name": "customer_id",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "purchase_amount",
+        "dtype": "float64",
+        "python_type": "float",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "product_category",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 536,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "customer_id": {
+      "name": "customer_id",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 3.0,
+      "median": 3.0,
+      "std": 1.5811388300841898,
+      "min": 1.0,
+      "max": 5.0,
+      "q25": 2.0,
+      "q75": 4.0,
+      "skewness": 0.0,
+      "kurtosis": -1.2000000000000002,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "purchase_amount": {
+      "name": "purchase_amount",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 195.3,
+      "median": 175.25,
+      "std": 79.80902987757713,
+      "min": 100.5,
+      "max": 300.0,
+      "q25": 150.0,
+      "q75": 250.75,
+      "skewness": 0.2993652007605323,
+      "kurtosis": -1.383065150890924,
+      "is_integer": false,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": true,
+      "decimal_places": null,
+      "clinical_context": {
+        "type": "unit",
+        "suggested_values": "mcg",
+        "category": "clinical"
+      }
+    },
+    "product_category": {
+      "name": "product_category",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 3,
+      "unique_ratio": 0.6,
+      "most_common_values": {
+        "Electronics": 2,
+        "Clothing": 2,
+        "Books": 1
+      },
+      "preserve_values": true,
+      "avg_length": 8.6,
+      "min_length": 5,
+      "max_length": 11,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "product_category"
+    }
+  },
+  "patterns": {
+    "product_category": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_suffix": "ics"
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [],
+      "correlation_matrix": {
+        "customer_id": {
+          "customer_id": 1.0,
+          "purchase_amount": 0.29370590260217955
+        },
+        "purchase_amount": {
+          "customer_id": 0.29370590260217955,
+          "purchase_amount": 1.0
+        }
+      }
+    },
+    "categorical_associations": {},
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.00051116943359375
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T18:18:44.767523"
+}

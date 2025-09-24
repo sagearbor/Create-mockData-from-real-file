@@ -1,0 +1,231 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 3,
+      "columns": 4
+    },
+    "columns": [
+      {
+        "name": "id",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "name",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "created_date",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "amount",
+        "dtype": "float64",
+        "python_type": "float",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 563,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "id": {
+      "name": "id",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 2.0,
+      "median": 2.0,
+      "std": 1.0,
+      "min": 1.0,
+      "max": 3.0,
+      "q25": 1.5,
+      "q75": 2.5,
+      "skewness": 0.0,
+      "kurtosis": 0.0,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "name": {
+      "name": "name",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 3,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "Alice": 1,
+        "Bob": 1,
+        "Charlie": 1
+      },
+      "preserve_values": true,
+      "avg_length": 5.0,
+      "min_length": 3,
+      "max_length": 7,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "name",
+      "clinical_context": {
+        "type": "full_name",
+        "suggested_values": [
+          "Patricia Jones",
+          "Kenneth Lopez",
+          "Steven Moore",
+          "Joshua White",
+          "Robert Williams",
+          "Nicholas Harris",
+          "Gary Thomas",
+          "Alex Williams",
+          "Morgan Lee",
+          "Gary Miller",
+          "Amy Thompson",
+          "Parker Nelson",
+          "Lisa Mitchell",
+          "Taylor Baker",
+          "Stephanie King",
+          "Timothy Lewis",
+          "Morgan Davis",
+          "Donald Wright",
+          "Gary Sanchez",
+          "John Hernandez"
+        ],
+        "category": "personal"
+      },
+      "suggested_values": [
+        "Patricia Jones",
+        "Kenneth Lopez",
+        "Steven Moore",
+        "Joshua White",
+        "Robert Williams",
+        "Nicholas Harris",
+        "Gary Thomas",
+        "Alex Williams",
+        "Morgan Lee",
+        "Gary Miller"
+      ],
+      "is_clinical": true
+    },
+    "created_date": {
+      "name": "created_date",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 3,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "2024-01-15": 1,
+        "2024-02-20": 1,
+        "2024-03-25": 1
+      },
+      "preserve_values": true,
+      "avg_length": 10.0,
+      "min_length": 10,
+      "max_length": 10,
+      "is_categorical": false,
+      "is_datetime_string": true,
+      "datetime_format": "%Y-%m-%d",
+      "has_numbers": true,
+      "has_special_chars": true,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "created_date"
+    },
+    "amount": {
+      "name": "amount",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 175.5,
+      "median": 175.25,
+      "std": 75.12531197938549,
+      "min": 100.5,
+      "max": 250.75,
+      "q25": 137.875,
+      "q75": 213.0,
+      "skewness": 0.014974813575148998,
+      "kurtosis": 0.0,
+      "is_integer": false,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": true,
+      "decimal_places": null,
+      "clinical_context": {
+        "type": "unit",
+        "suggested_values": "puffs",
+        "category": "clinical"
+      }
+    }
+  },
+  "patterns": {
+    "name": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_suffix": "ice"
+    },
+    "created_date": {
+      "common_patterns": [],
+      "detected_format": "date_iso",
+      "format_confidence": 1.0,
+      "common_prefix": "2024-0",
+      "common_suffix": "-15"
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [],
+      "correlation_matrix": {
+        "id": {
+          "id": 1.0,
+          "amount": 0.4975020937051917
+        },
+        "amount": {
+          "id": 0.4975020937051917,
+          "amount": 1.0
+        }
+      }
+    },
+    "categorical_associations": [
+      {
+        "column1": "name",
+        "column2": "created_date",
+        "association_strength": 0.6666666666666667
+      }
+    ],
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.0005369186401367188
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T19:57:35.941132"
+}

@@ -208,6 +208,97 @@
             background: var(--primary-hover);
             transform: translateY(-1px);
         }
+
+        /* Cache Section Styles */
+        .cache-section {
+            background: var(--surface);
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .cache-section h2 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+
+        .cache-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .cache-stat-card {
+            background: var(--background);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+
+        .cache-stat-card h4 {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .cache-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .clear-cache-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .clear-cache-btn:hover {
+            background: #dc2626;
+        }
+
+        .cache-entries {
+            margin-top: 1.5rem;
+        }
+
+        .cache-entries h3 {
+            color: var(--text-primary);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .cache-entries-list {
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--background);
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+
+        .cache-entry-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .cache-entry-item:last-child {
+            border-bottom: none;
+        }
+
+        .cache-entry-columns {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+        }
     </style>
 </head>
 <body>
@@ -243,6 +334,13 @@
             <input type="date" id="startDate" class="date-input">
             <span>to</span>
             <input type="date" id="endDate" class="date-input">
+            <label style="margin-left: 1rem;">Granularity:</label>
+            <select id="timeGranularity" class="date-input">
+                <option value="hour">Hourly</option>
+                <option value="day" selected>Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
+            </select>
             <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
         </div>
 
@@ -313,6 +411,34 @@
             </div>
         </div>
 
+        <!-- Cache Statistics Section -->
+        <div class="cache-section">
+            <h2>💾 Cache Library</h2>
+            <div class="cache-stats-grid">
+                <div class="cache-stat-card">
+                    <h4>Cached Programs</h4>
+                    <div class="cache-value" id="cachedPrograms">-</div>
+                </div>
+                <div class="cache-stat-card">
+                    <h4>Unique Formats</h4>
+                    <div class="cache-value" id="uniqueFormats">-</div>
+                </div>
+                <div class="cache-stat-card">
+                    <h4>Cache Size</h4>
+                    <div class="cache-value" id="cacheSize">-</div>
+                </div>
+                <div class="cache-stat-card">
+                    <button class="clear-cache-btn" onclick="clearCache()">🗑️ Clear Cache</button>
+                </div>
+            </div>
+            <div class="cache-entries">
+                <h3>Recent Cached Patterns</h3>
+                <div id="cacheEntriesList" class="cache-entries-list">
+                    <p>Loading cache entries...</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Recent Logs Table -->
         <div class="logs-table">
             <h2>📋 Recent Generation Logs</h2>
@@ -353,16 +479,74 @@
         document.getElementById('startDate').valueAsDate = startDate;
         document.getElementById('endDate').valueAsDate = endDate;
 
+        // Fetch cache information
+        async function fetchCacheInfo() {
+            try {
+                const response = await fetch('/api/cache-info');
+                if (!response.ok) throw new Error('Failed to fetch cache info');
+
+                const data = await response.json();
+                updateCacheSection(data);
+            } catch (error) {
+                console.error('Error fetching cache info:', error);
+            }
+        }
+
+        // Update cache section
+        function updateCacheSection(data) {
+            // Update stats
+            document.getElementById('cachedPrograms').textContent = data.statistics.total_entries || '0';
+            document.getElementById('uniqueFormats').textContent = data.statistics.unique_formats || '0';
+            document.getElementById('cacheSize').textContent = `${data.statistics.cache_size_mb || 0} MB`;
+
+            // Update entries list
+            const entriesList = document.getElementById('cacheEntriesList');
+            if (data.entries && data.entries.length > 0) {
+                entriesList.innerHTML = data.entries.slice(0, 10).map(entry => `
+                    <div class="cache-entry-item">
+                        <div>${new Date(entry.timestamp).toLocaleString()}</div>
+                        <div class="cache-entry-columns">
+                            ${entry.columns.join(', ') || 'No columns info'}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                entriesList.innerHTML = '<p>No cached programs yet</p>';
+            }
+        }
+
+        // Clear cache function
+        async function clearCache() {
+            if (confirm('Are you sure you want to clear all cached programs?')) {
+                try {
+                    const response = await fetch('/api/cache/clear', { method: 'DELETE' });
+                    if (!response.ok) throw new Error('Failed to clear cache');
+
+                    const result = await response.json();
+                    alert(result.message);
+                    fetchCacheInfo(); // Refresh cache info
+                } catch (error) {
+                    console.error('Error clearing cache:', error);
+                    alert('Failed to clear cache');
+                }
+            }
+        }
+
         // Fetch and process log data
         async function fetchLogs() {
             const start = document.getElementById('startDate').value;
             const end = document.getElementById('endDate').value;
+            const granularity = document.getElementById('timeGranularity').value;
 
             try {
                 const response = await fetch(`/api/usage-logs?start=${start}&end=${end}`);
                 if (!response.ok) throw new Error('Failed to fetch logs');
 
                 const data = await response.json();
+
+                // Process data based on granularity
+                data.aggregated = aggregateDataByGranularity(data.logs, granularity);
+
                 updateDashboard(data);
             } catch (error) {
                 console.error('Error fetching logs:', error);
@@ -370,12 +554,52 @@
             }
         }
 
+        // Aggregate data based on selected granularity
+        function aggregateDataByGranularity(logs, granularity) {
+            const grouped = {};
+
+            logs.forEach(log => {
+                const date = new Date(log.timestamp);
+                let key;
+
+                switch(granularity) {
+                    case 'hour':
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`;
+                        break;
+                    case 'day':
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                        break;
+                    case 'week':
+                        const weekStart = new Date(date);
+                        weekStart.setDate(date.getDate() - date.getDay());
+                        key = `Week of ${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(2, '0')}-${String(weekStart.getDate()).padStart(2, '0')}`;
+                        break;
+                    case 'month':
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                        break;
+                    default:
+                        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                }
+
+                if (!grouped[key]) {
+                    grouped[key] = { requests: 0, cache_hits: 0, date: key };
+                }
+
+                grouped[key].requests++;
+                if (log.cache_hit || log.method === 'cached') {
+                    grouped[key].cache_hits++;
+                }
+            });
+
+            return Object.values(grouped).sort((a, b) => new Date(a.date) - new Date(b.date));
+        }
+
         function updateDashboard(data) {
             // Update metrics cards
             updateMetrics(data.metrics);
 
-            // Update charts
-            updateUsageChart(data.daily);
+            // Update charts - use aggregated data if available, otherwise use daily
+            updateUsageChart(data.aggregated || data.daily);
             updateResponseTimeChart(data.logs);
             updateCacheChart(data.metrics);
             updateColumnTypesChart(data.logs);
@@ -444,13 +668,21 @@
 
             // Create histogram bins
             const bins = [0, 2, 4, 6, 8, 10, 15, 20];
-            const counts = new Array(bins.length - 1).fill(0);
+            const cachedCounts = new Array(bins.length - 1).fill(0);
+            const llmCounts = new Array(bins.length - 1).fill(0);
 
+            // Separate logs by method (cached vs LLM)
             logs.forEach(log => {
                 const time = log.total_time;
+                const isCached = log.method === 'cached' || log.cache_hit === true;
+
                 for (let i = 0; i < bins.length - 1; i++) {
                     if (time >= bins[i] && time < bins[i + 1]) {
-                        counts[i]++;
+                        if (isCached) {
+                            cachedCounts[i]++;
+                        } else {
+                            llmCounts[i]++;
+                        }
                         break;
                     }
                 }
@@ -462,17 +694,51 @@
                 type: 'bar',
                 data: {
                     labels: bins.slice(0, -1).map((b, i) => `${b}-${bins[i+1]}s`),
-                    datasets: [{
-                        label: 'Response Time Distribution',
-                        data: counts,
-                        backgroundColor: '#6366f1'
-                    }]
+                    datasets: [
+                        {
+                            label: 'Cached',
+                            data: cachedCounts,
+                            backgroundColor: '#10b981',
+                            stack: 'Stack 0'
+                        },
+                        {
+                            label: 'LLM Generated',
+                            data: llmCounts,
+                            backgroundColor: '#6366f1',
+                            stack: 'Stack 0'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            onClick: function(e, legendItem, legend) {
+                                // Default behavior - toggle visibility
+                                const index = legendItem.datasetIndex;
+                                const chart = legend.chart;
+                                const meta = chart.getDatasetMeta(index);
+                                meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
+                                chart.update();
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
                     scales: {
+                        x: {
+                            stacked: true
+                        },
                         y: {
+                            stacked: true,
                             beginAtZero: true
                         }
                     }
@@ -614,12 +880,15 @@
         document.getElementById('refreshBtn').addEventListener('click', fetchLogs);
         document.getElementById('startDate').addEventListener('change', fetchLogs);
         document.getElementById('endDate').addEventListener('change', fetchLogs);
+        document.getElementById('timeGranularity').addEventListener('change', fetchLogs);
 
         // Initial load
         fetchLogs();
+        fetchCacheInfo();
 
         // Auto-refresh every 30 seconds
         setInterval(fetchLogs, 30000);
+        setInterval(fetchCacheInfo, 30000);
     </script>
 </body>
 </html>

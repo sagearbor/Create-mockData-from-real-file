@@ -1,0 +1,141 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 2,
+      "columns": 3
+    },
+    "columns": [
+      {
+        "name": "id",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 2,
+        "null_count": 0
+      },
+      {
+        "name": "random_col_1758670113",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 2,
+        "null_count": 0
+      },
+      {
+        "name": "another_col",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 2,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 394,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "id": {
+      "name": "id",
+      "non_null_count": 2,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 1.5,
+      "median": 1.5,
+      "std": 0.7071067811865476,
+      "min": 1.0,
+      "max": 2.0,
+      "q25": 1.25,
+      "q75": 1.75,
+      "skewness": 0.0,
+      "kurtosis": 0.0,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "random_col_1758670113": {
+      "name": "random_col_1758670113",
+      "non_null_count": 2,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 2,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "value1": 1,
+        "value2": 1
+      },
+      "preserve_values": true,
+      "avg_length": 6.0,
+      "min_length": 6,
+      "max_length": 6,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "random_col_1758670113"
+    },
+    "another_col": {
+      "name": "another_col",
+      "non_null_count": 2,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 2,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "data1": 1,
+        "data2": 1
+      },
+      "preserve_values": true,
+      "avg_length": 5.0,
+      "min_length": 5,
+      "max_length": 5,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "another_col"
+    }
+  },
+  "patterns": {
+    "random_col_1758670113": {
+      "common_patterns": [],
+      "detected_format": null
+    },
+    "another_col": {
+      "common_patterns": [],
+      "detected_format": null
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {},
+    "categorical_associations": [
+      {
+        "column1": "random_col_1758670113",
+        "column2": "another_col",
+        "association_strength": 0.5
+      }
+    ],
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.0003757476806640625
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T19:28:42.756378"
+}

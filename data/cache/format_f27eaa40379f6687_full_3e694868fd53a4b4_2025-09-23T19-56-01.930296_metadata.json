@@ -1,0 +1,646 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 5,
+      "columns": 9
+    },
+    "columns": [
+      {
+        "name": "customer_id",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "name",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "email",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "phone",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "city",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "registration_date",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "status",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 2,
+        "null_count": 0
+      },
+      {
+        "name": "testt",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 2,
+        "null_count": 0
+      },
+      {
+        "name": "test2",
+        "dtype": "float64",
+        "python_type": "float",
+        "nullable": true,
+        "unique_count": 0,
+        "null_count": 5
+      }
+    ],
+    "memory_usage": 2528,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "customer_id": {
+      "name": "customer_id",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "C001": 1,
+        "C002": 1,
+        "C003": 1,
+        "C004": 1,
+        "C005": 1
+      },
+      "preserve_values": true,
+      "avg_length": 4.0,
+      "min_length": 4,
+      "max_length": 4,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "customer_id"
+    },
+    "name": {
+      "name": "name",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "John Smith": 1,
+        "Jane Doe": 1,
+        "Bob Johnson": 1,
+        "Alice Brown": 1,
+        "Charlie Wilson": 1
+      },
+      "preserve_values": true,
+      "avg_length": 10.8,
+      "min_length": 8,
+      "max_length": 14,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "name",
+      "clinical_context": {
+        "type": "full_name",
+        "suggested_values": [
+          "Stephanie Nguyen",
+          "Charles Rivera",
+          "Riley Hernandez",
+          "Carol Hall",
+          "Elizabeth Perez",
+          "Rebecca White",
+          "Daniel Jones",
+          "Nicholas Wilson",
+          "Nancy Martinez",
+          "Dorothy Thompson",
+          "Mary Davis",
+          "Taylor Martin",
+          "Susan Young",
+          "Amanda Harris",
+          "Hayden Wilson",
+          "Nicholas Scott",
+          "Mary Rivera",
+          "Matthew Mitchell",
+          "Christopher Harris",
+          "Ashley Green"
+        ],
+        "category": "personal"
+      },
+      "suggested_values": [
+        "Stephanie Nguyen",
+        "Charles Rivera",
+        "Riley Hernandez",
+        "Carol Hall",
+        "Elizabeth Perez",
+        "Rebecca White",
+        "Daniel Jones",
+        "Nicholas Wilson",
+        "Nancy Martinez",
+        "Dorothy Thompson"
+      ],
+      "is_clinical": true
+    },
+    "email": {
+      "name": "email",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "john.smith@email.com": 1,
+        "jane.doe@email.com": 1,
+        "bob.j@email.com": 1,
+        "alice.b@email.com": 1,
+        "charlie.w@email.com": 1
+      },
+      "preserve_values": true,
+      "avg_length": 17.8,
+      "min_length": 15,
+      "max_length": 20,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": true,
+      "is_email_like": true,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "detected_type": "email",
+      "preserve_format": true,
+      "column_name": "email"
+    },
+    "phone": {
+      "name": "phone",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "555-0101": 1,
+        "555-0102": 1,
+        "555-0103": 1,
+        "555-0104": 1,
+        "555-0105": 1
+      },
+      "preserve_values": true,
+      "avg_length": 8.0,
+      "min_length": 8,
+      "max_length": 8,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": true,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "detected_type": "phone",
+      "preserve_format": true,
+      "phone_format": "dash",
+      "column_name": "phone"
+    },
+    "city": {
+      "name": "city",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "New York": 1,
+        "Los Angeles": 1,
+        "Chicago": 1,
+        "Houston": 1,
+        "Phoenix": 1
+      },
+      "preserve_values": true,
+      "avg_length": 8.0,
+      "min_length": 7,
+      "max_length": 11,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "city",
+      "clinical_context": {
+        "type": "city",
+        "suggested_values": [
+          "New York",
+          "Los Angeles",
+          "Chicago",
+          "Houston",
+          "Phoenix",
+          "Philadelphia",
+          "San Antonio",
+          "San Diego",
+          "Dallas",
+          "San Jose",
+          "Austin",
+          "Jacksonville",
+          "Fort Worth",
+          "Columbus",
+          "Indianapolis",
+          "Charlotte",
+          "San Francisco",
+          "Seattle",
+          "Denver",
+          "Washington"
+        ],
+        "category": "geographic"
+      },
+      "suggested_values": [
+        "New York",
+        "Los Angeles",
+        "Chicago",
+        "Houston",
+        "Phoenix",
+        "Philadelphia",
+        "San Antonio",
+        "San Diego",
+        "Dallas",
+        "San Jose"
+      ],
+      "is_clinical": true
+    },
+    "registration_date": {
+      "name": "registration_date",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "2023-01-15": 1,
+        "2023-02-20": 1,
+        "2023-03-10": 1,
+        "2023-04-05": 1,
+        "2023-05-12": 1
+      },
+      "preserve_values": true,
+      "avg_length": 10.0,
+      "min_length": 10,
+      "max_length": 10,
+      "is_categorical": false,
+      "is_datetime_string": true,
+      "datetime_format": "%Y-%m-%d",
+      "has_numbers": true,
+      "has_special_chars": true,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "registration_date"
+    },
+    "status": {
+      "name": "status",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 2,
+      "unique_ratio": 0.4,
+      "most_common_values": {
+        "Active": 4,
+        "Inactive": 1
+      },
+      "preserve_values": true,
+      "avg_length": 6.4,
+      "min_length": 6,
+      "max_length": 8,
+      "is_categorical": true,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "status",
+      "clinical_context": {
+        "type": "status",
+        "suggested_values": [
+          "Active",
+          "Resolved",
+          "Chronic",
+          "Acute",
+          "Stable",
+          "Unstable"
+        ],
+        "category": "clinical"
+      },
+      "suggested_values": [
+        "Active",
+        "Resolved",
+        "Chronic",
+        "Acute",
+        "Stable",
+        "Unstable"
+      ],
+      "is_clinical": true
+    },
+    "testt": {
+      "name": "testt",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 0.6,
+      "median": 1.0,
+      "std": 0.5477225575051662,
+      "min": 0.0,
+      "max": 1.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": -0.6085806194501843,
+      "kurtosis": -3.333333333333335,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": true,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "decimal",
+      "clinical_context": {
+        "type": "lab_test",
+        "suggested_values": [
+          "PT",
+          "Fasting glucose",
+          "CO2",
+          "ALT",
+          "Calcium",
+          "Potassium",
+          "ESR",
+          "TSH",
+          "Triglycerides",
+          "Total bilirubin",
+          "Vitamin D",
+          "WBC",
+          "Iron",
+          "Urine ketones",
+          "Total protein",
+          "Glucose",
+          "C-peptide",
+          "Monocytes",
+          "BNP",
+          "INR"
+        ],
+        "category": "clinical"
+      }
+    },
+    "test2": {
+      "name": "test2",
+      "non_null_count": 0,
+      "null_percentage": 100.0,
+      "type": "numeric",
+      "all_null": true,
+      "clinical_context": {
+        "type": "lab_test",
+        "suggested_values": [
+          "Urine protein",
+          "Urine glucose",
+          "Total bilirubin",
+          "Alkaline phosphatase",
+          "Free T3",
+          "Neutrophils",
+          "Procalcitonin",
+          "Myoglobin",
+          "Urine ketones",
+          "Albumin",
+          "Potassium",
+          "CO2",
+          "Random glucose",
+          "CK-MB",
+          "CRP",
+          "WBC",
+          "Monocytes",
+          "Hemoglobin",
+          "Urine specific gravity",
+          "BUN"
+        ],
+        "category": "clinical"
+      }
+    }
+  },
+  "patterns": {
+    "customer_id": {
+      "common_patterns": [],
+      "detected_format": null,
+      "id_pattern": {
+        "type": "prefix_sequential",
+        "prefix": "C",
+        "example": "C001",
+        "confidence": 1.0
+      },
+      "common_prefix": "C00"
+    },
+    "name": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_suffix": "son"
+    },
+    "email": {
+      "common_patterns": [],
+      "detected_format": "email",
+      "format_confidence": 1.0,
+      "common_suffix": "com"
+    },
+    "phone": {
+      "common_patterns": [],
+      "detected_format": "phone_simple",
+      "format_confidence": 1.0,
+      "common_prefix": "555-010"
+    },
+    "city": {
+      "common_patterns": [],
+      "detected_format": null
+    },
+    "registration_date": {
+      "common_patterns": [],
+      "detected_format": "date_iso",
+      "format_confidence": 1.0,
+      "common_prefix": "2023-0"
+    },
+    "status": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_suffix": "ive"
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [],
+      "correlation_matrix": {
+        "testt": {
+          "testt": 1.0,
+          "test2": NaN
+        },
+        "test2": {
+          "testt": NaN,
+          "test2": NaN
+        }
+      }
+    },
+    "categorical_associations": [
+      {
+        "column1": "customer_id",
+        "column2": "name",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "customer_id",
+        "column2": "email",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "customer_id",
+        "column2": "phone",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "customer_id",
+        "column2": "city",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "customer_id",
+        "column2": "registration_date",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "customer_id",
+        "column2": "status",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "name",
+        "column2": "email",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "name",
+        "column2": "phone",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "name",
+        "column2": "city",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "name",
+        "column2": "registration_date",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "name",
+        "column2": "status",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "email",
+        "column2": "phone",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "email",
+        "column2": "city",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "email",
+        "column2": "registration_date",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "email",
+        "column2": "status",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "phone",
+        "column2": "city",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "phone",
+        "column2": "registration_date",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "phone",
+        "column2": "status",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "city",
+        "column2": "registration_date",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "city",
+        "column2": "status",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "registration_date",
+        "column2": "status",
+        "association_strength": 0.5
+      }
+    ],
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 0.8888888888888888,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [
+      "test2"
+    ],
+    "columns_all_null": [
+      "test2"
+    ],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.002410888671875
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T19:55:57.147274"
+}

@@ -266,19 +266,11 @@ async function generateSyntheticData() {
     const fileCount = parseInt(document.getElementById('fileCount').value);
     showLoading(`Generating ${fileCount} synthetic data file${fileCount > 1 ? 's' : ''}...`, true);
 
-    // Start progress flow and simulate real-time updates
-    updateProgressStep('extract-metadata', 'active');
-
-    // Simulate real-time progress based on typical timings
-    setTimeout(() => {
-        updateProgressStep('extract-metadata', 'completed', 0.05);
-        updateProgressStep('check-cache', 'active');
-    }, 100);
-
-    setTimeout(() => {
-        updateProgressStep('check-cache', 'completed', 0.01);
-        updateProgressStep('prepare-llm', 'active');
-    }, 200);
+    // Track which steps are active for real-time duration display
+    window.activeProgressStep = {
+        step: 'extract-metadata',
+        startTime: Date.now()
+    };
 
     const formData = new FormData();
     
@@ -305,6 +297,13 @@ async function generateSyntheticData() {
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
+
+    // Add cache mode
+    const cacheMode = document.getElementById('cacheMode');
+    if (cacheMode) {
+        formData.append('cache_mode', cacheMode.value);
+    }
+
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'true');  // Request preview mode
     
@@ -316,12 +315,83 @@ async function generateSyntheticData() {
             console.log(`  ${key}:`, value);
         }
     }
-    
+
+    // Use the SSE endpoint with POST for real-time progress
+    // First, send the request to the SSE endpoint
     try {
-        const response = await fetch(`${API_BASE}/generate`, {
+        const response = await fetch(`${API_BASE}/generate-sse`, {
             method: 'POST',
             body: formData
         });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        // Read the streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete SSE messages
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = JSON.parse(line.slice(6));
+
+                    // Handle progress updates
+                    if (data.step) {
+                        if (data.status === 'active') {
+                            updateProgressStep(data.step, 'active');
+                        } else if (data.status === 'completed') {
+                            updateProgressStep(data.step, 'completed', data.duration);
+                        } else if (data.status === 'skipped') {
+                            updateProgressStep(data.step, 'skipped');
+                        }
+
+                        // Update step text if provided
+                        if (data.text) {
+                            const stepEl = document.querySelector(`[data-step="${data.step}"]`);
+                            if (stepEl) {
+                                const stepText = stepEl.querySelector('.step-text');
+                                if (stepText) {
+                                    stepText.textContent = data.text;
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle completion
+                    if (data.complete) {
+                        if (data.preview) {
+                            displayPreview(data);
+                            setTimeout(() => {
+                                hideLoading();
+                            }, 2000);
+                        } else {
+                            displayResults(data);
+                            hideLoading();
+                        }
+                        return; // Exit the function
+                    }
+
+                    // Handle errors
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                }
+            }
+        }
+        return; // SSE handled everything, exit here
         
         if (!response.ok) {
             let errorMessage = 'Generation failed';
@@ -354,6 +424,12 @@ async function generateSyntheticData() {
         if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
 
+            // Clear any scheduled progress updates
+            if (window.progressTimeouts) {
+                window.progressTimeouts.forEach(timeout => clearTimeout(timeout));
+                window.progressTimeouts = null;
+            }
+
             // Update progress steps with real timings from backend
             if (data.generation_info && data.generation_info.all_timings) {
                 const timings = data.generation_info.all_timings;
@@ -374,41 +450,50 @@ async function generateSyntheticData() {
                     if (cacheStep) {
                         const stepText = cacheStep.querySelector('.step-text');
                         if (stepText) {
-                            stepText.textContent = cacheHit ? '🔍 Check Cache [✓]' : '🔍 Check Cache [−]';
+                            stepText.textContent = cacheHit ? 'Cache Hit ✓' : 'Cache Miss';
                         }
                     }
                     updateProgressStep('check-cache', 'completed', timings.cache_check);
                 }
 
-                // Handle LLM vs cached vs fallback
+                // Handle code generation step (LLM/cached/fallback)
+                const genStep = document.querySelector('[data-step="generate-code"]');
                 if (cacheHit) {
-                    // Cache hit - AI not needed
+                    // Using cached code - skip both AI and generate steps
+                    updateProgressStep('prepare-llm', 'skipped');
+                    if (genStep) {
+                        const stepText = genStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = 'Using Cached Code';
+                        }
+                    }
+                    updateProgressStep('generate-code', 'completed', 0);
+                } else if (data.generation_info.method === 'llm') {
+                    // LLM generated code - show full generation time
+                    if (timings.llm_response) {
+                        updateProgressStep('prepare-llm', 'completed', timings.llm_response * 0.1); // Small portion for prep
+                        updateProgressStep('generate-code', 'completed', timings.llm_response * 0.9); // Most time is generation
+                    }
+                } else if (data.generation_info.method === 'fallback') {
+                    // Fallback template
                     const llmStep = document.querySelector('[data-step="prepare-llm"]');
                     if (llmStep) {
                         const stepText = llmStep.querySelector('.step-text');
                         if (stepText) {
-                            stepText.textContent = '🤖 AI (cached)';
+                            stepText.textContent = 'Template';
                         }
                     }
                     updateProgressStep('prepare-llm', 'skipped');
-                } else if (data.generation_info.method === 'llm') {
-                    if (timings.llm_response) {
-                        updateProgressStep('prepare-llm', 'completed', timings.llm_response);
-                    }
-                } else if (data.generation_info.method === 'fallback') {
-                    // Fallback method
-                    const llmStep = document.querySelector('[data-step="prepare-llm"]');
-                    if (llmStep) {
-                        const stepText = llmStep.querySelector('.step-text');
+                    if (genStep) {
+                        const stepText = genStep.querySelector('.step-text');
                         if (stepText) {
-                            stepText.textContent = '🔧 Fallback';
+                            stepText.textContent = 'Template Code';
                         }
                     }
-                    if (timings.llm_response) {
-                        updateProgressStep('prepare-llm', 'completed', timings.llm_response);
-                    }
+                    updateProgressStep('generate-code', 'completed', timings.llm_response || 0.1);
                 }
 
+                // Always show execution time
                 if (timings.code_execution) {
                     updateProgressStep('execute-code', 'completed', timings.code_execution);
                 }
@@ -719,16 +804,54 @@ function hideLoading() {
     }
 }
 
-// Update progress step with optional timing (in seconds)
+// Update progress step with optional timing (in seconds) and active timer
 function updateProgressStep(stepName, status, durationSeconds) {
     const step = document.querySelector(`[data-step="${stepName}"]`);
     if (!step) return;
 
     // Remove all status classes
-    step.classList.remove('active', 'completed', 'error');
+    step.classList.remove('active', 'completed', 'error', 'skipped');
 
     // Add appropriate class and status icon
     const statusEl = step.querySelector('.step-status');
+
+    // Handle active step timer
+    if (status === 'active') {
+        // Start tracking this step
+        window.activeProgressStep = {
+            step: stepName,
+            startTime: Date.now()
+        };
+
+        // Start live timer update
+        if (window.progressTimerInterval) {
+            clearInterval(window.progressTimerInterval);
+        }
+
+        window.progressTimerInterval = setInterval(() => {
+            if (window.activeProgressStep && window.activeProgressStep.step === stepName) {
+                const elapsed = (Date.now() - window.activeProgressStep.startTime) / 1000;
+                const durationText = elapsed < 1 ? `${Math.round(elapsed * 1000)}ms` : `${elapsed.toFixed(1)}s`;
+
+                let durationEl = step.querySelector('.step-duration');
+                if (!durationEl) {
+                    durationEl = document.createElement('span');
+                    durationEl.className = 'step-duration';
+                    step.appendChild(durationEl);
+                }
+                durationEl.textContent = durationText;
+            }
+        }, 100); // Update every 100ms
+    } else {
+        // Clear timer if this was the active step
+        if (window.activeProgressStep && window.activeProgressStep.step === stepName) {
+            if (window.progressTimerInterval) {
+                clearInterval(window.progressTimerInterval);
+                window.progressTimerInterval = null;
+            }
+            window.activeProgressStep = null;
+        }
+    }
 
     // Add duration if provided (convert from seconds)
     if ((status === 'completed' || status === 'error') && durationSeconds !== undefined) {
@@ -758,8 +881,17 @@ function updateProgressStep(stepName, status, durationSeconds) {
             statusEl.textContent = '✗'; // X mark
             break;
         case 'skipped':
-            step.classList.add('completed');
-            statusEl.textContent = '➤'; // arrow (skipped)
+            step.classList.add('skipped');
+            statusEl.textContent = '−'; // dash (skipped)
+
+            // Add skipped indicator
+            let durationEl = step.querySelector('.step-duration');
+            if (!durationEl) {
+                durationEl = document.createElement('span');
+                durationEl.className = 'step-duration';
+                step.appendChild(durationEl);
+            }
+            durationEl.textContent = 'skipped';
             break;
     }
 }
@@ -1264,6 +1396,13 @@ async function downloadGeneratedData(preview = false) {
     formData.append('match_threshold', matchThreshold.value / 100);
     formData.append('output_format', outputFormat.value);
     formData.append('use_cache', useCache.checked);
+
+    // Add cache mode
+    const cacheMode = document.getElementById('cacheMode');
+    if (cacheMode) {
+        formData.append('cache_mode', cacheMode.value);
+    }
+
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');  // Request actual download
 

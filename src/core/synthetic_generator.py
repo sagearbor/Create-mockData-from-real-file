@@ -456,18 +456,79 @@ class SyntheticDataGenerator:
         ])
         
         return "\n".join(code_lines), "fallback"
-    
-    def _execute_generation_code(self, code: str) -> pd.DataFrame:
+
+    def _inject_random_seed(self, code: str, seed: int) -> str:
+        """
+        Inject or replace random seed in the code to ensure variety.
+
+        Args:
+            code: Original code string
+            seed: New seed value
+
+        Returns:
+            Modified code with new seed
+        """
+        import re
+
+        # Pattern to find seed assignments
+        seed_patterns = [
+            (r'random\.seed\(\d+\)', f'random.seed({seed})'),
+            (r'np\.random\.seed\(\d+\)', f'np.random.seed({seed})'),
+            (r'fake = Faker\(\)', f'fake = Faker()\n    fake.seed_instance({seed})'),
+            (r'Faker\(seed=\d+\)', f'Faker(seed={seed})')
+        ]
+
+        modified_code = code
+        seed_found = False
+
+        for pattern, replacement in seed_patterns:
+            if re.search(pattern, modified_code):
+                modified_code = re.sub(pattern, replacement, modified_code)
+                seed_found = True
+
+        # If no seed found, add one at the beginning of the function
+        if not seed_found:
+            # Find the function definition
+            if 'def generate_synthetic_data' in modified_code:
+                lines = modified_code.split('\n')
+                for i, line in enumerate(lines):
+                    if 'def generate_synthetic_data' in line and i + 1 < len(lines):
+                        # Add seed after imports within the function
+                        indent = '    '
+                        seed_lines = [
+                            f'{indent}import random',
+                            f'{indent}import numpy as np',
+                            f'{indent}random.seed({seed})',
+                            f'{indent}np.random.seed({seed})',
+                            ''
+                        ]
+                        # Insert after the function definition
+                        lines = lines[:i+1] + seed_lines + lines[i+1:]
+                        modified_code = '\n'.join(lines)
+                        break
+
+        return modified_code
+
+    def _execute_generation_code(self, code: str, randomize_seed: bool = True) -> pd.DataFrame:
         """
         Safely execute the generated Python code.
-        
+
         Args:
             code: Python code string
-            
+            randomize_seed: Whether to inject a random seed for variety
+
         Returns:
             Generated DataFrame
         """
         self.logger.info("Executing generated code in sandbox")
+
+        # Inject random seed to ensure variety even with cached code
+        if randomize_seed:
+            import random
+            new_seed = random.randint(1, 1000000)
+            self.logger.info(f"Injecting random seed {new_seed} for variety")
+            # Try to update any existing seed calls
+            code = self._inject_random_seed(code, new_seed)
         
         # Create a temporary file for the code
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -557,7 +618,15 @@ class SyntheticDataGenerator:
                 'abs': abs,
                 'round': round,
                 'sorted': sorted,
-                'reversed': reversed
+                'reversed': reversed,
+                '__import__': __import__,
+                'set': set,
+                'tuple': tuple,
+                'bool': bool,
+                'type': type,
+                'isinstance': isinstance,
+                'any': any,
+                'all': all
             }
         }
         

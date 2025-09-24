@@ -1,0 +1,107 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 3,
+      "columns": 2
+    },
+    "columns": [
+      {
+        "name": "id",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "value",
+        "dtype": "float64",
+        "python_type": "float",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 176,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "id": {
+      "name": "id",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 2.0,
+      "median": 2.0,
+      "std": 1.0,
+      "min": 1.0,
+      "max": 3.0,
+      "q25": 1.5,
+      "q75": 2.5,
+      "skewness": 0.0,
+      "kurtosis": 0.0,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "value": {
+      "name": "value",
+      "non_null_count": 3,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 20.5,
+      "median": 20.3,
+      "std": 10.101485039339513,
+      "min": 10.5,
+      "max": 30.7,
+      "q25": 15.4,
+      "q75": 25.5,
+      "skewness": 0.0890608849762152,
+      "kurtosis": 0.0,
+      "is_integer": false,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    }
+  },
+  "patterns": {},
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [
+        {
+          "column1": "id",
+          "column2": "value",
+          "correlation": 0.999852988017729
+        }
+      ],
+      "correlation_matrix": {
+        "id": {
+          "id": 1.0,
+          "value": 0.999852988017729
+        },
+        "value": {
+          "id": 0.999852988017729,
+          "value": 1.0
+        }
+      }
+    },
+    "categorical_associations": {},
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.0001678466796875
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T18:54:59.001820"
+}

@@ -1,0 +1,575 @@
+{
+  "structure": {
+    "shape": {
+      "rows": 5,
+      "columns": 8
+    },
+    "columns": [
+      {
+        "name": "patient_id",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "age",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "gender",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 2,
+        "null_count": 0
+      },
+      {
+        "name": "diagnosis",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 4,
+        "null_count": 0
+      },
+      {
+        "name": "treatment_date",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "doctor_id",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 3,
+        "null_count": 0
+      },
+      {
+        "name": "medication",
+        "dtype": "object",
+        "python_type": "str",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      },
+      {
+        "name": "dosage_mg",
+        "dtype": "int64",
+        "python_type": "int",
+        "nullable": false,
+        "unique_count": 5,
+        "null_count": 0
+      }
+    ],
+    "memory_usage": 2118,
+    "index_dtype": "int64"
+  },
+  "statistics": {
+    "patient_id": {
+      "name": "patient_id",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "P001": 1,
+        "P002": 1,
+        "P003": 1,
+        "P004": 1,
+        "P005": 1
+      },
+      "preserve_values": true,
+      "avg_length": 4.0,
+      "min_length": 4,
+      "max_length": 4,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "patient_id"
+    },
+    "age": {
+      "name": "age",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 45.8,
+      "median": 45.0,
+      "std": 13.141537200799608,
+      "min": 29.0,
+      "max": 62.0,
+      "q25": 38.0,
+      "q75": 55.0,
+      "skewness": -0.034235960170113766,
+      "kurtosis": -1.3194272377569494,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "might_be_percentage": "whole"
+    },
+    "gender": {
+      "name": "gender",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 2,
+      "unique_ratio": 0.4,
+      "most_common_values": {
+        "M": 3,
+        "F": 2
+      },
+      "preserve_values": true,
+      "avg_length": 1.0,
+      "min_length": 1,
+      "max_length": 1,
+      "is_categorical": true,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "gender",
+      "clinical_context": {
+        "type": "gender",
+        "suggested_values": [
+          "M",
+          "F"
+        ],
+        "alternate_values": [
+          "Male",
+          "Female"
+        ],
+        "category": "demographic"
+      },
+      "suggested_values": [
+        "M",
+        "F"
+      ],
+      "is_clinical": true
+    },
+    "diagnosis": {
+      "name": "diagnosis",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 4,
+      "unique_ratio": 0.8,
+      "most_common_values": {
+        "Hypertension": 2,
+        "Diabetes Type 2": 1,
+        "Anxiety": 1,
+        "Depression": 1
+      },
+      "preserve_values": true,
+      "avg_length": 11.2,
+      "min_length": 7,
+      "max_length": 15,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "diagnosis",
+      "clinical_context": {
+        "type": "diagnosis",
+        "suggested_values": [
+          "Hyperthyroidism",
+          "COVID-19",
+          "Alzheimer's disease",
+          "UTI",
+          "Upper respiratory infection",
+          "Peptic ulcer disease",
+          "ADHD",
+          "Parkinson's disease",
+          "Stroke",
+          "Multiple sclerosis",
+          "Anemia",
+          "Rheumatoid arthritis",
+          "Acute kidney injury",
+          "Crohn's disease",
+          "Influenza",
+          "Osteoporosis",
+          "Obesity",
+          "Pregnancy",
+          "Hypothyroidism",
+          "GERD"
+        ],
+        "category": "clinical"
+      },
+      "suggested_values": [
+        "Hyperthyroidism",
+        "COVID-19",
+        "Alzheimer's disease",
+        "UTI",
+        "Upper respiratory infection",
+        "Peptic ulcer disease",
+        "ADHD",
+        "Parkinson's disease",
+        "Stroke",
+        "Multiple sclerosis"
+      ],
+      "is_clinical": true
+    },
+    "treatment_date": {
+      "name": "treatment_date",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "2024-01-10": 1,
+        "2024-01-11": 1,
+        "2024-01-12": 1,
+        "2024-01-13": 1,
+        "2024-01-14": 1
+      },
+      "preserve_values": true,
+      "avg_length": 10.0,
+      "min_length": 10,
+      "max_length": 10,
+      "is_categorical": false,
+      "is_datetime_string": true,
+      "datetime_format": "%Y-%m-%d",
+      "has_numbers": true,
+      "has_special_chars": true,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "treatment_date",
+      "clinical_context": {
+        "type": "procedure",
+        "suggested_values": [
+          "ECG",
+          "Blood draw",
+          "Colonoscopy",
+          "CT scan",
+          "Transfusion",
+          "Infusion",
+          "Dialysis",
+          "Chest X-ray",
+          "Wound care",
+          "Hernia repair",
+          "Appendectomy",
+          "Vaccination",
+          "Endoscopy",
+          "Cholecystectomy",
+          "Joint replacement",
+          "Bronchoscopy",
+          "Biopsy",
+          "Injection",
+          "Cardiac catheterization",
+          "MRI"
+        ],
+        "category": "clinical"
+      },
+      "suggested_values": [
+        "ECG",
+        "Blood draw",
+        "Colonoscopy",
+        "CT scan",
+        "Transfusion",
+        "Infusion",
+        "Dialysis",
+        "Chest X-ray",
+        "Wound care",
+        "Hernia repair"
+      ],
+      "is_clinical": true
+    },
+    "doctor_id": {
+      "name": "doctor_id",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 3,
+      "unique_ratio": 0.6,
+      "most_common_values": {
+        "D101": 2,
+        "D103": 2,
+        "D102": 1
+      },
+      "preserve_values": true,
+      "avg_length": 4.0,
+      "min_length": 4,
+      "max_length": 4,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": true,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "doctor_id"
+    },
+    "medication": {
+      "name": "medication",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "string",
+      "unique_values": 5,
+      "unique_ratio": 1.0,
+      "most_common_values": {
+        "Lisinopril": 1,
+        "Metformin": 1,
+        "Sertraline": 1,
+        "Amlodipine": 1,
+        "Fluoxetine": 1
+      },
+      "preserve_values": true,
+      "avg_length": 9.8,
+      "min_length": 9,
+      "max_length": 10,
+      "is_categorical": false,
+      "is_datetime_string": false,
+      "datetime_format": null,
+      "has_numbers": false,
+      "has_special_chars": false,
+      "is_email_like": false,
+      "is_url_like": false,
+      "is_phone_like": false,
+      "column_name": "medication",
+      "clinical_context": {
+        "type": "medication",
+        "suggested_values": [
+          "Potassium chloride",
+          "Codeine",
+          "Naproxen",
+          "Calcium carbonate",
+          "Fluoxetine",
+          "Alprazolam",
+          "Digoxin",
+          "Iron sulfate",
+          "Liraglutide",
+          "Metoclopramide",
+          "Famotidine",
+          "Escitalopram",
+          "Levothyroxine",
+          "Aspirin",
+          "Warfarin",
+          "Prednisone",
+          "Fluticasone",
+          "Hydrochlorothiazide",
+          "Ciprofloxacin",
+          "Morphine"
+        ],
+        "category": "clinical"
+      },
+      "suggested_values": [
+        "Potassium chloride",
+        "Codeine",
+        "Naproxen",
+        "Calcium carbonate",
+        "Fluoxetine",
+        "Alprazolam",
+        "Digoxin",
+        "Iron sulfate",
+        "Liraglutide",
+        "Metoclopramide"
+      ],
+      "is_clinical": true
+    },
+    "dosage_mg": {
+      "name": "dosage_mg",
+      "non_null_count": 5,
+      "null_percentage": 0.0,
+      "type": "numeric",
+      "mean": 117.0,
+      "median": 20.0,
+      "std": 214.81387292258384,
+      "min": 5.0,
+      "max": 500.0,
+      "q25": 10.0,
+      "q75": 50.0,
+      "skewness": 2.2000010526790925,
+      "kurtosis": 4.86464249292813,
+      "is_integer": true,
+      "has_negative": false,
+      "has_zero": false,
+      "is_likely_currency": false,
+      "decimal_places": null,
+      "clinical_context": {
+        "type": "unit",
+        "suggested_values": "ng/mL",
+        "category": "clinical"
+      }
+    }
+  },
+  "patterns": {
+    "patient_id": {
+      "common_patterns": [],
+      "detected_format": null,
+      "id_pattern": {
+        "type": "prefix_sequential",
+        "prefix": "P",
+        "example": "P001",
+        "confidence": 1.0
+      },
+      "common_prefix": "P00"
+    },
+    "gender": {
+      "common_patterns": [],
+      "detected_format": null
+    },
+    "diagnosis": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_suffix": "ion"
+    },
+    "treatment_date": {
+      "common_patterns": [],
+      "detected_format": "date_iso",
+      "format_confidence": 1.0,
+      "common_prefix": "2024-01-1"
+    },
+    "doctor_id": {
+      "common_patterns": [],
+      "detected_format": null,
+      "id_pattern": {
+        "type": "prefix_sequential",
+        "prefix": "D",
+        "example": "D101",
+        "confidence": 1.0
+      },
+      "common_prefix": "D10",
+      "common_suffix": "101"
+    },
+    "medication": {
+      "common_patterns": [],
+      "detected_format": null,
+      "common_suffix": "ine"
+    }
+  },
+  "correlations": {
+    "numeric_correlations": {
+      "strong_correlations": [
+        {
+          "column1": "age",
+          "column2": "dosage_mg",
+          "correlation": 0.6563975106900368
+        }
+      ],
+      "correlation_matrix": {
+        "age": {
+          "age": 1.0,
+          "dosage_mg": 0.6563975106900368
+        },
+        "dosage_mg": {
+          "age": 0.6563975106900368,
+          "dosage_mg": 1.0
+        }
+      }
+    },
+    "categorical_associations": [
+      {
+        "column1": "patient_id",
+        "column2": "gender",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "patient_id",
+        "column2": "diagnosis",
+        "association_strength": 0.75
+      },
+      {
+        "column1": "patient_id",
+        "column2": "treatment_date",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "patient_id",
+        "column2": "doctor_id",
+        "association_strength": 0.6666666666666667
+      },
+      {
+        "column1": "patient_id",
+        "column2": "medication",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "gender",
+        "column2": "diagnosis",
+        "association_strength": 0.375
+      },
+      {
+        "column1": "gender",
+        "column2": "treatment_date",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "gender",
+        "column2": "doctor_id",
+        "association_strength": 0.33333333333333337
+      },
+      {
+        "column1": "gender",
+        "column2": "medication",
+        "association_strength": 0.5
+      },
+      {
+        "column1": "diagnosis",
+        "column2": "treatment_date",
+        "association_strength": 0.75
+      },
+      {
+        "column1": "diagnosis",
+        "column2": "doctor_id",
+        "association_strength": 0.6666666666666667
+      },
+      {
+        "column1": "diagnosis",
+        "column2": "medication",
+        "association_strength": 0.75
+      },
+      {
+        "column1": "treatment_date",
+        "column2": "doctor_id",
+        "association_strength": 0.6666666666666667
+      },
+      {
+        "column1": "treatment_date",
+        "column2": "medication",
+        "association_strength": 0.8
+      },
+      {
+        "column1": "doctor_id",
+        "column2": "medication",
+        "association_strength": 0.6666666666666667
+      }
+    ],
+    "temporal_relationships": []
+  },
+  "data_quality": {
+    "completeness": 1.0,
+    "duplicate_rows": 0,
+    "duplicate_percentage": 0.0,
+    "columns_with_nulls": [],
+    "columns_all_null": [],
+    "columns_single_value": [],
+    "memory_usage_mb": 0.0020198822021484375
+  },
+  "metadata_version": "1.0",
+  "extraction_timestamp": "2025-09-23T16:19:34.186686"
+}

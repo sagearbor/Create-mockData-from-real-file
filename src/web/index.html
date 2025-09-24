@@ -16,7 +16,18 @@
             <h1 class="nav-brand">🧬 BYOD Synthetic Data Generator</h1>
             <div class="nav-links">
                 <a href="/" class="active">Home</a>
-                <a href="/about">About</a>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-btn">
+                        Info
+                        <svg class="dropdown-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="nav-dropdown-content">
+                        <a href="/about">About</a>
+                        <a href="/dashboard">Usage Dashboard</a>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>
@@ -347,6 +358,38 @@
         <div id="loadingOverlay" class="loading-overlay" style="display: none;">
             <div class="spinner"></div>
             <p id="loadingMessage">Processing...</p>
+            <div id="progressFlow" class="progress-flow" style="display: none;">
+                <div class="progress-step" data-step="extract-metadata">
+                    <span class="step-icon">📊</span>
+                    <span class="step-text">Extract Metadata</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="check-cache">
+                    <span class="step-icon">🔍</span>
+                    <span class="step-text">Check Cache</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="prepare-llm">
+                    <span class="step-icon">🧠</span>
+                    <span class="step-text">AI Response</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="generate-code">
+                    <span class="step-icon">💻</span>
+                    <span class="step-text">Generate Code</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="execute-code">
+                    <span class="step-icon">⚡</span>
+                    <span class="step-text">Create Data</span>
+                    <span class="step-status"></span>
+                </div>
+                <div class="progress-step" data-step="validate">
+                    <span class="step-icon">✅</span>
+                    <span class="step-text">Validate Output</span>
+                    <span class="step-status"></span>
+                </div>
+            </div>
         </div>
 
         <!-- Error Modal -->

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import json
 import io
+import time
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -40,26 +41,36 @@ synthetic_generator = None
 def initialize_openai_client():
     """Initialize OpenAI client if credentials are available."""
     global synthetic_generator
-    
+
+    logger.info(f"Initializing OpenAI client...")
+    logger.info(f"Endpoint configured: {bool(settings.azure_openai_endpoint)}")
+    logger.info(f"API key configured: {bool(settings.azure_openai_api_key)}")
+    logger.info(f"Chat deployment: {settings.azure_openai_chat_deployment}")
+    logger.info(f"API version: {settings.azure_openai_api_version}")
+
     if settings.azure_openai_api_key and settings.azure_openai_endpoint:
         try:
             from openai import AzureOpenAI
-            
+
             client = AzureOpenAI(
                 api_key=settings.azure_openai_api_key,
                 api_version=settings.azure_openai_api_version,
                 azure_endpoint=settings.azure_openai_endpoint
             )
-            
+
             synthetic_generator = SyntheticDataGenerator(openai_client=client)
-            logger.info("OpenAI client initialized successfully")
+            logger.info("✓ OpenAI client initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"✗ Failed to initialize OpenAI client: {type(e).__name__}: {e}")
             synthetic_generator = SyntheticDataGenerator()
             return False
     else:
-        logger.warning("OpenAI credentials not configured, using fallback generation")
+        logger.warning("✗ OpenAI credentials not configured, using fallback generation")
+        if not settings.azure_openai_api_key:
+            logger.warning("  - Missing: AZURE_OPENAI_API_KEY")
+        if not settings.azure_openai_endpoint:
+            logger.warning("  - Missing: AZURE_OPENAI_ENDPOINT")
         synthetic_generator = SyntheticDataGenerator()
         return False
 
@@ -143,6 +154,25 @@ async def about():
     else:
         return HTMLResponse(content="<h1>About page not found</h1>")
 
+@app.get("/dashboard")
+async def dashboard():
+    """Serve the usage dashboard page."""
+    from fastapi.responses import Response
+
+    html_file = Path(__file__).parent / "src" / "web" / "dashboard.html"
+    if html_file.exists():
+        with open(html_file, 'r') as f:
+            content = f.read()
+
+        # Add cache-busting headers for real-time updates
+        response = HTMLResponse(content=content)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+    else:
+        return HTMLResponse(content="<h1>Dashboard page not found</h1>")
+
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon.ico directly if it exists, otherwise redirect to favicon.svg."""
@@ -180,6 +210,82 @@ async def health_check():
         "openai_configured": synthetic_generator.openai_client is not None,
         "cache_enabled": True,
         "environment": settings.environment
+    }
+
+@app.get("/api/usage-logs")
+async def get_usage_logs(start: str = None, end: str = None):
+    """
+    Fetch usage logs for the dashboard.
+
+    Args:
+        start: Start date in YYYY-MM-DD format
+        end: End date in YYYY-MM-DD format
+    """
+    import json
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    # Default to last 7 days if no range specified
+    if not end:
+        end_date = datetime.now()
+    else:
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+
+    if not start:
+        start_date = end_date - timedelta(days=7)
+    else:
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+
+    logs = []
+    log_dir = Path(__file__).parent / "logs" / "usage"
+
+    # Iterate through date range
+    current_date = start_date
+    while current_date <= end_date:
+        log_file = log_dir / f"usage_{current_date.strftime('%Y-%m-%d')}.jsonl"
+
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                for line in f:
+                    try:
+                        log_entry = json.loads(line)
+                        logs.append(log_entry)
+                    except json.JSONDecodeError:
+                        continue
+
+        current_date += timedelta(days=1)
+
+    # Calculate metrics
+    total_requests = len(logs)
+    cache_hits = sum(1 for log in logs if log.get('cache_hit', False))
+    total_rows = sum(log.get('num_rows', 0) for log in logs)
+    avg_response_time = sum(log.get('total_time', 0) for log in logs) / max(total_requests, 1)
+
+    # Group by day for chart data
+    daily_stats = defaultdict(lambda: {'requests': 0, 'cache_hits': 0})
+    for log in logs:
+        timestamp = log.get('timestamp', '')
+        if timestamp:
+            date_key = timestamp.split('T')[0]
+            daily_stats[date_key]['requests'] += 1
+            if log.get('cache_hit', False):
+                daily_stats[date_key]['cache_hits'] += 1
+
+    # Convert to list for frontend
+    daily = [
+        {'date': date, **stats}
+        for date, stats in sorted(daily_stats.items())
+    ]
+
+    return {
+        "logs": logs,
+        "metrics": {
+            "total_requests": total_requests,
+            "cache_hits": cache_hits,
+            "total_rows": total_rows,
+            "avg_response_time": avg_response_time
+        },
+        "daily": daily
     }
 
 @app.post("/upload")
@@ -288,10 +394,15 @@ async def generate_synthetic_data(
         preview_only: If True, return preview data instead of file download
     """
     try:
+        # Track overall timing
+        all_timings = {}
+        request_start = time.time()
+
         # Create metadata extractor with specified safety mode
         extractor = MetadataExtractor(safety_mode=safety_mode)
 
         # Get metadata from edited data, file, or JSON
+        metadata_start = time.time()
         if edited_data:
             # Parse edited CSV data
             df = pd.read_csv(io.StringIO(edited_data))
@@ -304,11 +415,15 @@ async def generate_synthetic_data(
             metadata = json.loads(metadata_json)
         else:
             raise HTTPException(status_code=400, detail="Either file or metadata_json must be provided")
+
+        all_timings['metadata_extraction'] = time.time() - metadata_start
         
         # Check cache if enabled
         cached_result = None
+        cache_start = time.time()
         if use_cache:
             cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
+        all_timings['cache_check'] = time.time() - cache_start
 
         # If preview only, generate single file and return preview data
         if preview_only:
@@ -325,6 +440,10 @@ async def generate_synthetic_data(
                     match_threshold=match_threshold,
                     use_cached=use_cache
                 )
+                # Merge timings
+                if 'step_timings' in generation_info:
+                    all_timings.update(generation_info['step_timings'])
+                generation_info['all_timings'] = all_timings
 
             # Prepare preview data (first 10 rows)
             preview_rows = min(10, len(synthetic_df))

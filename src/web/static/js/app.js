@@ -253,6 +253,9 @@ function smoothToggleSection(section, open) {
     setTimeout(() => section.classList.remove('animating'), 400);
 }
 
+// Global variable for step timings
+let stepTimings = {};
+
 // API calls
 async function generateSyntheticData() {
     if (!currentFile && !window.currentEditedData) {
@@ -261,7 +264,21 @@ async function generateSyntheticData() {
     }
 
     const fileCount = parseInt(document.getElementById('fileCount').value);
-    showLoading(`Generating ${fileCount} synthetic data file${fileCount > 1 ? 's' : ''}...`);
+    showLoading(`Generating ${fileCount} synthetic data file${fileCount > 1 ? 's' : ''}...`, true);
+
+    // Start progress flow and simulate real-time updates
+    updateProgressStep('extract-metadata', 'active');
+
+    // Simulate real-time progress based on typical timings
+    setTimeout(() => {
+        updateProgressStep('extract-metadata', 'completed', 0.05);
+        updateProgressStep('check-cache', 'active');
+    }, 100);
+
+    setTimeout(() => {
+        updateProgressStep('check-cache', 'completed', 0.01);
+        updateProgressStep('prepare-llm', 'active');
+    }, 200);
 
     const formData = new FormData();
     
@@ -336,11 +353,84 @@ async function generateSyntheticData() {
 
         if (contentType && contentType.includes('application/json')) {
             const data = await response.json();
+
+            // Update progress steps with real timings from backend
+            if (data.generation_info && data.generation_info.all_timings) {
+                const timings = data.generation_info.all_timings;
+
+                // Mark all steps complete with their actual timings
+                if (timings.metadata_extraction) {
+                    updateProgressStep('extract-metadata', 'completed', timings.metadata_extraction);
+                }
+                if (timings.cache_check !== undefined) {
+                    updateProgressStep('check-cache', 'completed', timings.cache_check);
+                }
+
+                // Handle cache check result
+                const cacheHit = data.generation_info.method === 'cached';
+                if (timings.cache_check !== undefined) {
+                    // Update cache step text to show hit/miss
+                    const cacheStep = document.querySelector('[data-step="check-cache"]');
+                    if (cacheStep) {
+                        const stepText = cacheStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = cacheHit ? '🔍 Check Cache [✓]' : '🔍 Check Cache [−]';
+                        }
+                    }
+                    updateProgressStep('check-cache', 'completed', timings.cache_check);
+                }
+
+                // Handle LLM vs cached vs fallback
+                if (cacheHit) {
+                    // Cache hit - AI not needed
+                    const llmStep = document.querySelector('[data-step="prepare-llm"]');
+                    if (llmStep) {
+                        const stepText = llmStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = '🤖 AI (cached)';
+                        }
+                    }
+                    updateProgressStep('prepare-llm', 'skipped');
+                } else if (data.generation_info.method === 'llm') {
+                    if (timings.llm_response) {
+                        updateProgressStep('prepare-llm', 'completed', timings.llm_response);
+                    }
+                } else if (data.generation_info.method === 'fallback') {
+                    // Fallback method
+                    const llmStep = document.querySelector('[data-step="prepare-llm"]');
+                    if (llmStep) {
+                        const stepText = llmStep.querySelector('.step-text');
+                        if (stepText) {
+                            stepText.textContent = '🔧 Fallback';
+                        }
+                    }
+                    if (timings.llm_response) {
+                        updateProgressStep('prepare-llm', 'completed', timings.llm_response);
+                    }
+                }
+
+                if (timings.code_execution) {
+                    updateProgressStep('execute-code', 'completed', timings.code_execution);
+                }
+                if (timings.validation) {
+                    updateProgressStep('validate', 'completed', timings.validation);
+                }
+
+                // Store timings for later display
+                window.lastGenerationTimings = timings;
+            }
+
             if (data.preview) {
                 // Show preview instead of auto-download
                 displayPreview(data);
+
+                // Keep progress visible for a bit longer to show final timings
+                setTimeout(() => {
+                    hideLoading();
+                }, 2000);
             } else {
                 displayResults(data);
+                hideLoading();
             }
         } else if (contentType && contentType.includes('application/zip')) {
             // ZIP file download (multiple files)
@@ -377,7 +467,6 @@ async function generateSyntheticData() {
         console.error('Full URL:', `${API_BASE}/generate`);
         const errorMsg = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
         showError(errorMsg || 'An unexpected error occurred');
-    } finally {
         hideLoading();
     }
 }
@@ -605,13 +694,74 @@ function downloadFile(blob, filename) {
     document.body.removeChild(a);
 }
 
-function showLoading(message = 'Processing...') {
+function showLoading(message = 'Processing...', showProgress = false) {
     loadingMessage.textContent = message;
     loadingOverlay.style.display = 'flex';
+
+    const progressFlow = document.getElementById('progressFlow');
+    if (showProgress && progressFlow) {
+        progressFlow.style.display = 'flex';
+        // Reset all steps
+        document.querySelectorAll('.progress-step').forEach(step => {
+            step.classList.remove('active', 'completed', 'error');
+            step.querySelector('.step-status').textContent = '';
+        });
+    } else if (progressFlow) {
+        progressFlow.style.display = 'none';
+    }
 }
 
 function hideLoading() {
     loadingOverlay.style.display = 'none';
+    const progressFlow = document.getElementById('progressFlow');
+    if (progressFlow) {
+        progressFlow.style.display = 'none';
+    }
+}
+
+// Update progress step with optional timing (in seconds)
+function updateProgressStep(stepName, status, durationSeconds) {
+    const step = document.querySelector(`[data-step="${stepName}"]`);
+    if (!step) return;
+
+    // Remove all status classes
+    step.classList.remove('active', 'completed', 'error');
+
+    // Add appropriate class and status icon
+    const statusEl = step.querySelector('.step-status');
+
+    // Add duration if provided (convert from seconds)
+    if ((status === 'completed' || status === 'error') && durationSeconds !== undefined) {
+        const durationText = durationSeconds < 1 ? `${Math.round(durationSeconds * 1000)}ms` : `${durationSeconds.toFixed(2)}s`;
+
+        // Add or update duration element
+        let durationEl = step.querySelector('.step-duration');
+        if (!durationEl) {
+            durationEl = document.createElement('span');
+            durationEl.className = 'step-duration';
+            step.appendChild(durationEl);
+        }
+        durationEl.textContent = durationText;
+    }
+
+    switch(status) {
+        case 'active':
+            step.classList.add('active');
+            statusEl.textContent = '🔄'; // rotating arrows
+            break;
+        case 'completed':
+            step.classList.add('completed');
+            statusEl.textContent = '✓'; // checkmark
+            break;
+        case 'error':
+            step.classList.add('error');
+            statusEl.textContent = '✗'; // X mark
+            break;
+        case 'skipped':
+            step.classList.add('completed');
+            statusEl.textContent = '➤'; // arrow (skipped)
+            break;
+    }
 }
 
 function showError(message) {
@@ -824,17 +974,26 @@ function displayGenerationBadges(generationInfo, dictionaryApplied) {
 
     badgesContainer.innerHTML = '';
 
-    // Add method badge
+    // Add method badge (make it hoverable like the timing badge)
     if (generationInfo) {
+        let methodBadge;
         if (generationInfo.method === 'llm') {
-            const badge = createBadge('🤖 LLM', 'badge-llm', 'Generated using AI model');
-            badgesContainer.appendChild(badge);
+            methodBadge = createHoverableBadge('🤖 LLM', 'badge-llm', 'Generated using AI model');
         } else if (generationInfo.method === 'cached') {
-            const badge = createBadge('⚡ CACHED', 'badge-cached', 'Using cached generation pipeline');
-            badgesContainer.appendChild(badge);
+            methodBadge = createHoverableBadge('⚡ CACHED', 'badge-cached', 'Using cached generation pipeline');
         } else if (generationInfo.method === 'fallback') {
-            const badge = createBadge('🔧 FALLBACK', 'badge-fallback', 'Template-based generation');
-            badgesContainer.appendChild(badge);
+            methodBadge = createHoverableBadge('🔧 FALLBACK', 'badge-fallback', 'Template-based generation');
+        }
+        if (methodBadge) {
+            badgesContainer.appendChild(methodBadge);
+        }
+
+        // Add processing time badge if timings are available
+        if (generationInfo.all_timings && generationInfo.all_timings.total) {
+            const totalTime = generationInfo.all_timings.total;
+            const timeText = totalTime < 1 ? `${Math.round(totalTime * 1000)}ms` : `${totalTime.toFixed(1)}s`;
+            const processingBadge = createProcessingTimeBadge(timeText, generationInfo.all_timings, generationInfo.method);
+            badgesContainer.appendChild(processingBadge);
         }
 
         // Add regenerated badge if applicable
@@ -851,13 +1010,232 @@ function displayGenerationBadges(generationInfo, dictionaryApplied) {
     }
 }
 
-// Create a badge element
+// Create a simple badge element
 function createBadge(text, className, title) {
     const badge = document.createElement('span');
     badge.className = `badge ${className}`;
     badge.textContent = text;
     badge.title = title;
     return badge;
+}
+
+// Create a hoverable badge (like the timing badge)
+function createHoverableBadge(text, className, title) {
+    const badge = document.createElement('span');
+    badge.className = `badge ${className} hoverable-badge`;
+    badge.textContent = text;
+    badge.title = title;
+    badge.style.cursor = 'pointer';
+
+    // Make badge hoverable to show generation methods tooltip
+    let hoverTimeout;
+    badge.onmouseenter = (e) => {
+        hoverTimeout = setTimeout(() => {
+            showGenerationMethodsTooltip(e.target);
+        }, 300);
+    };
+
+    badge.onmouseleave = () => {
+        clearTimeout(hoverTimeout);
+    };
+
+    badge.onclick = (e) => {
+        e.stopPropagation();
+        clearTimeout(hoverTimeout);
+        showGenerationMethodsTooltip(e.target);
+    };
+
+    return badge;
+}
+
+// Create processing time badge with hover details
+function createProcessingTimeBadge(timeText, timings, generationMethod) {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-time hoverable-badge';
+    badge.innerHTML = `⏱️ ${timeText}`;
+    badge.title = 'Hover for timing breakdown';
+
+    // Make entire badge hoverable
+    let hoverTimeout;
+    badge.onmouseenter = (e) => {
+        hoverTimeout = setTimeout(() => {
+            showTimingBreakdown(e.target, timings, generationMethod);
+        }, 300);
+    };
+
+    badge.onmouseleave = () => {
+        clearTimeout(hoverTimeout);
+    };
+
+    badge.onclick = (e) => {
+        e.stopPropagation();
+        clearTimeout(hoverTimeout);
+        showTimingBreakdown(e.target, timings);
+    };
+
+    return badge;
+}
+
+// Show timing breakdown tooltip
+function showTimingBreakdown(target, timings, generationMethod) {
+    // Remove any existing floating tooltip
+    const existingTooltip = document.getElementById('timing-tooltip');
+    if (existingTooltip) {
+        existingTooltip.remove();
+    }
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'timing-tooltip';
+    tooltip.className = 'floating-tooltip timing-breakdown';
+
+    // Build timing breakdown HTML
+    let html = '<div class="timing-breakdown-content"><h4>Processing Time Breakdown</h4><div class="timing-items">';
+
+    // Determine cache hit/miss and method for consistent display
+    const cacheHit = generationMethod === 'cached';
+    const isFallback = generationMethod === 'fallback';
+
+    const timingLabels = {
+        'metadata_extraction': '📊 Extract Metadata',
+        'cache_check': cacheHit ? '🔍 Check Cache [✓]' : '🔍 Check Cache [−]',
+        'llm_response': cacheHit ? '🤖 AI (cached)' : (isFallback ? '🔧 Fallback' : '🤖 AI Response'),
+        'code_execution': '⚡ Execute Code',
+        'validation': '✅ Validate Output',
+        'total': '⏱️ Total Time'
+    };
+
+    for (const [key, value] of Object.entries(timings)) {
+        // Skip code_generation as it's redundant with llm_response
+        if (key === 'code_generation') continue;
+
+        if (value !== undefined && value !== null) {
+            const label = timingLabels[key] || key;
+            const timeStr = value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(2)}s`;
+            const cssClass = key === 'total' ? 'timing-total' : '';
+            html += `<div class="timing-item ${cssClass}">
+                <span class="timing-label">${label}</span>
+                <span class="timing-value">${timeStr}</span>
+            </div>`;
+        }
+    }
+
+    html += '</div></div>';
+    tooltip.innerHTML = html;
+
+    // Position the tooltip
+    document.body.appendChild(tooltip);
+    const rect = target.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+    tooltip.style.position = 'absolute';
+    tooltip.style.left = `${rect.left + scrollLeft}px`;
+    tooltip.style.top = `${rect.bottom + scrollTop + 5}px`;
+    tooltip.style.zIndex = '10000';
+
+    // Ensure tooltip is within viewport
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (tooltipRect.right > window.innerWidth) {
+        tooltip.style.left = `${window.innerWidth - tooltipRect.width - 10}px`;
+    }
+    if (tooltipRect.bottom > window.innerHeight) {
+        tooltip.style.top = `${rect.top + scrollTop - tooltipRect.height - 5}px`;
+    }
+
+    // Close handlers
+    const closeTooltip = (e) => {
+        if (!tooltip.contains(e.target) && e.target !== target) {
+            tooltip.remove();
+            document.removeEventListener('click', closeTooltip);
+        }
+    };
+
+    setTimeout(() => {
+        document.addEventListener('click', closeTooltip);
+    }, 100);
+}
+
+// Show the generation methods tooltip
+function showGenerationMethodsTooltip(target) {
+    // Remove any existing floating tooltip
+    const existingTooltip = document.getElementById('floating-tooltip');
+    if (existingTooltip) {
+        existingTooltip.remove();
+    }
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'floating-tooltip';
+    tooltip.className = 'floating-tooltip';
+
+    // Create the same content as the Generation Settings tooltip
+    tooltip.innerHTML = `
+        <div class="tooltip-content">
+            <h4>Generation Methods</h4>
+            <div class="badge-legend">
+                <div class="badge-legend-item">
+                    <span class="badge badge-llm">🤖 LLM</span>
+                    <span>AI-powered generation using Azure OpenAI</span>
+                </div>
+                <div class="badge-legend-item">
+                    <span class="badge badge-cached">⚡ CACHED</span>
+                    <span>Using previously generated code for similar data</span>
+                </div>
+                <div class="badge-legend-item">
+                    <span class="badge badge-fallback">🔧 FALLBACK</span>
+                    <span>Template-based generation when LLM is unavailable</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Append to body and position
+    document.body.appendChild(tooltip);
+
+    const rect = target.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+    // Position with scroll compensation
+    tooltip.style.position = 'absolute';
+    tooltip.style.left = `${rect.left + scrollLeft}px`;
+    tooltip.style.top = `${rect.bottom + scrollTop + 5}px`;
+    tooltip.style.zIndex = '10000';
+
+    // Ensure tooltip is within viewport
+    const tooltipRect = tooltip.getBoundingClientRect();
+    if (tooltipRect.right > window.innerWidth) {
+        tooltip.style.left = `${window.innerWidth - tooltipRect.width - 10}px`;
+    }
+    if (tooltipRect.bottom > window.innerHeight) {
+        tooltip.style.top = `${rect.top + scrollTop - tooltipRect.height - 5}px`;
+    }
+
+    // Close on mouse leave or click outside
+    const closeTooltip = (e) => {
+        if (!tooltip.contains(e.target) && e.target !== target) {
+            tooltip.remove();
+            document.removeEventListener('click', closeTooltip);
+            document.removeEventListener('mousemove', checkMouseDistance);
+        }
+    };
+
+    // Check mouse distance for auto-close
+    const checkMouseDistance = (e) => {
+        const distance = Math.sqrt(
+            Math.pow(e.clientX - (rect.left + rect.width / 2), 2) +
+            Math.pow(e.clientY - (rect.top + rect.height / 2), 2)
+        );
+        if (distance > 200) { // Close if mouse moves far away
+            tooltip.remove();
+            document.removeEventListener('mousemove', checkMouseDistance);
+            document.removeEventListener('click', closeTooltip);
+        }
+    };
+
+    setTimeout(() => {
+        document.addEventListener('click', closeTooltip);
+        document.addEventListener('mousemove', checkMouseDistance);
+    }, 100);
 }
 
 // Download generated data

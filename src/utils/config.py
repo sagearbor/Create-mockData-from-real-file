@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Azure OpenAI Configuration
     azure_openai_endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
     azure_openai_api_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_API_KEY")
-    azure_openai_chat_deployment: str = Field(default="gpt-4", env="AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
+    azure_openai_chat_deployment: str = Field(default="gpt-4o-mini", env="AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
     azure_openai_embedding_deployment: str = Field(default="text-embedding-ada-002", env="AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
     azure_openai_api_version: str = Field(default="2024-02-01", env="AZURE_OPENAI_API_VERSION")
     

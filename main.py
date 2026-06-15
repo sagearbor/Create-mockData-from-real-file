@@ -80,17 +80,23 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting BYOD Synthetic Data Generator")
     initialize_openai_client()
-    
+
+    # Register the A2A agent into the default registry so the /a2a/* routes
+    # can dispatch to it without re-importing generation_service at module load.
+    from src.a2a_agent import register as _register_a2a_agent
+    _register_a2a_agent()
+    logger.info("A2A agent registered.")
+
     # Ensure directories exist
     settings.ensure_local_directories()
-    
+
     # Mount static files directory if it exists
     static_dir = Path(__file__).parent / "src" / "web" / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down BYOD Synthetic Data Generator")
 
@@ -205,11 +211,13 @@ async def api_info():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    from a2a_runtime import A2A_BACKEND
     return {
         "status": "healthy",
         "openai_configured": synthetic_generator.openai_client is not None,
         "cache_enabled": True,
-        "environment": settings.environment
+        "environment": settings.environment,
+        "a2a_backend": A2A_BACKEND,
     }
 
 @app.get("/api/cache-info")
@@ -1221,7 +1229,7 @@ async def get_batch_status(batch_id: str):
 async def clear_cache(older_than_days: Optional[int] = None):
     """
     Clear cache entries.
-    
+
     Args:
         older_than_days: Clear entries older than specified days
     """
@@ -1235,11 +1243,76 @@ async def clear_cache(older_than_days: Optional[int] = None):
         logger.error(f"Error clearing cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ---------------------------------------------------------------------------
+# A2A endpoints (additive — do not remove or reorder routes above)
+# ---------------------------------------------------------------------------
+
+@app.get("/.well-known/agent.json", include_in_schema=False)
+async def agent_card():
+    """Serve the AgentCard so external systems can discover this agent."""
+    from src.a2a_agent import build_card
+    from a2a_runtime import serve_agent_card
+    from fastapi.responses import Response
+
+    card = build_card(internal_only=False)
+    body, headers, content_type = serve_agent_card(card)
+    return Response(content=body, media_type=content_type, headers=headers)
+
+
+@app.post("/a2a/{agent_id}")
+async def a2a_dispatch(agent_id: str, raw_request: Dict[str, Any]):
+    """Receive an A2A Message envelope and dispatch to the registered agent.
+
+    Args:
+        agent_id:    Must be ``"mock-data-generator"``.
+        raw_request: A2A Message envelope (JSON body with ``payload`` and
+                     ``metadata`` keys as produced by
+                     :func:`a2a_runtime.encode_message`).
+
+    Returns:
+        A2A Message envelope wrapping the agent's response payload.
+    """
+    from a2a_runtime import decode_message, encode_message, default_registry
+
+    if agent_id != "mock-data-generator":
+        raise HTTPException(
+            status_code=404,
+            detail=f"No A2A agent registered for agent_id {agent_id!r}.",
+        )
+
+    agent = default_registry.get(agent_id)
+    if agent is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Agent {agent_id!r} is registered but not yet available.",
+        )
+
+    try:
+        payload, meta = decode_message(raw_request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Malformed A2A envelope: {exc}") from exc
+
+    result = await agent.run(payload)
+
+    # Echo the request cycle back: cycle advancement is owned by the
+    # orchestrator (e.g. the dcri-ct-graph runner), and A2AClient ignores the
+    # response cycle. Echoing keeps both DCRI services behaving identically.
+    response_message = encode_message(
+        result,
+        correlation_id=meta["correlation_id"],
+        cycle=meta["cycle"],
+        agent_id=agent_id,
+    )
+    return JSONResponse(content=response_message)
+
+
 # Main entry point
 if __name__ == "__main__":
     import os
-    # Get port from environment or settings
-    port = int(os.environ.get("APP_PORT", settings.app_port))
+    # Cloud Run (and most PaaS) inject the bind port via $PORT; fall back to
+    # APP_PORT, then the configured default.
+    port = int(os.environ.get("PORT", os.environ.get("APP_PORT", settings.app_port)))
     
     # Run the application
     uvicorn.run(

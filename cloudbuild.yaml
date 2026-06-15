@@ -1,0 +1,32 @@
+# cloudbuild.yaml — Google Cloud Build configuration for the Cloud Run image.
+#
+# Usage:
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_IMAGE=<region>-docker.pkg.dev/<project>/apps/<service>:latest .
+#
+# The deploy/cloudrun.sh script calls this automatically.
+# The GitHub Actions workflow (.github/workflows/deploy-cloudrun.yml) also uses
+# this file so build logic is defined in exactly one place.
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - '-f'
+      - 'Dockerfile.api'
+      - '-t'
+      - '$_IMAGE'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - '$_IMAGE'
+
+substitutions:
+  # Override on the command line with --substitutions=_IMAGE=...
+  # No sensible default here — the deploy script always provides it.
+  _IMAGE: 'gcr.io/UNSET/mock-data-generator-api:latest'
+
+images:
+  - '$_IMAGE'

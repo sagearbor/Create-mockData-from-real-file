@@ -1,0 +1,208 @@
+# .github/workflows/deploy-cloudrun.yml
+#
+# Deploy the BYOD Mock Data Generator to Google Cloud Run (public endpoint).
+#
+# ============================================================
+# REQUIRED secret (Settings > Secrets and variables > Actions):
+#
+#   GCP_SA_KEY  — JSON key file for a GCP Service Account that has the
+#                 following IAM roles:
+#                   - roles/run.admin
+#                   - roles/cloudbuild.builds.editor
+#                   - roles/artifactregistry.admin
+#                   - roles/iam.serviceAccountUser
+#                   - roles/storage.admin   (Cloud Build staging bucket)
+#
+#   NOTE: Workload Identity Federation is the more secure alternative to a
+#   long-lived JSON key.  See:
+#   https://github.com/google-github-actions/auth#workload-identity-federation
+#   When using WIF, replace the `credentials_json` input in the auth step
+#   with `workload_identity_provider` and `service_account`.
+#
+# OPTIONAL secrets (enable real Azure OpenAI generation instead of fallback):
+#   AZURE_OPENAI_API_KEY
+#   AZURE_OPENAI_ENDPOINT
+#   AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
+#   AZURE_OPENAI_API_VERSION
+#
+#   If these secrets are absent the service still deploys successfully and
+#   uses the built-in deterministic fallback generator (lower statistical
+#   fidelity, but fully functional for smoke testing).
+# ============================================================
+
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'GCP Project ID'
+        required: true
+        type: string
+      region:
+        description: 'GCP Region'
+        required: false
+        default: 'us-central1'
+        type: string
+      service:
+        description: 'Cloud Run service name'
+        required: false
+        default: 'mock-data-generator-api'
+        type: string
+
+env:
+  ARTIFACT_REPO: apps
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required for Workload Identity Federation
+
+    steps:
+      # -------------------------------------------------------------------
+      # 1. Checkout source
+      # -------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------------------------
+      # 2. Authenticate to Google Cloud
+      # -------------------------------------------------------------------
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          # When migrating to Workload Identity Federation, replace the line
+          # above with:
+          #   workload_identity_provider: 'projects/<project_number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>'
+          #   service_account: '<sa>@<project>.iam.gserviceaccount.com'
+
+      # -------------------------------------------------------------------
+      # 3. Set up gcloud CLI
+      # -------------------------------------------------------------------
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ inputs.project_id }}
+
+      # -------------------------------------------------------------------
+      # 4. Ensure Artifact Registry repository exists
+      # -------------------------------------------------------------------
+      - name: Ensure Artifact Registry repository
+        run: |
+          IMAGE_HOST="${{ inputs.region }}-docker.pkg.dev"
+          gcloud artifacts repositories create "${ARTIFACT_REPO}" \
+            --repository-format=docker \
+            --location="${{ inputs.region }}" \
+            --project="${{ inputs.project_id }}" \
+            --description="Container images for BYOD services" \
+            2>/dev/null || true
+          gcloud auth configure-docker "${IMAGE_HOST}" --quiet
+
+      # -------------------------------------------------------------------
+      # 5. Build image via Cloud Build (uses cloudbuild.yaml)
+      # -------------------------------------------------------------------
+      - name: Build image with Cloud Build
+        run: |
+          IMAGE="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/${ARTIFACT_REPO}/${{ inputs.service }}:${{ github.sha }}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+          gcloud builds submit \
+            --config cloudbuild.yaml \
+            --substitutions="_IMAGE=${IMAGE}" \
+            --project="${{ inputs.project_id }}" \
+            .
+
+      # -------------------------------------------------------------------
+      # 6. Build optional env-vars flag for Azure OpenAI credentials
+      # -------------------------------------------------------------------
+      - name: Prepare Azure OpenAI env-vars
+        id: azure_env
+        run: |
+          PAIRS=()
+          if [[ -n "${{ secrets.AZURE_OPENAI_API_KEY }}" ]]; then
+            PAIRS+=("AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}")
+          fi
+          if [[ -n "${{ secrets.AZURE_OPENAI_ENDPOINT }}" ]]; then
+            PAIRS+=("AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}")
+          fi
+          if [[ -n "${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}" ]]; then
+            PAIRS+=("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}")
+          fi
+          if [[ -n "${{ secrets.AZURE_OPENAI_API_VERSION }}" ]]; then
+            PAIRS+=("AZURE_OPENAI_API_VERSION=${{ secrets.AZURE_OPENAI_API_VERSION }}")
+          fi
+
+          if [[ ${#PAIRS[@]} -gt 0 ]]; then
+            JOINED=$(printf "%s," "${PAIRS[@]}")
+            JOINED="${JOINED%,}"
+            echo "env_flag=--set-env-vars=${JOINED}" >> "${GITHUB_OUTPUT}"
+            echo "Found ${#PAIRS[@]} Azure OpenAI credential(s); will pass to Cloud Run."
+          else
+            echo "env_flag=" >> "${GITHUB_OUTPUT}"
+            echo "No Azure OpenAI credentials found; service will use fallback generation."
+          fi
+
+      # -------------------------------------------------------------------
+      # 7. Deploy to Cloud Run (allow unauthenticated)
+      # -------------------------------------------------------------------
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${{ inputs.service }}" \
+            --image "${IMAGE}" \
+            --region "${{ inputs.region }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --project "${{ inputs.project_id }}" \
+            ${{ steps.azure_env.outputs.env_flag }}
+
+      # -------------------------------------------------------------------
+      # 8. Retrieve service URL and write to job summary
+      # -------------------------------------------------------------------
+      - name: Get service URL
+        id: service_url
+        run: |
+          URL=$(gcloud run services describe "${{ inputs.service }}" \
+            --region "${{ inputs.region }}" \
+            --project "${{ inputs.project_id }}" \
+            --format="value(status.url)")
+          echo "url=${URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Write job summary
+        run: |
+          SERVICE_URL="${{ steps.service_url.outputs.url }}"
+          cat >> "${GITHUB_STEP_SUMMARY}" <<EOF
+          ## Cloud Run Deployment Complete
+
+          | Field | Value |
+          |-------|-------|
+          | Service | \`${{ inputs.service }}\` |
+          | Region | \`${{ inputs.region }}\` |
+          | Project | \`${{ inputs.project_id }}\` |
+          | Image SHA | \`${{ github.sha }}\` |
+          | **Service URL** | **${SERVICE_URL}** |
+
+          ### Quick checks
+
+          \`\`\`bash
+          # Health
+          curl ${SERVICE_URL}/health
+
+          # Agent card
+          curl ${SERVICE_URL}/.well-known/agent.json
+
+          # End-to-end A2A proof
+          python3 scripts/e2e_a2a_check.py --url ${SERVICE_URL}
+          \`\`\`
+
+          ### Notes
+
+          - The endpoint is **public and unauthenticated** — intended for
+            temporary demos only.  Add Cloud Run IAM or an API gateway before
+            promoting to production.
+          - If the Azure OpenAI secrets were not configured, generation uses the
+            **deterministic fallback path** (lower fidelity; still functional).
+          EOF

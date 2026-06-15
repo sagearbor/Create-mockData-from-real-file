@@ -1,0 +1,40 @@
+# Cloud Run runtime dependencies — trimmed from requirements.txt.
+# Dev/test tools (pytest, black, flake8, isort, mypy, httpx) and Azure-only
+# SDKs (azure-storage-blob, azure-cosmos, azure-search-documents,
+# azure-keyvault-secrets, azure-identity) are intentionally excluded.
+# Pins match requirements.txt so local and Cloud Run images use identical
+# package versions.
+
+# Web framework
+fastapi==0.109.0
+uvicorn[standard]==0.25.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# Data processing
+pandas==2.1.4
+numpy==1.26.2
+jsonschema==4.20.0
+openpyxl==3.1.5
+PyYAML==6.0.1
+PyPDF2==3.0.1
+
+# Config & validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# LLM — generation_service imports AzureOpenAI lazily; the package must be
+# present even when credentials are absent (the code falls back gracefully).
+openai==1.6.1
+
+# Utilities
+typing-extensions==4.9.0
+aiohttp==3.9.1
+Jinja2==3.1.2
+
+# MCP server (used by src/mcp_server.py which is imported transitively)
+mcp>=0.4.0
+
+# Security
+cryptography==41.0.7

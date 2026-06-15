@@ -1,0 +1,74 @@
+# Dockerfile.api — Cloud Run image for the BYOD Mock Data Generator A2A endpoint.
+#
+# This is a SEPARATE file from ./Dockerfile (the existing multi-stage dev image).
+# Do NOT replace or modify ./Dockerfile.
+#
+# Build:
+#   docker build -f Dockerfile.api -t mock-data-generator-api .
+#
+# Run locally:
+#   docker run --rm -p 8080:8080 mock-data-generator-api
+#
+# Cloud Run port: 8080 (Cloud Run injects $PORT=8080; the shell-form CMD
+# expands it at container start so the value is always respected).
+
+FROM python:3.11-slim
+
+# --------------------------------------------------------------------------- #
+# System dependencies needed at runtime (curl for HEALTHCHECK)
+# --------------------------------------------------------------------------- #
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# --------------------------------------------------------------------------- #
+# Working directory
+# --------------------------------------------------------------------------- #
+WORKDIR /app
+
+# --------------------------------------------------------------------------- #
+# Python dependencies — install before copying source so this layer is cached
+# --------------------------------------------------------------------------- #
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements-api.txt
+
+# --------------------------------------------------------------------------- #
+# Application source
+# --------------------------------------------------------------------------- #
+COPY . .
+
+# --------------------------------------------------------------------------- #
+# Runtime directories the application expects to find at startup.
+# Matches settings.ensure_local_directories() in src/utils/config.py and the
+# paths referenced by CacheManager and the usage-log writer.
+# --------------------------------------------------------------------------- #
+RUN mkdir -p /app/data/local_storage /app/data/cache /app/logs/usage
+
+# --------------------------------------------------------------------------- #
+# Environment
+# --------------------------------------------------------------------------- #
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8080 \
+    ENVIRONMENT=production \
+    LOG_LEVEL=INFO
+
+# --------------------------------------------------------------------------- #
+# Expose Cloud Run's default port (overridable via $PORT at runtime)
+# --------------------------------------------------------------------------- #
+EXPOSE 8080
+
+# --------------------------------------------------------------------------- #
+# Health check — hits /health which the FastAPI app always provides.
+# start-period gives the app time to register the A2A agent during lifespan.
+# --------------------------------------------------------------------------- #
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
+
+# --------------------------------------------------------------------------- #
+# CMD must be shell form so that $PORT is expanded at runtime.
+# exec prefix ensures uvicorn receives signals correctly (SIGTERM for graceful
+# shutdown on Cloud Run).
+# --------------------------------------------------------------------------- #
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

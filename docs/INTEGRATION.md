@@ -251,3 +251,122 @@ Production authentication (bearer tokens, mTLS, Azure Managed Identity) is a
 **deployment-level concern** and is not enforced by this service's A2A or MCP
 layers directly.  Configure your API gateway or NGINX reverse proxy to require
 authentication before traffic reaches these endpoints.
+
+---
+
+## Deploying to Google Cloud Run (public, unauthenticated)
+
+The repo ships everything needed to deploy `main:app` (agent_id
+`"mock-data-generator"`) as a real, publicly-reachable Cloud Run service.
+
+> **WARNING:** `--allow-unauthenticated` makes the synthetic-data generation
+> endpoint reachable by anyone on the internet.  This is acceptable for a
+> **temporary demo or development smoke-test** but must not be used for
+> long-running production workloads.  Add Cloud Run IAM bindings, a managed
+> API gateway, or a Cloud Armor policy before promoting to production.
+
+### One-command deploy
+
+```bash
+# Authenticate first:
+gcloud auth login
+gcloud config set project <YOUR_GCP_PROJECT_ID>
+
+# Deploy:
+PROJECT_ID=<YOUR_GCP_PROJECT_ID> ./deploy/cloudrun.sh
+
+# Optionally pass Azure OpenAI credentials so real (non-fallback) generation
+# is used in the deployed service:
+PROJECT_ID=<project> \
+  AZURE_OPENAI_API_KEY=<key> \
+  AZURE_OPENAI_ENDPOINT=<endpoint> \
+  AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=<deployment> \
+  AZURE_OPENAI_API_VERSION=2024-02-01 \
+  ./deploy/cloudrun.sh
+```
+
+The script:
+1. Creates an Artifact Registry repo `apps` in the target region (idempotent).
+2. Builds `Dockerfile.api` via Cloud Build (`cloudbuild.yaml`).
+3. Deploys the image to Cloud Run (public, unauthenticated, port 8080).
+4. Prints the live service URL.
+
+Optional environment variables for `cloudrun.sh`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROJECT_ID` | *(required)* | GCP project ID |
+| `REGION` | `us-central1` | GCP region |
+| `SERVICE` | `mock-data-generator-api` | Cloud Run service name |
+
+### GitHub Actions alternative
+
+The workflow `.github/workflows/deploy-cloudrun.yml` performs the same steps
+from CI via `workflow_dispatch`.
+
+**Required secret** (Settings > Secrets and variables > Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `GCP_SA_KEY` | JSON key for a GCP Service Account with roles: `run.admin`, `cloudbuild.builds.editor`, `artifactregistry.admin`, `iam.serviceAccountUser`, `storage.admin` |
+
+> **More secure alternative:** Workload Identity Federation avoids storing a
+> long-lived JSON key in GitHub.  See the inline comments in
+> `.github/workflows/deploy-cloudrun.yml` for the WIF migration path.
+
+**Optional secrets** (enable real Azure OpenAI generation; without them the
+service uses the deterministic fallback path):
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Chat model deployment name |
+| `AZURE_OPENAI_API_VERSION` | API version (e.g. `2024-02-01`) |
+
+### Getting the service URL
+
+After deployment the URL is printed by the deploy script.  You can also
+retrieve it any time:
+
+```bash
+gcloud run services describe mock-data-generator-api \
+  --region us-central1 \
+  --format="value(status.url)"
+```
+
+### End-to-end check
+
+Run the stdlib-only proof script against the live URL to verify all three
+layers (health, agent card, A2A generation):
+
+```bash
+python3 scripts/e2e_a2a_check.py --url https://<service-url>
+# or
+E2E_URL=https://<service-url> python3 scripts/e2e_a2a_check.py
+```
+
+The script:
+- Checks `/health` and asserts `a2a_backend` is present in the response.
+- Checks `/.well-known/agent.json` and asserts `url == "/a2a/mock-data-generator"`.
+- Posts a tiny base64-encoded CSV to `/a2a/mock-data-generator` via the
+  canonical DCRI JSON envelope and asserts a non-error result.
+- Prints a ready-to-paste `curl` example.
+- Exits `0` on full pass, `1` on any failure.
+
+**Fallback-path note:** Without Azure OpenAI credentials the service uses the
+built-in deterministic fallback generator (lower statistical fidelity but
+fully functional).  The e2e script treats a non-empty `"data"` or
+`"generation_info"` key as success even when `method == "fallback"`, so the
+check passes in either mode.
+
+### A2A wire contract note
+
+The `/a2a/{agent_id}` endpoint speaks the **canonical DCRI JSON envelope**
+produced by `a2a_runtime.encode_message` / `decode_message` (the same shape
+used by this repo's shim and by the real `dcri-a2a-core` package).  When
+`dcri-a2a-core` is installed, `a2a_runtime/__init__.py` switches
+transparently to the real package.  Verify inbound framing against the actual
+`a2a-sdk` `message/send` JSON-RPC spec when adopting `dcri-a2a-core` in
+production, as the shim uses a simplified envelope that may differ from the
+full JSON-RPC framing expected by the real SDK.

@@ -1310,8 +1310,9 @@ async def a2a_dispatch(agent_id: str, raw_request: Dict[str, Any]):
 # Main entry point
 if __name__ == "__main__":
     import os
-    # Get port from environment or settings
-    port = int(os.environ.get("APP_PORT", settings.app_port))
+    # Cloud Run (and most PaaS) inject the bind port via $PORT; fall back to
+    # APP_PORT, then the configured default.
+    port = int(os.environ.get("PORT", os.environ.get("APP_PORT", settings.app_port)))
     
     # Run the application
     uvicorn.run(

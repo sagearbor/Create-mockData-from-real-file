@@ -107,7 +107,45 @@ You should see:
 4. Click "Generate Synthetic Data"
 5. Download your synthetic dataset (single file or ZIP for multiple)
 
-## 🔌 API Usage
+## Calling this service (REST / MCP / A2A)
+
+The service exposes one shared generation pipeline over **three interfaces**.
+See [docs/INTEGRATION.md](docs/INTEGRATION.md) for full details.
+
+| Interface | How to call |
+|-----------|-------------|
+| **REST** | `POST /generate`, `POST /metadata`, etc. (FastAPI, default port 8201) |
+| **MCP** | `python -m src.mcp_server` — tools: `generate_synthetic_data`, `extract_metadata` |
+| **A2A** | `POST /a2a/mock-data-generator` with an encoded A2A Message envelope; AgentCard at `GET /.well-known/agent.json` |
+
+### Quick MCP example
+
+```bash
+# Launch the MCP stdio server (connect via Claude Desktop or any MCP host)
+python -m src.mcp_server
+```
+
+### Quick A2A example
+
+```python
+import asyncio, base64, pathlib
+from a2a_runtime import A2AClient
+
+csv_bytes = pathlib.Path("data.csv").read_bytes()
+client = A2AClient()  # in-process dispatch
+
+result = asyncio.run(client.call(
+    "mock-data-generator",
+    {"operation": "generate", "data_content": base64.b64encode(csv_bytes).decode(),
+     "file_name": "data.csv", "num_rows": 100},
+    correlation_id="req-001",
+))
+print(result["status"])  # "success"
+```
+
+---
+
+## REST API Usage
 
 ### Generate synthetic data via API
 

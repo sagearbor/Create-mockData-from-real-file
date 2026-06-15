@@ -87,6 +87,20 @@
 
 ### Task 6.1: Documentation
 - [x] Basic architecture documentation
+- [x] **6.1.0**: Multi-interface transport layer (MCP + A2A) ✅ DONE
+  - Added `src/core/generation_service.py` — single shared core for all transports
+  - Added `src/mcp_server.py` — MCP stdio server (`python -m src.mcp_server`); tools:
+    `generate_synthetic_data` and `extract_metadata`
+  - Added `src/a2a_agent.py` — A2A agent (`MockDataAgent`, `build_card`, `register`)
+    implementing `a2a_runtime.RunnableAgent`
+  - Mounted A2A routes on FastAPI (`/.well-known/agent.json`, `POST /a2a/{agent_id}`),
+    registered agent in lifespan, added `a2a_backend` to `/health`
+  - `a2a_runtime/` ships a pure-stdlib shim; automatically uses `dcri-a2a-core`
+    when installed
+  - Tests: `tests/test_a2a_runtime.py` (stdlib-only), `tests/test_a2a_agent.py`,
+    `tests/test_mcp_server.py`
+  - Added `mcp>=0.4.0` to `requirements.txt`
+  - Created `docs/INTEGRATION.md` and updated `README.md` with calling guide
 - [ ] **6.1.1**: API documentation with examples
 - [ ] **6.1.2**: Data dictionary format specification
 - [ ] **6.1.3**: Deployment guide for Azure

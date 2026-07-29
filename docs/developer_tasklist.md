@@ -110,8 +110,29 @@
 - [ ] **6.2.2**: Implement file size limits and validation
 - [ ] **6.2.3**: Add monitoring and alerting
 - [ ] **6.2.4**: Security hardening and penetration testing
+- [x] **SEC.1**: Fix code injection in the fallback generator ✅
+  - ✅ Column names / cell values / detected formats are emitted as `repr()`
+    literals (`py_literal()`), never interpolated as raw source
+  - ✅ Generated helper variables are named by column index, so a column name
+    can no longer become a Python identifier
+  - ✅ Comments sanitized (`safe_comment()`) so a newline in a header cannot
+    end the comment and start a statement
+  - ✅ Exec subprocess now runs with a minimal environment, so generated code
+    cannot read `AZURE_OPENAI_API_KEY` or cloud metadata tokens
+  - ✅ `Dockerfile.api` runs as non-root `appuser` (matches `./Dockerfile`)
+  - Regression tests: `tests/test_synthetic_generator_injection.py`,
+    `tests/test_synthetic_generator_sandbox.py`
 
 ## Known Issues & Technical Debt
+
+### Security Notes
+- **Public deployment**: `deploy/cloudrun.sh` intentionally deploys with
+  `--allow-unauthenticated`. Anything reachable there is reachable by anyone,
+  so the exec path must stay injection-free — see SEC.1 and its tests.
+- **Generated code is still executed**: the LLM and cache paths produce Python
+  that is run in a subprocess. The subprocess has a scrubbed environment and a
+  30s timeout, but no CPU/memory/network sandbox. Untrusted *cache contents*
+  would still be a code-execution vector.
 
 ### Current Bugs
 1. **Date Detection**: Standard date formats (YYYY-MM-DD) not properly detected
@@ -140,6 +161,10 @@ AZURE_OPENAI_CHAT_DEPLOYMENT_NAME="gpt-4"
 
 ### Testing Commands
 ```bash
+# Security regression tests for the code-generation path (must always pass)
+pytest tests/test_synthetic_generator_injection.py \
+       tests/test_synthetic_generator_sandbox.py
+
 # Run local server
 python main.py
 

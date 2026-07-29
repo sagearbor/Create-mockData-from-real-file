@@ -1,9 +1,12 @@
 """Synthetic data generation using LLM and metadata."""
 
 import json
+import math
+import os
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional, Union, Tuple
+import re
 import tempfile
 import subprocess
 import sys
@@ -16,6 +19,56 @@ from datetime import datetime
 from src.utils.logger import logger
 from src.utils.config import settings
 from src.core.cache_manager import CacheManager
+
+
+# Characters allowed to survive into a generated comment. Anything else (most
+# importantly newlines, which would end the comment and start a new statement)
+# is replaced, so an untrusted column name can never break out of a comment.
+_COMMENT_SAFE_PATTERN = re.compile(r"[^\w .,:;/@+-]", re.UNICODE)
+
+
+def _to_plain_python(value: Any) -> Any:
+    """Coerce a metadata value to plain built-in types.
+
+    numpy scalars repr() as expressions such as ``np.str_('x')`` that are not
+    valid on their own, so they are unwrapped before a literal is emitted.
+    """
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (str, bool, int, type(None))):
+        return value
+    if isinstance(value, float):
+        return value
+    if isinstance(value, (list, tuple, set, np.ndarray)):
+        return [_to_plain_python(item) for item in value]
+    if isinstance(value, dict):
+        return {_to_plain_python(k): _to_plain_python(v) for k, v in value.items()}
+    return str(value)
+
+
+def py_literal(value: Any) -> str:
+    """Render an untrusted metadata value as a self-contained Python literal.
+
+    Every value that reaches the generated source (column names, cell values,
+    detected formats, statistics) originates in a user-supplied file. Emitting
+    them with repr() instead of interpolating them as raw text is what keeps a
+    CSV header from becoming executable code.
+    """
+    plain = _to_plain_python(value)
+
+    # repr(float('nan')) is 'nan', which is not a valid expression on its own.
+    if isinstance(plain, float) and not math.isfinite(plain):
+        return f"float({repr(str(plain))})"
+
+    return repr(plain)
+
+
+def safe_comment(value: Any, max_length: int = 60) -> str:
+    """Render an untrusted value as text that is safe inside a ``#`` comment."""
+    text = _COMMENT_SAFE_PATTERN.sub("?", str(value))
+    if len(text) > max_length:
+        text = text[:max_length] + "..."
+    return text
 
 
 class SyntheticDataGenerator:
@@ -282,7 +335,7 @@ class SyntheticDataGenerator:
             "import string",
             "",
             "def generate_synthetic_data():",
-            f"    num_rows = {num_rows}",
+            f"    num_rows = {py_literal(int(num_rows))}",
             "    data = {}",
             "",
             "    # Helper functions for realistic data",
@@ -303,150 +356,163 @@ class SyntheticDataGenerator:
             ""
         ]
         
-        # Generate code for each column
-        for col_info in metadata['structure']['columns']:
+        # Generate code for each column.
+        #
+        # SECURITY: column names, cell values and detected formats all come from
+        # the user-supplied file. They are emitted with py_literal() (never
+        # interpolated as raw source) and helper variables are named by column
+        # index (never derived from the column name), so no part of the input
+        # can reach executable position. See
+        # tests/test_synthetic_generator_injection.py.
+        for col_index, col_info in enumerate(metadata['structure']['columns']):
             col_name = col_info['name']
             col_stats = metadata['statistics'].get(col_name, {})
-            
+
+            col_lit = py_literal(col_name)
+            col_label = safe_comment(col_name)
+            target = f"data[{col_lit}]"
+
             if col_stats.get('type') == 'numeric':
                 # Check if this is currency/money
                 if col_stats.get('is_likely_currency', False):
-                    decimal_places = col_stats.get('decimal_places', 2) or 2  # Default to 2 if None
+                    decimal_places = col_stats.get('decimal_places', 2)
+                    if decimal_places is None:
+                        decimal_places = 2  # Default to 2 if None
                     min_val = col_stats.get('min', 0)
                     max_val = col_stats.get('max', 10000)
-                    code_lines.append(f"    # Generating currency values for '{col_name}'")
-                    code_lines.append(f"    data['{col_name}'] = np.round(np.random.uniform({min_val}, {max_val}, size=num_rows), {decimal_places})")
+                    code_lines.append(f"    # Generating currency values for '{col_label}'")
+                    code_lines.append(f"    {target} = np.round(np.random.uniform({py_literal(min_val)}, {py_literal(max_val)}, size=num_rows), {py_literal(int(decimal_places))})")
                 # Regular numeric column generation
                 elif col_stats.get('is_integer', False):
                     min_val = int(col_stats.get('min', 0))
                     max_val = int(col_stats.get('max', 100))
-                    code_lines.append(f"    data['{col_name}'] = np.random.randint({min_val}, {max_val + 1}, size=num_rows)")
+                    code_lines.append(f"    {target} = np.random.randint({py_literal(min_val)}, {py_literal(max_val + 1)}, size=num_rows)")
                 else:
                     mean = col_stats.get('mean', 0)
                     std = col_stats.get('std', 1)
-                    code_lines.append(f"    data['{col_name}'] = np.random.normal({mean}, {std}, size=num_rows)")
+                    code_lines.append(f"    {target} = np.random.normal({py_literal(mean)}, {py_literal(std)}, size=num_rows)")
 
                     # Clip to min/max if specified
                     if 'min' in col_stats and 'max' in col_stats:
-                        code_lines.append(f"    data['{col_name}'] = np.clip(data['{col_name}'], {col_stats['min']}, {col_stats['max']})")
-            
+                        code_lines.append(f"    {target} = np.clip({target}, {py_literal(col_stats['min'])}, {py_literal(col_stats['max'])})")
+
             elif col_stats.get('type') == 'string':
                 # First check if this is a datetime stored as string (detected from data)
                 if col_stats.get('is_datetime_string', False):
-                    datetime_format = col_stats.get('datetime_format', '%Y-%m-%d %H:%M:%S')
-                    code_lines.append(f"    # Detected datetime string format: {datetime_format}")
+                    datetime_format = col_stats.get('datetime_format') or '%Y-%m-%d %H:%M:%S'
+                    code_lines.append(f"    # Detected datetime string format: {safe_comment(datetime_format)}")
                     code_lines.append(f"    base_date = datetime.now()")
                     code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365), hours=random.randint(0, 23), minutes=random.randint(0, 59)) for _ in range(num_rows)]")
                     if '%H' in datetime_format:  # Has time component
-                        code_lines.append(f"    data['{col_name}'] = [d.strftime('{datetime_format}') for d in date_list]")
+                        code_lines.append(f"    {target} = [d.strftime({py_literal(datetime_format)}) for d in date_list]")
                     else:
-                        code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
+                        code_lines.append(f"    {target} = [d.strftime('%Y-%m-%d') for d in date_list]")
                 # Fallback: Check if column name suggests date
                 elif any(keyword in col_name.lower() for keyword in ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp']):
                     # Generate dates even if stored as string
-                    code_lines.append(f"    # Detected '{col_name}' as likely date column")
+                    code_lines.append(f"    # Detected '{col_label}' as likely date column")
                     code_lines.append(f"    base_date = datetime.now()")
                     code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
-                    code_lines.append(f"    data['{col_name}'] = [d.strftime('%Y-%m-%d') for d in date_list]")
+                    code_lines.append(f"    {target} = [d.strftime('%Y-%m-%d') for d in date_list]")
                 # Check for categorical values
                 elif col_stats.get('is_categorical', False) or col_stats.get('unique_values', 100) <= 10:
                     # Check if we have preserved actual categorical values
                     if col_stats.get('preserve_values', False) and 'most_common_values' in col_stats:
                         most_common = col_stats['most_common_values']
                         # Check if these are actual values (not anonymized)
-                        if not any(k.startswith('value_') for k in most_common.keys()):
+                        if not any(str(k).startswith('value_') for k in most_common.keys()):
                             # Use actual values with their distributions
                             values = list(most_common.keys())
                             counts = list(most_common.values())
                             # Normalize to probabilities
                             total = sum(counts)
                             probabilities = [c/total for c in counts]
-                            code_lines.append(f"    # Using preserved categorical values for '{col_name}'")
-                            code_lines.append(f"    categories_{col_name} = {values}")
-                            code_lines.append(f"    probabilities_{col_name} = {probabilities}")
-                            code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows, p=probabilities_{col_name})")
+                            code_lines.append(f"    # Using preserved categorical values for '{col_label}'")
+                            code_lines.append(f"    categories_{col_index} = {py_literal(values)}")
+                            code_lines.append(f"    probabilities_{col_index} = {py_literal(probabilities)}")
+                            code_lines.append(f"    {target} = np.random.choice(categories_{col_index}, size=num_rows, p=probabilities_{col_index})")
                         else:
                             # Fallback to generic categories if anonymized
                             unique_count = min(col_stats.get('unique_values', 10), 20)
-                            code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
-                            code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
+                            code_lines.append(f"    categories_{col_index} = [f'Category_{{i}}' for i in range({py_literal(int(unique_count))})]")
+                            code_lines.append(f"    {target} = np.random.choice(categories_{col_index}, size=num_rows)")
                     else:
                         # No preserved values, use generic categories
                         unique_count = min(col_stats.get('unique_values', 10), 20)
-                        code_lines.append(f"    categories_{col_name} = [f'Category_{{i}}' for i in range({unique_count})]")
-                        code_lines.append(f"    data['{col_name}'] = np.random.choice(categories_{col_name}, size=num_rows)")
+                        code_lines.append(f"    categories_{col_index} = [f'Category_{{i}}' for i in range({py_literal(int(unique_count))})]")
+                        code_lines.append(f"    {target} = np.random.choice(categories_{col_index}, size=num_rows)")
                 else:
                     # Check for specific detected types and patterns
                     patterns = metadata.get('patterns', {}).get(col_name, {})
 
                     # Check for email detection
                     if col_stats.get('detected_type') == 'email' or col_stats.get('is_email_like'):
-                        code_lines.append(f"    # Generating emails for '{col_name}'")
-                        code_lines.append(f"    data['{col_name}'] = [generate_email(f'user{{i}}') for i in range(num_rows)]")
+                        code_lines.append(f"    # Generating emails for '{col_label}'")
+                        code_lines.append(f"    {target} = [generate_email(f'user{{i}}') for i in range(num_rows)]")
 
                     # Check for phone detection
                     elif col_stats.get('detected_type') == 'phone' or col_stats.get('is_phone_like'):
                         phone_format = col_stats.get('phone_format', 'dash')
-                        code_lines.append(f"    # Generating phone numbers for '{col_name}'")
-                        code_lines.append(f"    data['{col_name}'] = [generate_phone('{phone_format}') for _ in range(num_rows)]")
+                        code_lines.append(f"    # Generating phone numbers for '{col_label}'")
+                        code_lines.append(f"    {target} = [generate_phone({py_literal(phone_format)}) for _ in range(num_rows)]")
 
                     # Check for ID pattern with prefix
                     elif patterns.get('id_pattern', {}).get('type') == 'prefix_sequential':
                         prefix = patterns['id_pattern']['prefix']
-                        code_lines.append(f"    # Generating IDs with prefix '{prefix}' for '{col_name}'")
-                        code_lines.append(f"    data['{col_name}'] = [f'{prefix}{{str(i+1).zfill(3)}}' for i in range(num_rows)]")
+                        code_lines.append(f"    # Generating IDs with prefix '{safe_comment(prefix)}' for '{col_label}'")
+                        code_lines.append(f"    {target} = [{py_literal(prefix)} + str(i+1).zfill(3) for i in range(num_rows)]")
 
                     # Check for suggested values from clinical/reference context
                     elif 'clinical_context' in col_stats or 'suggested_values' in col_stats:
                         suggested = col_stats.get('suggested_values', col_stats.get('clinical_context', {}).get('suggested_values', []))
                         if suggested:
-                            code_lines.append(f"    # Using suggested values for '{col_name}'")
-                            code_lines.append(f"    suggested_{col_name} = {suggested}")
-                            code_lines.append(f"    data['{col_name}'] = [random.choice(suggested_{col_name}) for _ in range(num_rows)]")
+                            code_lines.append(f"    # Using suggested values for '{col_label}'")
+                            code_lines.append(f"    suggested_{col_index} = {py_literal(suggested)}")
+                            code_lines.append(f"    {target} = [random.choice(suggested_{col_index}) for _ in range(num_rows)]")
                         else:
                             # Fallback to random strings
                             avg_length = int(col_stats.get('avg_length', 10))
-                            code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
+                            code_lines.append(f"    {target} = [''.join(random.choices(string.ascii_letters + string.digits, k={py_literal(avg_length)})) for _ in range(num_rows)]")
 
                     # Check if column name suggests specific data type
                     elif 'city' in col_name.lower():
-                        code_lines.append(f"    # Generating city names for '{col_name}'")
+                        code_lines.append(f"    # Generating city names for '{col_label}'")
                         cities = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
-                        code_lines.append(f"    cities = {cities}")
-                        code_lines.append(f"    data['{col_name}'] = [random.choice(cities) for _ in range(num_rows)]")
+                        code_lines.append(f"    cities = {py_literal(cities)}")
+                        code_lines.append(f"    {target} = [random.choice(cities) for _ in range(num_rows)]")
 
                     elif 'name' in col_name.lower() and 'first' not in col_name.lower() and 'last' not in col_name.lower():
-                        code_lines.append(f"    # Generating full names for '{col_name}'")
+                        code_lines.append(f"    # Generating full names for '{col_label}'")
                         first_names = ["John", "Jane", "Bob", "Alice", "Charlie", "Mary", "Michael", "Sarah", "David", "Emily"]
                         last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
-                        code_lines.append(f"    first_names = {first_names}")
-                        code_lines.append(f"    last_names = {last_names}")
-                        code_lines.append(f"    data['{col_name}'] = [f'{{random.choice(first_names)}} {{random.choice(last_names)}}' for _ in range(num_rows)]")
+                        code_lines.append(f"    first_names = {py_literal(first_names)}")
+                        code_lines.append(f"    last_names = {py_literal(last_names)}")
+                        code_lines.append(f"    {target} = [f'{{random.choice(first_names)}} {{random.choice(last_names)}}' for _ in range(num_rows)]")
 
                     else:
                         # Default random strings
                         avg_length = int(col_stats.get('avg_length', 10))
-                        code_lines.append(f"    data['{col_name}'] = [''.join(random.choices(string.ascii_letters + string.digits, k={avg_length})) for _ in range(num_rows)]")
-            
+                        code_lines.append(f"    {target} = [''.join(random.choices(string.ascii_letters + string.digits, k={py_literal(avg_length)})) for _ in range(num_rows)]")
+
             elif col_stats.get('type') == 'datetime':
                 # DateTime column generation
                 code_lines.append(f"    base_date = datetime.now()")
-                code_lines.append(f"    data['{col_name}'] = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
-            
+                code_lines.append(f"    {target} = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
+
             else:
                 # Default to None
-                code_lines.append(f"    data['{col_name}'] = [None] * num_rows")
-            
+                code_lines.append(f"    {target} = [None] * num_rows")
+
             # Add null values if needed
             if col_info.get('nullable', False) and col_info.get('null_count', 0) > 0:
                 null_percentage = col_info['null_count'] / metadata['structure']['shape']['rows']
                 code_lines.append(f"    # Add null values")
-                code_lines.append(f"    null_mask = np.random.random(num_rows) < {null_percentage}")
-                code_lines.append(f"    data['{col_name}'] = pd.Series(data['{col_name}'])")
-                code_lines.append(f"    data['{col_name}'][null_mask] = None")
-            
+                code_lines.append(f"    null_mask = np.random.random(num_rows) < {py_literal(null_percentage)}")
+                code_lines.append(f"    {target} = pd.Series({target})")
+                code_lines.append(f"    {target}[null_mask] = None")
+
             code_lines.append("")
-        
+
         code_lines.extend([
             "    df = pd.DataFrame(data)",
             "    return df",
@@ -454,7 +520,7 @@ class SyntheticDataGenerator:
             "# Generate the data",
             "result = generate_synthetic_data()"
         ])
-        
+
         return "\n".join(code_lines), "fallback"
 
     def _inject_random_seed(self, code: str, seed: int) -> str:
@@ -509,6 +575,30 @@ class SyntheticDataGenerator:
 
         return modified_code
 
+    @staticmethod
+    def _sandbox_environment(temp_dir: str) -> Dict[str, str]:
+        """Build the minimal environment for the code-execution subprocess.
+
+        Only what CPython needs to start and import its own site-packages is
+        forwarded; everything else (API keys, cloud credentials, tokens) is
+        withheld from the generated code.
+        """
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "HOME": temp_dir,
+            "TMPDIR": temp_dir,
+            "PYTHONHASHSEED": "0",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+
+        # Locale and Windows loader variables are needed for the interpreter to
+        # start, but carry no secrets.
+        for passthrough in ("LANG", "LC_ALL", "SYSTEMROOT", "COMSPEC", "PATHEXT"):
+            if passthrough in os.environ:
+                env[passthrough] = os.environ[passthrough]
+
+        return env
+
     def _execute_generation_code(self, code: str, randomize_seed: bool = True) -> pd.DataFrame:
         """
         Safely execute the generated Python code.
@@ -551,13 +641,17 @@ class SyntheticDataGenerator:
                 code_path = Path(temp_dir) / "generator.py"
                 code_path.write_text(modified_code + f"\nresult.to_pickle('{pickle_path}')")
                 
-                # Execute the code
+                # Execute the code with a minimal environment. The code being
+                # run is generated (by an LLM, from cache, or from a template),
+                # so it must not inherit credentials such as
+                # AZURE_OPENAI_API_KEY or cloud instance-metadata tokens.
                 result = subprocess.run(
                     [sys.executable, str(code_path)],
                     capture_output=True,
                     text=True,
                     timeout=30,
-                    cwd=temp_dir
+                    cwd=temp_dir,
+                    env=self._sandbox_environment(temp_dir)
                 )
                 
                 if result.returncode != 0:

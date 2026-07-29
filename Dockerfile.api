@@ -22,6 +22,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------------------------------- #
+# Non-root user (matches the appuser convention in ./Dockerfile).
+# The service executes generated Python to produce synthetic data, so it must
+# never run with root privileges inside the container.
+# --------------------------------------------------------------------------- #
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# --------------------------------------------------------------------------- #
 # Working directory
 # --------------------------------------------------------------------------- #
 WORKDIR /app
@@ -36,14 +43,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # --------------------------------------------------------------------------- #
 # Application source
 # --------------------------------------------------------------------------- #
-COPY . .
+COPY --chown=appuser:appuser . .
 
 # --------------------------------------------------------------------------- #
 # Runtime directories the application expects to find at startup.
 # Matches settings.ensure_local_directories() in src/utils/config.py and the
 # paths referenced by CacheManager and the usage-log writer.
 # --------------------------------------------------------------------------- #
-RUN mkdir -p /app/data/local_storage /app/data/cache /app/logs/usage
+RUN mkdir -p /app/data/local_storage /app/data/cache /app/logs/usage && \
+    chown -R appuser:appuser /app
 
 # --------------------------------------------------------------------------- #
 # Environment
@@ -53,6 +61,11 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=8080 \
     ENVIRONMENT=production \
     LOG_LEVEL=INFO
+
+# --------------------------------------------------------------------------- #
+# Drop privileges for everything from here on (including CMD).
+# --------------------------------------------------------------------------- #
+USER appuser
 
 # --------------------------------------------------------------------------- #
 # Expose Cloud Run's default port (overridable via $PORT at runtime)

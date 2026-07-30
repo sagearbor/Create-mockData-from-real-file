@@ -6,6 +6,11 @@ import pandas as pd
 import io
 import json
 
+import pytest
+
+# Drives the HTTP API; skipped by tests/conftest.py when no server is up.
+pytestmark = pytest.mark.requires_server
+
 # API endpoint
 BASE_URL = "http://localhost:8201"
 

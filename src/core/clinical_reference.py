@@ -427,42 +427,6 @@ class ClinicalReferenceLibrary:
                 "category": "geographic"
             }
 
-        # Name-related
-        name_keywords = ['name', 'firstname', 'first_name', 'lastname', 'last_name', 'full_name']
-        if any(keyword in col_lower for keyword in name_keywords):
-            # Determine if it's first, last, or full name
-            if 'first' in col_lower:
-                return {
-                    "type": "first_name",
-                    "suggested_values": (
-                        self.first_names.get("male", [])[:10] +
-                        self.first_names.get("female", [])[:10]
-                    ),
-                    "category": "personal"
-                }
-            elif 'last' in col_lower:
-                return {
-                    "type": "last_name",
-                    "suggested_values": self.last_names[:20],
-                    "category": "personal"
-                }
-            else:
-                # Full name - combine first and last
-                full_names = []
-                for _ in range(20):
-                    first = random.choice(
-                        self.first_names.get("male", []) +
-                        self.first_names.get("female", []) +
-                        self.first_names.get("neutral", [])
-                    )
-                    last = random.choice(self.last_names)
-                    full_names.append(f"{first} {last}")
-                return {
-                    "type": "full_name",
-                    "suggested_values": full_names,
-                    "category": "personal"
-                }
-
         # Medication-related
         medication_keywords = ['medication', 'drug', 'medicine', 'rx', 'prescription', 'med']
         if any(keyword in col_lower for keyword in medication_keywords):
@@ -526,6 +490,45 @@ class ClinicalReferenceLibrary:
                     "category": "clinical"
                 }
 
+        # Name-related.
+        # NOTE: this must stay AFTER every clinical check. 'name' is a generic
+        # substring, so checking it first classified medication_name /
+        # lab_test_name / diagnosis_name / procedure_name as people's names.
+        name_keywords = ['name', 'firstname', 'first_name', 'lastname', 'last_name', 'full_name']
+        if any(keyword in col_lower for keyword in name_keywords):
+            # Determine if it's first, last, or full name
+            if 'first' in col_lower:
+                return {
+                    "type": "first_name",
+                    "suggested_values": (
+                        self.first_names.get("male", [])[:10] +
+                        self.first_names.get("female", [])[:10]
+                    ),
+                    "category": "personal"
+                }
+            elif 'last' in col_lower:
+                return {
+                    "type": "last_name",
+                    "suggested_values": self.last_names[:20],
+                    "category": "personal"
+                }
+            else:
+                # Full name - combine first and last
+                full_names = []
+                for _ in range(20):
+                    first = random.choice(
+                        self.first_names.get("male", []) +
+                        self.first_names.get("female", []) +
+                        self.first_names.get("neutral", [])
+                    )
+                    last = random.choice(self.last_names)
+                    full_names.append(f"{first} {last}")
+                return {
+                    "type": "full_name",
+                    "suggested_values": full_names,
+                    "category": "personal"
+                }
+
         return None
 
     def enhance_metadata_with_clinical_context(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -540,13 +543,21 @@ class ClinicalReferenceLibrary:
         """
         if "statistics" in metadata:
             for column_name, column_stats in metadata["statistics"].items():
-                clinical_context = self.detect_clinical_column_type(column_name)
-                if clinical_context:
-                    column_stats["clinical_context"] = clinical_context
-                    # Add to metadata for LLM to use
-                    if column_stats.get("type") == "string" and clinical_context.get("suggested_values"):
-                        column_stats["suggested_values"] = clinical_context["suggested_values"][:10]
-                        column_stats["is_clinical"] = True
+                context = self.detect_clinical_column_type(column_name)
+                if not context:
+                    continue
+
+                # Only genuinely clinical columns are labelled clinical. Names,
+                # cities and states are reference data too, but calling them
+                # clinical makes the flag useless for anyone auditing PHI.
+                is_clinical = context.get("category") == "clinical"
+                key = "clinical_context" if is_clinical else "reference_context"
+                column_stats[key] = context
+
+                # Add to metadata for LLM to use
+                if column_stats.get("type") == "string" and context.get("suggested_values"):
+                    column_stats["suggested_values"] = context["suggested_values"][:10]
+                    column_stats["is_clinical"] = is_clinical
 
         return metadata
 

@@ -80,12 +80,39 @@ class TestClinicalReferenceLibrary(unittest.TestCase):
         self.assertEqual(result['type'], 'diagnosis')
 
     def test_detect_non_clinical_column(self):
-        """Test that non-clinical columns return None."""
-        result = self.library.detect_clinical_column_type('customer_name')
-        self.assertIsNone(result)
+        """Columns matching no reference category return None."""
+        for column in ('price', 'widget_sku', 'order_total'):
+            self.assertIsNone(
+                self.library.detect_clinical_column_type(column),
+                f"{column} should not match any reference category",
+            )
 
-        result = self.library.detect_clinical_column_type('price')
-        self.assertIsNone(result)
+    def test_person_name_column_is_personal_not_clinical(self):
+        """Name columns are recognised, but as personal reference data."""
+        result = self.library.detect_clinical_column_type('customer_name')
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result['type'], 'full_name')
+        self.assertEqual(result['category'], 'personal')
+
+    def test_clinical_name_columns_beat_the_generic_name_keyword(self):
+        """'<clinical>_name' must resolve to the clinical type, not a person.
+
+        The generic 'name' keyword used to be checked first, so a
+        medication_name / diagnosis_name / procedure_name column was filled
+        with people's names.
+        """
+        expected = {
+            'medication_name': 'medication',
+            'lab_test_name': 'lab_test',
+            'diagnosis_name': 'diagnosis',
+            'procedure_name': 'procedure',
+        }
+        for column, expected_type in expected.items():
+            result = self.library.detect_clinical_column_type(column)
+            self.assertIsNotNone(result, f"{column} was not detected")
+            self.assertEqual(result['type'], expected_type, f"for column {column}")
+            self.assertEqual(result['category'], 'clinical', f"for column {column}")
 
     def test_get_random_medications(self):
         """Test getting random medications."""
@@ -133,8 +160,12 @@ class TestClinicalReferenceLibrary(unittest.TestCase):
         self.assertIn('suggested_values', enhanced['statistics']['medication_name'])
         self.assertTrue(enhanced['statistics']['medication_name']['is_clinical'])
 
-        # Check non-clinical column was not enhanced
-        self.assertNotIn('clinical_context', enhanced['statistics']['patient_name'])
+        # A person-name column is reference data, but it is not clinical
+        patient_name = enhanced['statistics']['patient_name']
+        self.assertNotIn('clinical_context', patient_name)
+        self.assertFalse(patient_name.get('is_clinical', False))
+        # ...it still gets values so the generator can produce realistic names
+        self.assertIn('suggested_values', patient_name)
 
     def test_to_dataframe(self):
         """Test conversion to DataFrame."""

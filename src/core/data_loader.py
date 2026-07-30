@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Union, Dict, Any, Optional
 import io
 from src.utils.logger import logger
+from src.utils.pandas_compat import is_text_dtype
 
 
 class DataLoader:
@@ -288,7 +289,7 @@ class DataLoader:
             name_suggests_date = any(keyword in col_lower for keyword in date_keywords)
 
             # For string columns, check if values match date patterns
-            if pd.api.types.is_object_dtype(df[col]):
+            if is_text_dtype(df[col]):
                 # Sample non-null values
                 sample = df[col].dropna().head(10).astype(str)
                 if len(sample) > 0:
@@ -303,7 +304,9 @@ class DataLoader:
                     if name_suggests_date or matches_pattern:
                         try:
                             # Try multiple date formats
-                            converted = pd.to_datetime(df[col], errors='coerce', infer_datetime_format=True)
+                            # infer_datetime_format has been a no-op since
+                            # pandas 2.0 and was removed in pandas 3.
+                            converted = pd.to_datetime(df[col], errors='coerce')
 
                             # Check if conversion was successful for majority of non-null values
                             non_null_original = df[col].notna().sum()

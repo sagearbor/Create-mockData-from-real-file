@@ -9,6 +9,11 @@ import pandas as pd
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
+# Drives the HTTP API; skipped by tests/conftest.py when no server is up.
+pytestmark = pytest.mark.requires_server
+
 BASE_URL = "http://localhost:8201"
 
 def test_health_check():

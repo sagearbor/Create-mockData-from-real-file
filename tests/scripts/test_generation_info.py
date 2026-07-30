@@ -5,6 +5,11 @@ import requests
 import json
 import io
 
+import pytest
+
+# Drives the HTTP API; skipped by tests/conftest.py when no server is up.
+pytestmark = pytest.mark.requires_server
+
 # API base URL
 API_BASE = "http://localhost:8201"
 

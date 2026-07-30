@@ -7,6 +7,7 @@ import json
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from src.utils.logger import logger
+from src.utils.pandas_compat import is_categorical, is_text_dtype, text_columns
 from src.core.clinical_reference import ClinicalReferenceLibrary
 
 
@@ -111,6 +112,13 @@ class MetadataExtractor:
     
     def _extract_numeric_stats(self, series: pd.Series, column_name: str = None) -> Dict[str, Any]:
         """Extract statistics for numeric columns."""
+        # is_numeric_dtype() reports True for booleans, so bool columns arrive
+        # here. Cast them to integers: quantile() on a boolean Series raises on
+        # pandas 3 / numpy 2 ("numpy boolean subtract ... is not supported"),
+        # and the 0/1 statistics this produces are what pandas 2 produced too.
+        if pd.api.types.is_bool_dtype(series):
+            series = series.astype("Int64" if series.isna().any() else "int64")
+
         # Remove NaN values for calculation
         clean_series = series.dropna()
 
@@ -323,7 +331,7 @@ class MetadataExtractor:
             sample_df = df
         
         for col in df.columns:
-            if pd.api.types.is_object_dtype(df[col]):
+            if is_text_dtype(df[col]):
                 patterns[col] = self._extract_string_patterns(sample_df[col])
         
         return patterns
@@ -442,7 +450,7 @@ class MetadataExtractor:
                 correlations["numeric_correlations"]["correlation_matrix"] = {}
         
         # Categorical associations (using Cramér's V for categorical variables)
-        categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+        categorical_cols = text_columns(df)
         if len(categorical_cols) > 1:
             associations = []
             for i in range(min(len(categorical_cols), 10)):  # Limit to first 10 to avoid explosion
@@ -451,6 +459,11 @@ class MetadataExtractor:
                     # Simple association metric based on unique value overlap
                     unique1 = df[col1].nunique()
                     unique2 = df[col2].nunique()
+                    # An all-null column has nunique() == 0, which would make the
+                    # denominator zero. Such a column carries no information, so
+                    # there is no association to report.
+                    if unique1 == 0 or unique2 == 0:
+                        continue
                     combined_unique = df.groupby([col1, col2]).size().shape[0]
                     association = 1 - (combined_unique / (unique1 * unique2))
                     if association > 0.3:  # Threshold for meaningful association
@@ -549,7 +562,7 @@ class MetadataExtractor:
             return "datetime"
         elif pd.api.types.is_timedelta64_dtype(series):
             return "timedelta"
-        elif pd.api.types.is_categorical_dtype(series):
+        elif is_categorical(series):
             return "category"
         else:
             return "str"

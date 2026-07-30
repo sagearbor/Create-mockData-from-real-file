@@ -123,7 +123,48 @@
   - Regression tests: `tests/test_synthetic_generator_injection.py`,
     `tests/test_synthetic_generator_sandbox.py`
 
+- [x] **COMPAT.1**: Make the suite green on pandas 2.x and 3.x ✅
+  - ✅ `src/utils/pandas_compat.py` — `is_text_dtype()` / `is_categorical()` /
+    `text_columns()` give identical answers on pandas 2 and 3. pandas 3 moved
+    text columns to the `str` dtype, so every `is_object_dtype()` guard had
+    silently stopped firing (date detection and pattern extraction were dead)
+  - ✅ Dropped `infer_datetime_format=` (no-op since pandas 2.0, removed in 3.0)
+  - ✅ Boolean columns cast to int before numeric stats — `quantile()` on a bool
+    Series raises "numpy boolean subtract" on **both** version sets
+  - ✅ Guarded divide-by-zero in categorical association for all-null columns
+  - ✅ Clinical detection ordering: `medication_name` / `lab_test_name` /
+    `diagnosis_name` / `procedure_name` resolved to *people's names* because the
+    generic `name` keyword was checked before every clinical keyword
+  - ✅ `is_clinical` now only true for genuinely clinical columns; other
+    reference matches (names, cities, states) use `reference_context`
+  - ✅ `CacheManager` writes the empty index on init, as its docstring claimed
+  - ✅ Test fixtures flushed before yielding (three fixtures yielded from inside
+    `open()`, so the loader read an empty file)
+  - ✅ Server-dependent tests marked `requires_server` and skipped with a clear
+    reason instead of failing (`tests/conftest.py`); playwright test skips when
+    the package is absent
+  - ✅ Pins widened to `pandas>=2.1.4,<4` / `numpy>=1.26.2,<3` so installs work
+    on modern Python. **The deployed image now resolves to pandas 3.x.**
+  - Regression tests: `tests/test_pandas_compat.py`
+
 ## Known Issues & Technical Debt
+
+### Version Support
+
+The suite must stay green on both ends of the supported range. Verify before
+release:
+
+```bash
+pytest                                   # your local venv
+docker run --rm -v "$PWD":/app -w /app python:3.11-slim bash -c \
+  'pip install -q pandas==2.1.4 numpy==1.26.2 pydantic-settings python-dotenv \
+     pytest pytest-asyncio requests fastapi "uvicorn[standard]" httpx \
+     python-multipart aiofiles openai && pytest -q'
+```
+
+Prefer the helpers in `src/utils/pandas_compat.py` over `is_object_dtype()` and
+`select_dtypes(include=['object'])`; on pandas 3 those quietly stop matching
+ordinary text columns rather than raising.
 
 ### Security Notes
 - **Public deployment**: `deploy/cloudrun.sh` intentionally deploys with
@@ -161,9 +202,16 @@ AZURE_OPENAI_CHAT_DEPLOYMENT_NAME="gpt-4"
 
 ### Testing Commands
 ```bash
+# Full suite. Tests needing a live API server skip themselves cleanly;
+# start the server first to run them too.
+pytest
+
 # Security regression tests for the code-generation path (must always pass)
 pytest tests/test_synthetic_generator_injection.py \
        tests/test_synthetic_generator_sandbox.py
+
+# pandas/numpy portability
+pytest tests/test_pandas_compat.py
 
 # Run local server
 python main.py

@@ -1,8 +1,10 @@
 # Core dependencies
 mcp>=0.4.0
 # dcri-a2a-core  # optional: real A2A wire contract (else a2a_runtime shim is used)
-pandas==2.1.4
-numpy==1.26.2
+# Verified against both bounds: pandas 2.1.4/numpy 1.26.2 and
+# pandas 3.x/numpy 2.x. See tests/test_pandas_compat.py.
+pandas>=2.1.4,<4
+numpy>=1.26.2,<3
 python-dotenv==1.0.0
 
 # Web framework

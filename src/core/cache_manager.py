@@ -31,7 +31,7 @@ class CacheManager:
         self.cache_index = self._load_cache_index()
         
     def _load_cache_index(self) -> Dict[str, Any]:
-        """Load or create cache index."""
+        """Load the cache index, creating an empty one if it does not exist."""
         if self.index_file.exists():
             try:
                 with open(self.index_file, 'r') as f:
@@ -39,6 +39,14 @@ class CacheManager:
             except Exception as e:
                 self.logger.error(f"Error loading cache index: {e}")
                 return {}
+
+        # Write the empty index now so the cache directory is self-describing
+        # and a later crash cannot leave a cache with no index at all.
+        try:
+            with open(self.index_file, 'w') as f:
+                json.dump({}, f)
+        except Exception as e:
+            self.logger.error(f"Error creating cache index: {e}")
         return {}
     
     def _save_cache_index(self):

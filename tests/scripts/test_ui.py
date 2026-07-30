@@ -5,9 +5,19 @@ Run with: python tests/scripts/test_ui.py
 """
 
 import asyncio
-from playwright.async_api import async_playwright
 import os
 from datetime import datetime
+
+import pytest
+
+# Playwright is an optional dev dependency; skip the module rather than failing
+# collection for everyone who has not installed it and its browsers.
+async_playwright = pytest.importorskip(
+    "playwright.async_api",
+    reason="playwright not installed; run `pip install playwright && playwright install`",
+).async_playwright
+
+pytestmark = [pytest.mark.requires_server, pytest.mark.requires_playwright]
 
 SCREENSHOTS_DIR = "tests/screenshots"
 BASE_URL = "http://localhost:8201"

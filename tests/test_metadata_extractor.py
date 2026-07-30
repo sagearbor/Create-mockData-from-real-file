@@ -149,6 +149,33 @@ class TestMetadataExtractor:
         assert "col4" in quality["columns_all_null"]
         assert set(quality["columns_with_nulls"]) == {"col1", "col2", "col3", "col4"}
     
+    def test_extract_correlations_with_all_null_text_column(self, metadata_extractor):
+        """An all-null text column must not divide by zero in the association metric."""
+        df = pd.DataFrame({
+            "site": ["A", "B", "A", "B"],
+            "notes": [None, None, None, None],
+        })
+
+        correlations = metadata_extractor._extract_correlations(df)
+
+        assert "categorical_associations" in correlations
+        # nunique() is 0 for the all-null column, so no association is possible
+        assert all(
+            a["column1"] != "notes" and a["column2"] != "notes"
+            for a in correlations["categorical_associations"]
+        )
+
+    def test_extract_correlations_with_constant_text_column(self, metadata_extractor):
+        """A single-valued column is degenerate but must not crash."""
+        df = pd.DataFrame({
+            "site": ["A", "B", "A", "B"],
+            "study": ["ONLY", "ONLY", "ONLY", "ONLY"],
+        })
+
+        correlations = metadata_extractor._extract_correlations(df)
+
+        assert "categorical_associations" in correlations
+
     def test_get_python_type(self, metadata_extractor):
         """Test Python type detection."""
         assert metadata_extractor._get_python_type(pd.Series([1, 2, 3])) == "int"
@@ -184,20 +211,40 @@ class TestMetadataExtractor:
         assert patterns["format_confidence"] > 0.8
     
     def test_to_secure_json(self, metadata_extractor, sample_dataframe):
-        """Test secure JSON conversion."""
+        """Values are anonymized unless the extractor marked them safe to keep.
+
+        `safety_mode` (default 'balanced') lets low-cardinality, non-sensitive
+        categoricals through so the generator can reproduce their distribution;
+        everything else is replaced by value_N placeholders.
+        """
         metadata = metadata_extractor.extract(sample_dataframe)
         secure_json = metadata_extractor.to_secure_json(metadata)
-        
+
         # Parse JSON to verify it's valid
         parsed = json.loads(secure_json)
         assert parsed is not None
-        
-        # Check that sensitive values are anonymized
+
         for col_stats in parsed["statistics"].values():
-            if "most_common_values" in col_stats:
-                # Values should be anonymized
-                for key in col_stats["most_common_values"]:
-                    assert key.startswith("value_")
+            if "most_common_values" not in col_stats:
+                continue
+            if col_stats.get("preserve_values", False):
+                continue
+            # Not marked safe, so the real values must not be present
+            for key in col_stats["most_common_values"]:
+                assert key.startswith("value_")
+
+    def test_to_secure_json_anonymizes_everything_in_strict_mode(self, sample_dataframe):
+        """Strict mode is the privacy guarantee: no real value may survive."""
+        strict_extractor = MetadataExtractor(safety_mode="strict")
+        metadata = strict_extractor.extract(sample_dataframe)
+
+        parsed = json.loads(strict_extractor.to_secure_json(metadata))
+
+        for col_stats in parsed["statistics"].values():
+            for key in col_stats.get("most_common_values", {}):
+                assert key.startswith("value_"), (
+                    f"strict mode leaked a real value: {key!r}"
+                )
     
     def test_metadata_version(self, metadata_extractor, sample_dataframe):
         """Test that metadata includes version information."""

@@ -22,32 +22,36 @@ class TestDataLoader:
         """Create a DataLoader instance."""
         return DataLoader()
     
+    # NOTE: these fixtures must fully write and CLOSE the file before yielding.
+    # Yielding from inside `open(...)` leaves the writes sitting in the buffer,
+    # so the loader sees an empty file ("No columns to parse from file").
+
     @pytest.fixture
-    def sample_csv_file(self):
+    def sample_csv_file(self, tmp_path):
         """Create a temporary CSV file for testing."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-            f.write("id,name,age,salary\n")
-            f.write("1,John Doe,30,50000\n")
-            f.write("2,Jane Smith,25,45000\n")
-            f.write("3,Bob Johnson,35,60000\n")
-            yield f.name
-        Path(f.name).unlink()
-    
+        path = tmp_path / "sample.csv"
+        path.write_text(
+            "id,name,age,salary\n"
+            "1,John Doe,30,50000\n"
+            "2,Jane Smith,25,45000\n"
+            "3,Bob Johnson,35,60000\n"
+        )
+        return str(path)
+
     @pytest.fixture
-    def sample_json_file(self):
+    def sample_json_file(self, tmp_path):
         """Create a temporary JSON file for testing."""
         data = [
             {"id": 1, "name": "John Doe", "age": 30, "salary": 50000},
             {"id": 2, "name": "Jane Smith", "age": 25, "salary": 45000},
             {"id": 3, "name": "Bob Johnson", "age": 35, "salary": 60000}
         ]
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(data, f)
-            yield f.name
-        Path(f.name).unlink()
-    
+        path = tmp_path / "sample.json"
+        path.write_text(json.dumps(data))
+        return str(path)
+
     @pytest.fixture
-    def sample_nested_json_file(self):
+    def sample_nested_json_file(self, tmp_path):
         """Create a temporary nested JSON file for testing."""
         data = {
             "users": [
@@ -55,10 +59,9 @@ class TestDataLoader:
                 {"id": 2, "info": {"name": "Jane", "age": 25}}
             ]
         }
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(data, f)
-            yield f.name
-        Path(f.name).unlink()
+        path = tmp_path / "nested.json"
+        path.write_text(json.dumps(data))
+        return str(path)
     
     def test_detect_file_type_csv(self, data_loader):
         """Test file type detection for CSV files."""

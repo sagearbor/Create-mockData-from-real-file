@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements-aca.txt .
+RUN pip install --no-cache-dir -r requirements-aca.txt
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+COPY main.py ./
+COPY src ./src
+COPY a2a_runtime ./a2a_runtime
+RUN mkdir -p data/cache data/local_storage logs && chown -R appuser:appuser /app
+ENV ENVIRONMENT=production PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+USER appuser
+EXPOSE 8201
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8201"]

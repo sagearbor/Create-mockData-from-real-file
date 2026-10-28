@@ -1,4 +1,4 @@
-# Azure Container Apps definition for the MVP landing page.
+# Azure Container Apps definition for the Mock Data Generator.
 # Committed TEMPLATE: <PLACEHOLDERS> come from ~/dcri/azure-environment.md.
 # Set IMAGE_TAG to the committed git short SHA used for the image build.
 # Copy to deploy/aca/mock-data-generator.local.yaml (gitignored), fill, then:
@@ -49,8 +49,8 @@ properties:
             initialDelaySeconds: 5
             periodSeconds: 15
     scale:
-      minReplicas: 0
-      maxReplicas: 2
+      minReplicas: 1
+      maxReplicas: 1
       pollingInterval: 30
       cooldownPeriod: 600
       rules:

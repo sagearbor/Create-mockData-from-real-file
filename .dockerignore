@@ -81,3 +81,9 @@ claude/
 *.bak
 *.orig
 .backup/
+# Never send runtime data, credentials, or virtualenvs to the build context.
+.env.*
+.venv/
+data/
+*.local.yaml
+*.local.yml

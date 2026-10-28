@@ -1,0 +1,60 @@
+# Azure Container Apps definition for the Mock Data Generator.
+# Committed TEMPLATE: <PLACEHOLDERS> come from ~/dcri/azure-environment.md.
+# Set IMAGE_TAG to the committed git short SHA used for the image build.
+# Copy to deploy/aca/mock-data-generator.local.yaml (gitignored), fill, then:
+#   az containerapp create -n mock-data-generator -g $RG --yaml deploy/aca/mock-data-generator.local.yaml
+identity:
+  type: UserAssigned
+  userAssignedIdentities:
+    "<USER_ASSIGNED_IDENTITY_RESOURCE_ID>": {}
+properties:
+  managedEnvironmentId: "<MANAGED_ENVIRONMENT_RESOURCE_ID>"
+  workloadProfileName: Consumption
+  configuration:
+    activeRevisionsMode: Single
+    # ACE denies public access, so external:true is still VPN-only; it just
+    # gives the app its own FQDN (same as the other DCRI MVP apps).
+    ingress:
+      external: true
+      targetPort: 8201
+      transport: http
+      allowInsecure: false
+      traffic:
+        - latestRevision: true
+          weight: 100
+    registries:
+      - server: "<ACR_LOGIN_SERVER>"
+        identity: "<USER_ASSIGNED_IDENTITY_RESOURCE_ID>"
+    # Add when the LLM router lands (docs/PLAN.md step 2):
+    # secrets:
+    #   - name: azure-openai-api-key
+    #     value: "<set-via-az-containerapp-secret-set>"
+  template:
+    containers:
+      - name: mock-data-generator
+        image: "<ACR_LOGIN_SERVER>/mock-data-generator:<IMAGE_TAG>"
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+        env:
+          - name: AZURE_CLIENT_ID
+            value: "<USER_ASSIGNED_IDENTITY_CLIENT_ID>"
+        probes:
+          - type: Liveness
+            httpGet: {path: /health, port: 8201}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          - type: Readiness
+            httpGet: {path: /health, port: 8201}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+      pollingInterval: 30
+      cooldownPeriod: 600
+      rules:
+        - name: http-scaling
+          http:
+            metadata:
+              concurrentRequests: "50"

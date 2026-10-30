@@ -45,6 +45,8 @@ properties:
             value: "<AZURE_OPENAI_ENDPOINT>"  # e.g. https://dcri-aifoundry-poc.openai.azure.com/
           - name: AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
             value: gpt-5-nano
+          - name: TELEMETRY_BLOB_ACCOUNT_URL
+            value: "<TELEMETRY_BLOB_ACCOUNT_URL>"  # Storage endpoint from ~/dcri/azure-environment.md
         probes:
           - type: Liveness
             httpGet: {path: /health, port: 8201}

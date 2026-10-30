@@ -1,7 +1,8 @@
 # Cloud Run runtime dependencies — trimmed from requirements.txt.
 # Dev/test tools (pytest, black, flake8, isort, mypy, httpx) and Azure-only
 # SDKs (azure-storage-blob, azure-cosmos, azure-search-documents,
-# azure-keyvault-secrets, azure-identity) are intentionally excluded.
+# azure-keyvault-secrets) are intentionally excluded. azure-identity is kept:
+# src/dcri_llm.py needs it for LLM auth.
 # Pins match requirements.txt so local and Cloud Run images use identical
 # package versions.
 
@@ -29,6 +30,7 @@ python-dotenv==1.0.0
 # LLM — generation_service imports AzureOpenAI lazily; the package must be
 # present even when credentials are absent (the code falls back gracefully).
 openai==1.109.1
+azure-identity==1.19.0
 
 # Utilities
 typing-extensions==4.12.2

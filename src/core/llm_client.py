@@ -38,6 +38,11 @@ def build_llm_client():
         )
         return client
     except Exception as exc:  # noqa: BLE001 - any failure means "no AI", not a crash
-        logger.error("Could not build Azure OpenAI client (%s); using fallback generation",
-                     type(exc).__name__)
+        # Never log the exception text: it could echo a key or endpoint detail.
+        logger.warning(
+            "AI DISABLED: could not build Azure OpenAI client (LLM_AUTH=%s, %s); "
+            "all generation will use the template fallback. Check LLM_AUTH, "
+            "AZURE_OPENAI_API_KEY (key mode) or azure-identity / az login (identity mode).",
+            (os.environ.get("LLM_AUTH") or "identity").strip().lower(), type(exc).__name__,
+        )
         return None

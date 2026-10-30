@@ -92,8 +92,11 @@ ENV_VARS=""
 ENV_PAIRS=()
 
 if [[ -n "${AZURE_OPENAI_API_KEY:-}" ]]; then
+    # Cloud Run has no Azure managed identity, so dcri_llm must use the key.
+    ENV_PAIRS+=("LLM_AUTH=key")
     ENV_PAIRS+=("AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}")
 fi
+ENV_PAIRS+=("SOLUTION_NAME=${SOLUTION_NAME:-mock-data-generator}")
 if [[ -n "${AZURE_OPENAI_ENDPOINT:-}" ]]; then
     ENV_PAIRS+=("AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}")
 fi

@@ -208,7 +208,7 @@ Key settings in `.env`:
 
 ```env
 # Azure OpenAI (optional - enables LLM generation; unset = template fallback)
-AZURE_OPENAI_ENDPOINT=https://dcri-aifoundry-poc.openai.azure.com/
+AZURE_OPENAI_ENDPOINT=https://<your-foundry>.openai.azure.com/
 AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=gpt-5-nano
 SOLUTION_NAME=mock-data-generator
 # Keyless by default (src/dcri_llm.py): `az login` locally, managed identity on ACA.

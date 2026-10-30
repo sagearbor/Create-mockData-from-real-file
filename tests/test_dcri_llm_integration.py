@@ -52,7 +52,7 @@ class _FakeCompletions:
 def _fake_client(**kw):
     completions = _FakeCompletions(**kw)
     client = SimpleNamespace(
-        base_url="https://dcri-aifoundry-poc.openai.azure.com/openai/",
+        base_url="https://example-foundry.openai.azure.com/openai/",
         chat=SimpleNamespace(completions=completions),
     )
     return dcri_llm.instrument(client), completions
@@ -164,3 +164,14 @@ def test_usage_log_has_no_column_names(tmp_path):
     assert SECRET_COLUMN not in text
     entry = json.loads(text.splitlines()[-1])
     assert "column_names" not in entry and entry["num_columns"] == 1
+
+
+def test_client_build_failure_logs_warning_and_falls_back(monkeypatch, caplog):
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example-foundry.openai.azure.com/")
+    monkeypatch.setenv("LLM_AUTH", "key")
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    with caplog.at_level("WARNING", logger="src.core.llm_client"):
+        assert llm_client.build_llm_client() is None
+    warn = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warn and "AI DISABLED" in warn[0].getMessage()
+    assert "LLM_AUTH=key" in warn[0].getMessage()

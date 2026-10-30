@@ -42,7 +42,7 @@ properties:
           - name: SOLUTION_NAME
             value: mock-data-generator
           - name: AZURE_OPENAI_ENDPOINT
-            value: "<AZURE_OPENAI_ENDPOINT>"  # e.g. https://dcri-aifoundry-poc.openai.azure.com/
+            value: "<AZURE_OPENAI_ENDPOINT>"  # e.g. https://<your-foundry>.openai.azure.com/
           - name: AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
             value: gpt-5-nano
           - name: TELEMETRY_BLOB_ACCOUNT_URL

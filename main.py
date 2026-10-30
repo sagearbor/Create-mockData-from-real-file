@@ -39,40 +39,19 @@ data_dictionary = DataDictionary()
 synthetic_generator = None
 
 def initialize_openai_client():
-    """Initialize OpenAI client if credentials are available."""
+    """Build the generator with an Azure OpenAI client when AI is configured.
+
+    Auth and telemetry live in src/dcri_llm.py (managed identity by default,
+    LLM_AUTH=key only as an opt-in). With no endpoint, or if the client cannot
+    be built, the generator runs its template-based fallback.
+    """
     global synthetic_generator
+    from src.core.llm_client import build_llm_client
 
-    logger.info(f"Initializing OpenAI client...")
-    logger.info(f"Endpoint configured: {bool(settings.azure_openai_endpoint)}")
-    logger.info(f"API key configured: {bool(settings.azure_openai_api_key)}")
     logger.info(f"Chat deployment: {settings.azure_openai_chat_deployment}")
-    logger.info(f"API version: {settings.azure_openai_api_version}")
-
-    if settings.azure_openai_api_key and settings.azure_openai_endpoint:
-        try:
-            from openai import AzureOpenAI
-
-            client = AzureOpenAI(
-                api_key=settings.azure_openai_api_key,
-                api_version=settings.azure_openai_api_version,
-                azure_endpoint=settings.azure_openai_endpoint
-            )
-
-            synthetic_generator = SyntheticDataGenerator(openai_client=client)
-            logger.info("✓ OpenAI client initialized successfully")
-            return True
-        except Exception as e:
-            logger.error(f"✗ Failed to initialize OpenAI client: {type(e).__name__}: {e}")
-            synthetic_generator = SyntheticDataGenerator()
-            return False
-    else:
-        logger.warning("✗ OpenAI credentials not configured, using fallback generation")
-        if not settings.azure_openai_api_key:
-            logger.warning("  - Missing: AZURE_OPENAI_API_KEY")
-        if not settings.azure_openai_endpoint:
-            logger.warning("  - Missing: AZURE_OPENAI_ENDPOINT")
-        synthetic_generator = SyntheticDataGenerator()
-        return False
+    client = build_llm_client()
+    synthetic_generator = SyntheticDataGenerator(openai_client=client)
+    return client is not None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -109,6 +88,10 @@ app = FastAPI(
 )
 
 # Add CORS middleware with secure configuration
+# Per-request action_id + Easy Auth user for LLM telemetry (dcri_llm).
+from src.dcri_llm import asgi_middleware as _dcri_llm_middleware
+app.add_middleware(_dcri_llm_middleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins(),  # Environment-specific origins

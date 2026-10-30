@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -23,49 +22,13 @@ logger = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _build_openai_client():
-    """Build and return an AzureOpenAI client using the same logic as main.py.
-
-    Reads AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, and
-    AZURE_OPENAI_API_VERSION from the environment (loaded from .env by
-    main.py's startup; generation_service reads them directly so it is
-    usable both inside and outside the FastAPI lifespan).
-
-    Returns:
-        AzureOpenAI client instance, or None if credentials are not configured.
-    """
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
-
-    if not api_key or not endpoint:
-        logger.warning(
-            "generation_service: Azure OpenAI credentials not configured; "
-            "SyntheticDataGenerator will use its built-in fallback path."
-        )
-        return None
-
-    try:
-        from openai import AzureOpenAI  # lazy — openai may not be installed
-
-        client = AzureOpenAI(
-            api_key=api_key,
-            api_version=api_version,
-            azure_endpoint=endpoint,
-        )
-        logger.info("generation_service: AzureOpenAI client initialised successfully.")
-        return client
-    except Exception as exc:  # noqa: BLE001
-        logger.error("generation_service: failed to build AzureOpenAI client: %s", exc)
-        return None
-
-
 def _get_generator():
     """Return a SyntheticDataGenerator, building the openai client lazily."""
     from src.core.synthetic_generator import SyntheticDataGenerator  # lazy
 
-    openai_client = _build_openai_client()
-    return SyntheticDataGenerator(openai_client=openai_client)
+    from src.core.llm_client import build_llm_client  # lazy
+
+    return SyntheticDataGenerator(openai_client=build_llm_client())
 
 
 # ---------------------------------------------------------------------------

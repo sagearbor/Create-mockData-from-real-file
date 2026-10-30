@@ -147,6 +147,20 @@
     on modern Python. **The deployed image now resolves to pandas 3.x.**
   - Regression tests: `tests/test_pandas_compat.py`
 
+- [x] **LLM.1**: Keyless Azure OpenAI auth + per-call telemetry (dcri_llm) ✅
+  - ✅ Vendored `src/dcri_llm.py` (v1.0.0, unmodified); one client builder
+    `src/core/llm_client.py` used by the web app and the MCP/A2A service layer
+  - ✅ Default auth is managed identity (`LLM_AUTH=identity`); API key only via
+    `LLM_AUTH=key`. No endpoint or a failed call -> template fallback, and the
+    reason is returned in `generation_info["llm_error"]`
+  - ✅ `max_completion_tokens=40000` (was `max_tokens=4000`); `finish_reason=length`
+    or empty output is treated as a failure, not success
+  - ✅ PHI: usage logs no longer store column names; loader/dictionary/sandbox logs
+    report counts instead of column names, sheet names or stderr text
+  - [ ] **Open question (Sage):** the prompt still sends real `most_common_values`
+    for categorical columns to the LLM — decide whether that is acceptable
+  - Regression tests: `tests/test_dcri_llm_integration.py`
+
 ## Known Issues & Technical Debt
 
 ### Version Support

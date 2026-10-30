@@ -68,10 +68,15 @@ When deployed to cloud:
 1. **Environment Configuration**:
    - Copy `.env.example` to `.env`
    - For local development, minimally configure:
-     - `AZURE_OPENAI_ENDPOINT`
-     - `AZURE_OPENAI_API_KEY`
-     - `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`
-     - `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME`
+     - `AZURE_OPENAI_ENDPOINT` (unset = template-based fallback, no AI)
+     - `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` (default `gpt-5-nano`)
+     - `SOLUTION_NAME=mock-data-generator`
+   - Auth: every LLM call goes through the vendored `src/dcri_llm.py` (do not edit it;
+     re-copy from mvp_landing_page `packages/dcri_llm`). `LLM_AUTH=identity` (default)
+     uses `az login` locally and the managed identity on ACA; `LLM_AUTH=key` +
+     `AZURE_OPENAI_API_KEY` only for people without an identity. Each call prints one
+     `llm_call` JSON telemetry line (counts only, no prompt text).
+   - Reasoning models (gpt-5.x, o-series): `max_completion_tokens` >= 32000, default 40000.
 
 2. **Python Environment**:
    ```bash

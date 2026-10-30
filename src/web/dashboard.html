@@ -396,7 +396,7 @@
 
             <!-- Top Column Types -->
             <div class="chart-card">
-                <h2>📊 Most Generated Column Types</h2>
+                <h2>📊 Columns per Dataset</h2>
                 <div class="chart-container">
                     <canvas id="columnTypesChart"></canvas>
                 </div>
@@ -770,17 +770,16 @@
         function updateColumnTypesChart(logs) {
             const ctx = document.getElementById('columnTypesChart').getContext('2d');
 
-            // Count column occurrences
+            // Usage logs hold column COUNTS only (never real column names: PHI).
             const columnCounts = {};
             logs.forEach(log => {
-                if (log.column_names) {
-                    log.column_names.forEach(col => {
-                        columnCounts[col] = (columnCounts[col] || 0) + 1;
-                    });
+                if (log.num_columns != null) {
+                    const key = `${log.num_columns} cols`;
+                    columnCounts[key] = (columnCounts[key] || 0) + 1;
                 }
             });
 
-            // Sort and take top 10
+            // Sort by frequency and take top 10
             const sorted = Object.entries(columnCounts)
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 10);

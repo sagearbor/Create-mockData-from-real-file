@@ -158,12 +158,12 @@ class DataDictionary:
                         column_mapping[semantic_key] = col
                     break
 
-        self.logger.info(f"Column mapping detected: {column_mapping}")
+        self.logger.info(f"Column mapping detected for fields: {sorted(column_mapping)}")
 
         # If no name column found, try to use the first column
         if 'name' not in column_mapping and len(df.columns) > 0:
             column_mapping['name'] = df.columns[0]
-            self.logger.info(f"Using first column '{df.columns[0]}' as field name")
+            self.logger.info("Using first column as field name")
 
         # Parse each row as a field definition
         for _, row in df.iterrows():
@@ -466,7 +466,7 @@ class DataDictionary:
         excel_file = pd.ExcelFile(io.BytesIO(content))
         sheet_names = excel_file.sheet_names
 
-        self.logger.info(f"Excel file contains {len(sheet_names)} sheets: {sheet_names}")
+        self.logger.info(f"Excel file contains {len(sheet_names)} sheets")
 
         # Try to find the data dictionary sheet
         dict_sheet = None
@@ -483,7 +483,7 @@ class DataDictionary:
             sheet_lower = sheet_name.lower().strip()
             if any(dict_name in sheet_lower for dict_name in common_dict_names):
                 dict_sheet = sheet_name
-                self.logger.info(f"Found dictionary sheet by name: {sheet_name}")
+                self.logger.info("Found dictionary sheet by name")
                 break
 
         # If no obvious dictionary sheet, check each sheet's content
@@ -508,7 +508,7 @@ class DataDictionary:
                 if matches >= 2:
                     dict_sheet = sheet_name
                     dict_df = df
-                    self.logger.info(f"Found dictionary sheet by content analysis: {sheet_name}")
+                    self.logger.info("Found dictionary sheet by content analysis")
                     break
 
         # If still no dictionary found, use the first non-empty sheet
@@ -518,7 +518,7 @@ class DataDictionary:
                 if not df.empty and len(df) > 0:
                     dict_sheet = sheet_name
                     dict_df = df
-                    self.logger.warning(f"No clear dictionary sheet found, using first non-empty sheet: {sheet_name}")
+                    self.logger.warning("No clear dictionary sheet found, using first non-empty sheet")
                     break
 
         # Load the identified sheet if not already loaded

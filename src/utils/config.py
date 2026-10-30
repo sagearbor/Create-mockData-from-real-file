@@ -21,10 +21,13 @@ class Settings(BaseSettings):
     
     # Azure OpenAI Configuration
     azure_openai_endpoint: Optional[str] = Field(default=None, env="AZURE_OPENAI_ENDPOINT")
+    # Auth is handled by src/dcri_llm.py (LLM_AUTH=identity by default). The key is
+    # read there only when LLM_AUTH=key; this field just keeps old .env files valid.
     azure_openai_api_key: Optional[str] = Field(default=None, env="AZURE_OPENAI_API_KEY")
-    azure_openai_chat_deployment: str = Field(default="gpt-4o-mini", env="AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
+    # gpt-5-nano is deployed on the DCRI POC Foundry; gpt-4o-mini is not.
+    azure_openai_chat_deployment: str = Field(default="gpt-5-nano", env="AZURE_OPENAI_CHAT_DEPLOYMENT_NAME")
     azure_openai_embedding_deployment: str = Field(default="text-embedding-ada-002", env="AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
-    azure_openai_api_version: str = Field(default="2024-02-01", env="AZURE_OPENAI_API_VERSION")
+    azure_openai_api_version: str = Field(default="2025-04-01-preview", env="AZURE_OPENAI_API_VERSION")
     
     # Azure Storage Configuration
     azure_storage_connection_string: Optional[str] = Field(default=None, env="AZURE_STORAGE_CONNECTION_STRING")

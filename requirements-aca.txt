@@ -16,9 +16,12 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 
-openai==1.6.1
+openai==1.109.1
+# Managed-identity auth + LLM telemetry (src/dcri_llm.py)
+azure-identity==1.19.0
+azure-storage-blob==12.19.0
 
-typing-extensions==4.9.0
+typing-extensions==4.12.2
 aiohttp==3.9.1
 Jinja2==3.1.2
 

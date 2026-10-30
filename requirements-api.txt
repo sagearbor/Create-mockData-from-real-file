@@ -28,10 +28,10 @@ python-dotenv==1.0.0
 
 # LLM — generation_service imports AzureOpenAI lazily; the package must be
 # present even when credentials are absent (the code falls back gracefully).
-openai==1.6.1
+openai==1.109.1
 
 # Utilities
-typing-extensions==4.9.0
+typing-extensions==4.12.2
 aiohttp==3.9.1
 Jinja2==3.1.2
 

@@ -249,7 +249,7 @@ class DataLoader:
         df = self._detect_and_convert_dates(df)
 
         # Log basic statistics
-        self.logger.info(f"DataFrame standardized - Shape: {df.shape}, Columns: {list(df.columns)[:5]}{'...' if len(df.columns) > 5 else ''}")
+        self.logger.info(f"DataFrame standardized - Shape: {df.shape}, Columns: {len(df.columns)}")
 
         return df
 
@@ -314,8 +314,8 @@ class DataLoader:
 
                             if non_null_converted >= non_null_original * 0.8:  # 80% successful conversion
                                 df[col] = converted
-                                self.logger.info(f"Converted column '{col}' to datetime")
+                                self.logger.info("Converted a column to datetime")
                         except Exception as e:
-                            self.logger.debug(f"Could not convert column '{col}' to datetime: {e}")
+                            self.logger.debug(f"Could not convert a column to datetime: {type(e).__name__}")
 
         return df

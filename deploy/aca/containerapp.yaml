@@ -25,10 +25,8 @@ properties:
     registries:
       - server: "<ACR_LOGIN_SERVER>"
         identity: "<USER_ASSIGNED_IDENTITY_RESOURCE_ID>"
-    # Add when the LLM router lands (docs/PLAN.md step 2):
-    # secrets:
-    #   - name: azure-openai-api-key
-    #     value: "<set-via-az-containerapp-secret-set>"
+    # No API-key secret: the app signs in to Azure OpenAI with the user-assigned
+    # managed identity via src/dcri_llm.py (LLM_AUTH=identity).
   template:
     containers:
       - name: mock-data-generator
@@ -39,6 +37,14 @@ properties:
         env:
           - name: AZURE_CLIENT_ID
             value: "<USER_ASSIGNED_IDENTITY_CLIENT_ID>"
+          - name: LLM_AUTH
+            value: identity
+          - name: SOLUTION_NAME
+            value: mock-data-generator
+          - name: AZURE_OPENAI_ENDPOINT
+            value: "<AZURE_OPENAI_ENDPOINT>"  # e.g. https://dcri-aifoundry-poc.openai.azure.com/
+          - name: AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
+            value: gpt-5-nano
         probes:
           - type: Liveness
             httpGet: {path: /health, port: 8201}

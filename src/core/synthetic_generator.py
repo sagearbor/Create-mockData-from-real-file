@@ -20,6 +20,15 @@ from src.utils.logger import logger
 from src.utils.config import settings
 from src.core.cache_manager import CacheManager
 
+# HARD RULE: reasoning models (gpt-5.x, o-series) spend thinking tokens out of the
+# completion budget; never cap them below 32000. 40000 is the DCRI default.
+LLM_MAX_COMPLETION_TOKENS = 40000
+_REASONING_MODEL_RE = re.compile(r"^(gpt-5|o\d)", re.I)
+
+
+class LLMOutputError(RuntimeError):
+    """The LLM call returned but its output is unusable (truncated or empty)."""
+
 
 # Characters allowed to survive into a generated comment. Anything else (most
 # importantly newlines, which would end the comment and start a new statement)
@@ -139,9 +148,11 @@ class SyntheticDataGenerator:
             generation_code = None
 
         # Generate code if not cached
+        llm_error = None
         if generation_code is None:
             code_gen_start = time.time()
-            generation_code, generation_method, llm_response_time = self._generate_code_with_llm(metadata, num_rows, match_threshold)
+            generation_code, generation_method, llm_response_time, llm_error = self._generate_code_with_llm(
+                metadata, num_rows, match_threshold, operation="generate_code")
             # Only track llm_response time (code_generation is redundant as it's the same)
             if llm_response_time:
                 step_timings['llm_response'] = llm_response_time
@@ -174,6 +185,10 @@ class SyntheticDataGenerator:
             "use_cached": use_cached,
             "step_timings": step_timings
         }
+        if llm_error:
+            # Surface AI failures (auth, truncation, empty output) instead of
+            # passing the template fallback off as a normal LLM result.
+            generation_info["llm_error"] = llm_error
 
         # Log usage for analytics
         self._log_usage(generation_method, metadata, num_rows, step_timings)
@@ -184,13 +199,22 @@ class SyntheticDataGenerator:
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
             # Try again with stricter threshold
-            generation_code, generation_method = self._generate_code_with_llm(metadata, num_rows, min(match_threshold + 0.1, 1.0))
+            generation_code, generation_method, _, llm_error = self._generate_code_with_llm(
+                metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code")
             synthetic_df = self._execute_generation_code(generation_code)
             generation_info["method"] = generation_method
             generation_info["regenerated"] = True
+            if llm_error:
+                generation_info["llm_error"] = llm_error
             return synthetic_df, generation_info
     
-    def _generate_code_with_llm(self, metadata: Dict[str, Any], num_rows: int, match_threshold: float) -> Tuple[str, str, Optional[float]]:
+    def _generate_code_with_llm(
+        self,
+        metadata: Dict[str, Any],
+        num_rows: int,
+        match_threshold: float,
+        operation: str = "generate_code",
+    ) -> Tuple[str, str, Optional[float], Optional[str]]:
         """
         Generate Python code using LLM based on metadata.
 
@@ -198,60 +222,82 @@ class SyntheticDataGenerator:
             metadata: Metadata dictionary
             num_rows: Number of rows to generate
             match_threshold: Statistical matching threshold
+            operation: Stable telemetry name for this call (dcri_llm ``operation``)
 
         Returns:
-            Tuple of (Python code string, generation method)
+            Tuple of (code, generation method, LLM seconds or None, llm_error or None).
+            ``llm_error`` is a short, content-free reason when an AI call was
+            attempted but the template fallback was used instead.
         """
         # Construct the prompt
         prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
-        
-        if self.openai_client:
-            # Use actual OpenAI API
-            try:
-                self.logger.info(f"Calling Azure OpenAI with model: {settings.azure_openai_chat_deployment}")
-                self.logger.debug(f"Prompt length: {len(prompt)} characters")
 
-                llm_start = time.time()
-                response = self.openai_client.chat.completions.create(
-                    model=settings.azure_openai_chat_deployment,
-                    messages=[
-                        {"role": "system", "content": self._get_system_prompt()},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=4000
-                )
-
-                code = response.choices[0].message.content
-                generation_method = "llm"
-                llm_response_time = time.time() - llm_start
-                self.logger.info(f"Successfully received LLM response ({len(code)} characters) in {llm_response_time:.2f}s")
-
-                # Cache the generated code
-                try:
-                    self.cache_manager.cache_generation(metadata, code)
-                    self.logger.info("Cached generation code for future use")
-                except Exception as e:
-                    self.logger.warning(f"Failed to cache: {e}")
-            except Exception as e:
-                self.logger.error(f"Azure OpenAI call failed: {type(e).__name__}: {str(e)}")
-                self.logger.warning("Falling back to template-based generation")
-                code, generation_method = self._generate_fallback_code(metadata, num_rows)
-                return code, generation_method, None
-            
-            # Extract code from markdown if present
-            if "```python" in code:
-                code = code.split("```python")[1].split("```")[0]
-            elif "```" in code:
-                code = code.split("```")[1].split("```")[0]
-            
-            return code.strip(), generation_method, llm_response_time
-        else:
+        if not self.openai_client:
             # Fallback to template-based generation when no LLM available
             self.logger.warning("No OpenAI client available, using fallback template-based generation")
             code, generation_method = self._generate_fallback_code(metadata, num_rows)
-            return code, generation_method, None
-    
+            return code, generation_method, None, None
+
+        from src.dcri_llm import llm_action  # lazy: keeps module import light
+
+        model = settings.azure_openai_chat_deployment
+        request: Dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": self._get_system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+            "max_completion_tokens": LLM_MAX_COMPLETION_TOKENS,
+        }
+        if not _REASONING_MODEL_RE.match(model or ""):
+            # Reasoning models only accept the default temperature.
+            request["temperature"] = 0.3
+
+        try:
+            self.logger.info(f"Calling Azure OpenAI with model: {model}")
+            self.logger.debug(f"Prompt length: {len(prompt)} characters")
+
+            llm_start = time.time()
+            with llm_action(operation):
+                response = self.openai_client.chat.completions.create(**request)
+            llm_response_time = time.time() - llm_start
+
+            choice = response.choices[0] if response.choices else None
+            finish_reason = getattr(choice, "finish_reason", None)
+            code = (choice.message.content if choice and choice.message else None) or ""
+            if finish_reason == "length":
+                raise LLMOutputError("finish_reason=length (output truncated at token budget)")
+            if not code.strip():
+                raise LLMOutputError(f"empty output (finish_reason={finish_reason})")
+
+            generation_method = "llm"
+            self.logger.info(f"Successfully received LLM response ({len(code)} characters) in {llm_response_time:.2f}s")
+        except Exception as e:
+            # Log the error type/status only: provider messages can echo request content.
+            status = getattr(e, "status_code", None)
+            reason = str(e) if isinstance(e, LLMOutputError) else type(e).__name__
+            if status:
+                reason = f"{reason} (HTTP {status})"
+            self.logger.error(f"Azure OpenAI call failed: {reason}")
+            self.logger.warning("Falling back to template-based generation")
+            code, generation_method = self._generate_fallback_code(metadata, num_rows)
+            return code, generation_method, None, f"AI generation failed, used template fallback: {reason}"
+
+        # Cache the generated code (only usable LLM output reaches here)
+        try:
+            self.cache_manager.cache_generation(metadata, code)
+            self.logger.info("Cached generation code for future use")
+        except Exception as e:
+            self.logger.warning(f"Failed to cache: {type(e).__name__}")
+
+        # Extract code from markdown if present
+        if "```python" in code:
+            code = code.split("```python")[1].split("```")[0]
+        elif "```" in code:
+            code = code.split("```")[1].split("```")[0]
+
+        return code.strip(), generation_method, llm_response_time, None
+
     def _get_system_prompt(self) -> str:
         """Get the system prompt for code generation."""
         return """You are a Python code generator specialized in creating synthetic data.
@@ -655,7 +701,8 @@ class SyntheticDataGenerator:
                 )
                 
                 if result.returncode != 0:
-                    self.logger.error(f"Code execution failed: {result.stderr}")
+                    # stderr can quote generated values/column names: log its size only.
+                    self.logger.error(f"Code execution failed (exit {result.returncode}, stderr {len(result.stderr or '')} chars)")
                     # Try to execute directly as fallback
                     return self._execute_code_directly(code)
                 
@@ -671,7 +718,7 @@ class SyntheticDataGenerator:
             self.logger.error("Code execution timeout")
             raise ValueError("Code execution took too long")
         except Exception as e:
-            self.logger.error(f"Code execution error: {e}")
+            self.logger.error(f"Code execution error: {type(e).__name__}")
             # Try direct execution as last resort
             return self._execute_code_directly(code)
         finally:
@@ -737,7 +784,7 @@ class SyntheticDataGenerator:
                 raise ValueError("No result found in generated code")
                 
         except Exception as e:
-            self.logger.error(f"Direct execution failed: {e}")
+            self.logger.error(f"Direct execution failed: {type(e).__name__}")
             raise
     
     def _validate_synthetic_data(self, df: pd.DataFrame, metadata: Dict[str, Any]) -> bool:
@@ -762,14 +809,14 @@ class SyntheticDataGenerator:
             expected_names = [col['name'] for col in metadata['structure']['columns']]
             missing_cols = set(expected_names) - set(df.columns)
             if missing_cols:
-                self.logger.warning(f"Missing columns: {missing_cols}")
+                self.logger.warning(f"Missing columns: {len(missing_cols)}")
                 return False
             
             # Basic validation passed
             return True
             
         except Exception as e:
-            self.logger.error(f"Validation error: {e}")
+            self.logger.error(f"Validation error: {type(e).__name__}")
             return False
 
     def _log_usage(self, method: str, metadata: Dict[str, Any], num_rows: int, timings: Dict[str, float]):
@@ -793,15 +840,11 @@ class SyntheticDataGenerator:
                     "test", "demo", "sample", "example", "mock"
                 ])
 
-            # Get column names to help identify datasets
-            column_names = [col["name"] for col in metadata["structure"]["columns"]]
-
             log_entry = {
                 "timestamp": datetime.now().isoformat(),
                 "method": method,
                 "num_rows": num_rows,
                 "num_columns": len(metadata["structure"]["columns"]),
-                "column_names": column_names,
                 "timings": timings,
                 "total_time": timings.get('total', sum(v for k, v in timings.items() if k != 'total')),
                 "cache_hit": method == "cached",

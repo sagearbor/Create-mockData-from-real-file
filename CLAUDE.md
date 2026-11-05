@@ -68,7 +68,8 @@ When deployed to cloud:
 1. **Environment Configuration**:
    - Copy `.env.example` to `.env`
    - For local development, minimally configure:
-     - `AZURE_OPENAI_ENDPOINT` (unset = template-based fallback, no AI)
+     - `AZURE_OPENAI_ENDPOINT` (required: unset = `/ready` 503 and every generation
+       request fails with a clear error; there is NO template fallback)
      - `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` (default `gpt-5-nano`)
      - `SOLUTION_NAME=mock-data-generator`
    - Auth: every LLM call goes through the vendored `src/dcri_llm.py` (do not edit it;
@@ -77,6 +78,10 @@ When deployed to cloud:
      `AZURE_OPENAI_API_KEY` only for people without an identity. Each call prints one
      `llm_call` JSON telemetry line (counts only, no prompt text).
    - Reasoning models (gpt-5.x, o-series): `max_completion_tokens` >= 32000, default 40000.
+   - `LLM_REASONING_EFFORT` (default `low`; `off` = don't send). Dropped automatically
+     if the deployment rejects it.
+   - LLM/generation work must never run on the event loop (use plain `def` handlers or
+     `run_in_threadpool`): a blocked loop fails the ACA `/health` liveness probe.
 
 2. **Python Environment**:
    ```bash

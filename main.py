@@ -11,7 +11,8 @@ import time
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,7 +24,7 @@ from datetime import datetime
 
 from src.core.data_loader import DataLoader
 from src.core.metadata_extractor import MetadataExtractor
-from src.core.synthetic_generator import SyntheticDataGenerator
+from src.core.synthetic_generator import SyntheticDataGenerator, AIGenerationError
 from src.core.cache_manager import CacheManager
 from src.core.data_dictionary import DataDictionary
 from src.utils.config import settings
@@ -43,7 +44,8 @@ def initialize_openai_client():
 
     Auth and telemetry live in src/dcri_llm.py (managed identity by default,
     LLM_AUTH=key only as an opt-in). With no endpoint, or if the client cannot
-    be built, the generator runs its template-based fallback.
+    be built, there is NO fallback: /ready answers 503 and generation requests
+    fail with a clear error.
     """
     global synthetic_generator
     from src.core.llm_client import build_llm_client
@@ -100,6 +102,24 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
+
+
+@app.exception_handler(AIGenerationError)
+async def ai_generation_error_handler(request: Request, exc: AIGenerationError):
+    """AI failed: tell the user plainly; no template data is ever substituted."""
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"status": "error", "error": exc.user_message, "error_class": exc.error_class},
+    )
+
+
+def _download_headers(filename: str, generation_info: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Headers for file downloads: say how the data was made (llm or cached)."""
+    headers = {"Content-Disposition": f"attachment; filename={filename}"}
+    method = (generation_info or {}).get("method")
+    if method:
+        headers["X-Generation-Method"] = str(method)
+    return headers
 
 @app.get("/")
 async def root():
@@ -191,17 +211,37 @@ async def api_info():
         }
     }
 
+def _ai_status() -> Dict[str, Any]:
+    from src.core import llm_client
+    ready = synthetic_generator is not None and synthetic_generator.openai_client is not None
+    return {"ai_ready": ready,
+            "ai_not_ready_reason": None if ready else (llm_client.not_ready_reason or "AI client not initialised")}
+
+
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Liveness: the process is up. Always 200 (see /ready for AI readiness)."""
     from a2a_runtime import A2A_BACKEND
+    ai = _ai_status()
     return {
         "status": "healthy",
-        "openai_configured": synthetic_generator.openai_client is not None,
+        "openai_configured": ai["ai_ready"],
+        **ai,
         "cache_enabled": True,
         "environment": settings.environment,
         "a2a_backend": A2A_BACKEND,
     }
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness: 200 only when an Azure OpenAI client is configured, else 503.
+
+    Used by the ACA readiness probe and deploy verification, so a revision
+    without working AI config never takes traffic (there is no template mode).
+    """
+    ai = _ai_status()
+    return JSONResponse(status_code=200 if ai["ai_ready"] else 503,
+                        content={"status": "ready" if ai["ai_ready"] else "not_ready", **ai})
 
 @app.get("/api/cache-info")
 async def get_cache_info():
@@ -443,7 +483,7 @@ async def extract_metadata(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/generate")
-async def generate_synthetic_data(
+def generate_synthetic_data(
     file: Optional[UploadFile] = File(None),
     metadata_json: Optional[str] = Form(None),
     edited_data: Optional[str] = Form(None),
@@ -468,6 +508,9 @@ async def generate_synthetic_data(
         use_cache: Whether to use cached generation scripts
         file_count: Number of files to generate
         preview_only: If True, return preview data instead of file download
+
+    Plain ``def`` on purpose: FastAPI runs it in the threadpool, so the slow,
+    synchronous LLM call never blocks the event loop (or /health).
     """
     try:
         # Track overall timing
@@ -484,7 +527,7 @@ async def generate_synthetic_data(
             df = pd.read_csv(io.StringIO(edited_data))
             metadata = extractor.extract(df)
         elif file:
-            content = await file.read()
+            content = file.file.read()
             df = data_loader.load_from_bytes(content, file.filename)
             metadata = extractor.extract(df)
         elif metadata_json:
@@ -596,14 +639,16 @@ async def generate_synthetic_data(
             base_filename = file.filename if file else "synthetic_data"
             base_name = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
 
+            zip_info = None
             for i in range(file_count):
                 if cached_result and "generation_code" in cached_result:
                     logger.info(f"Using cached generation script for file {i+1}/{file_count}")
                     generation_code = cached_result["generation_code"]
                     synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                    zip_info = zip_info or {"method": "cached"}
                 else:
                     # Generate new synthetic data
-                    synthetic_df, _ = synthetic_generator.generate(
+                    synthetic_df, zip_info = synthetic_generator.generate(
                         metadata=metadata,
                         num_rows=num_rows,
                         match_threshold=match_threshold,
@@ -635,7 +680,7 @@ async def generate_synthetic_data(
             return StreamingResponse(
                 zip_buffer,
                 media_type="application/zip",
-                headers={"Content-Disposition": f"attachment; filename=synthetic_data_{timestamp}.zip"}
+                headers=_download_headers(f"synthetic_data_{timestamp}.zip", zip_info)
             )
 
         # Single file generation (existing logic)
@@ -691,7 +736,7 @@ async def generate_synthetic_data(
             return StreamingResponse(
                 output,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": "attachment; filename=synthetic_data.xlsx"}
+                headers=_download_headers("synthetic_data.xlsx", generation_info)
             )
 
         else:  # Default to CSV
@@ -702,9 +747,11 @@ async def generate_synthetic_data(
             return StreamingResponse(
                 io.BytesIO(output.getvalue().encode()),
                 media_type="text/csv",
-                headers={"Content-Disposition": "attachment; filename=synthetic_data.csv"}
+                headers=_download_headers("synthetic_data.csv", generation_info)
             )
             
+    except (HTTPException, AIGenerationError):
+        raise
     except Exception as e:
         logger.error(f"Error generating synthetic data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -773,9 +820,9 @@ async def generate_with_sse(
             if cache_mode == "off" or not use_cache:
                 cached_result = None
             elif cache_mode == "structure":
-                cached_result = cache_manager.find_similar_cached(metadata, match_threshold=0.5)
+                cached_result = await run_in_threadpool(cache_manager.find_similar_cached, metadata, 0.5)
             else:
-                cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
+                cached_result = await run_in_threadpool(cache_manager.find_similar_cached, metadata, match_threshold)
 
             cache_time = time.time() - cache_start
             all_timings['cache_check'] = cache_time
@@ -793,7 +840,7 @@ async def generate_with_sse(
                 yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
                 exec_start = time.time()
                 generation_code = cached_result["generation_code"]
-                synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                synthetic_df = await run_in_threadpool(synthetic_generator._execute_generation_code, generation_code)
                 exec_time = time.time() - exec_start
                 all_timings['code_execution'] = exec_time
                 yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': exec_time})}\n\n"
@@ -807,11 +854,14 @@ async def generate_with_sse(
                 yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'active'})}\n\n"
                 gen_start = time.time()
 
-                synthetic_df, generation_info = synthetic_generator.generate(
+                # Off the event loop: the LLM call takes tens of seconds and
+                # must not starve /health (ACA liveness) or other requests.
+                synthetic_df, generation_info = await run_in_threadpool(
+                    synthetic_generator.generate,
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=match_threshold,
-                    use_cached=use_cache
+                    use_cached=use_cache,
                 )
 
                 # Extract individual step timings from generation_info
@@ -885,6 +935,9 @@ async def generate_with_sse(
 
             yield f"data: {json.dumps(result)}\n\n"
 
+        except AIGenerationError as e:
+            # Already logged as a structured ai_generation_failed line.
+            yield f"data: {json.dumps({'error': e.user_message, 'error_class': e.error_class, 'http_status': e.http_status})}\n\n"
         except Exception as e:
             logger.error(f"SSE generation error: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -976,7 +1029,7 @@ async def validate_with_dictionary(
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/generate-with-dictionary")
-async def generate_with_dictionary(
+def generate_with_dictionary(
     dictionary_file: Optional[UploadFile] = File(None),
     data_file: Optional[UploadFile] = File(None),
     use_stored_dictionary: bool = Form(True),
@@ -1000,7 +1053,7 @@ async def generate_with_dictionary(
     try:
         # Get dictionary
         if dictionary_file:
-            dict_content = await dictionary_file.read()
+            dict_content = dictionary_file.file.read()
             dictionary = data_dictionary.parse_dictionary(dict_content)
             data_dictionary.dictionary = dictionary
         elif use_stored_dictionary and data_dictionary.dictionary:
@@ -1019,7 +1072,7 @@ async def generate_with_dictionary(
 
         # If data file provided, extract base statistics
         if data_file:
-            data_content = await data_file.read()
+            data_content = data_file.file.read()
             df = data_loader.load_from_bytes(data_content, data_file.filename)
             base_metadata = metadata_extractor.extract(df)
             metadata = base_metadata
@@ -1056,8 +1109,9 @@ async def generate_with_dictionary(
         # Generate actual files
         if file_count > 1:
             synthetic_files = []
+            zip_info = None
             for i in range(file_count):
-                synthetic_df, _ = synthetic_generator.generate(
+                synthetic_df, zip_info = synthetic_generator.generate(
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=0.9
@@ -1084,7 +1138,7 @@ async def generate_with_dictionary(
             return StreamingResponse(
                 zip_buffer,
                 media_type="application/zip",
-                headers={"Content-Disposition": f"attachment; filename=dictionary_generated.zip"}
+                headers=_download_headers("dictionary_generated.zip", zip_info)
             )
         else:
             # Single file
@@ -1108,7 +1162,7 @@ async def generate_with_dictionary(
                 return StreamingResponse(
                     output,
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": "attachment; filename=dictionary_generated.xlsx"}
+                    headers=_download_headers("dictionary_generated.xlsx", generation_info)
                 )
             else:  # CSV
                 output = io.StringIO()
@@ -1117,9 +1171,11 @@ async def generate_with_dictionary(
                 return StreamingResponse(
                     io.BytesIO(output.getvalue().encode()),
                     media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=dictionary_generated.csv"}
+                    headers=_download_headers("dictionary_generated.csv", generation_info)
                 )
 
+    except (HTTPException, AIGenerationError):
+        raise
     except Exception as e:
         logger.error(f"Error generating with dictionary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1150,13 +1206,13 @@ async def generate_batch(
         "message": f"Batch processing started. Check status at /batch/{batch_id}"
     })
 
-async def process_batch(files, match_threshold, batch_id):
-    """Process batch generation in background."""
+def process_batch(files, match_threshold, batch_id):
+    """Process batch generation in background (sync: Starlette runs it in the threadpool)."""
     results = []
     
     for file in files:
         try:
-            content = await file.read()
+            content = file.file.read()
             df = data_loader.load_from_bytes(content, file.filename)
             metadata = metadata_extractor.extract(df)
             

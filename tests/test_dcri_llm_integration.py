@@ -14,6 +14,8 @@ from src import dcri_llm
 from src.core import llm_client
 from src.core.synthetic_generator import (
     LLM_MAX_COMPLETION_TOKENS,
+    AIGenerationError,
+    LLMOutputError,
     SyntheticDataGenerator,
 )
 
@@ -87,9 +89,9 @@ def test_one_call_emits_schema_v1_event_without_content(capsys):
     client, completions = _fake_client(content=GOOD_CODE)
     gen = SyntheticDataGenerator(openai_client=client)
 
-    code, method, _, llm_error = gen._generate_code_with_llm(_metadata(), 3, 0.8)
+    code, method, _ = gen._generate_code_with_llm(_metadata(), 3, 0.8)
 
-    assert method == "llm" and llm_error is None
+    assert method == "llm"
     sent = completions.calls[0]
     assert sent["max_completion_tokens"] == LLM_MAX_COMPLETION_TOKENS == 40000
     assert "max_tokens" not in sent
@@ -112,37 +114,41 @@ def test_one_call_emits_schema_v1_event_without_content(capsys):
 
 
 @pytest.mark.parametrize("content,finish", [("partial code", "length"), ("", "stop")])
-def test_truncated_or_empty_output_falls_back_and_is_surfaced(content, finish, capsys):
+def test_truncated_or_empty_output_raises_no_data(content, finish, capsys):
     client, _ = _fake_client(content=content, finish_reason=finish)
     gen = SyntheticDataGenerator(openai_client=client)
 
-    code, method, _, llm_error = gen._generate_code_with_llm(_metadata(), 3, 0.8)
+    with pytest.raises(LLMOutputError) as exc:
+        gen._generate_code_with_llm(_metadata(), 3, 0.8)
 
-    assert method == "fallback"
-    assert llm_error and "fallback" in llm_error
+    assert exc.value.finish_reason == finish
+    assert "No data was generated" in exc.value.user_message
     ev = _events(capsys.readouterr().out)[0]
     assert ev["finish_length"] is (finish == "length")
 
 
-def test_auth_failure_falls_back_cleanly_and_generate_reports_it(capsys):
+def test_auth_failure_raises_with_short_reason(capsys):
     class FakeAuthError(Exception):
         status_code = 401
 
     client, _ = _fake_client(content=None, exc=FakeAuthError("bad token"))
     gen = SyntheticDataGenerator(openai_client=client)
 
-    df, info = gen.generate(_metadata(), num_rows=3, use_cached=False)
+    with pytest.raises(AIGenerationError) as exc:
+        gen.generate(_metadata(), num_rows=3, use_cached=False)
 
-    assert len(df) == 3
-    assert info["method"] == "fallback"
-    assert "FakeAuthError" in info["llm_error"] and "401" in info["llm_error"]
+    msg = exc.value.user_message
+    assert "FakeAuthError" in msg and "401" in msg
+    assert "bad token" not in msg  # provider text never reaches the user/log
+    assert exc.value.upstream_status == 401
     ev = _events(capsys.readouterr().out)[0]
     assert ev["outcome"] == "error" and ev["http_status"] == 401
 
 
-def test_no_endpoint_means_no_client(monkeypatch):
+def test_no_endpoint_means_no_client_and_records_why(monkeypatch):
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
     assert llm_client.build_llm_client() is None
+    assert "AZURE_OPENAI_ENDPOINT" in llm_client.not_ready_reason
 
 
 def test_identity_client_builds_without_a_key(monkeypatch):
@@ -157,7 +163,7 @@ def test_identity_client_builds_without_a_key(monkeypatch):
 
 def test_usage_log_has_no_column_names(tmp_path):
     gen = SyntheticDataGenerator()
-    gen._log_usage("fallback", _metadata(), 3, {"total": 0.1})
+    gen._log_usage("llm", _metadata(), 3, {"total": 0.1})
 
     files = list((tmp_path / "logs" / "usage").glob("*.jsonl"))
     text = files[0].read_text()
@@ -166,12 +172,13 @@ def test_usage_log_has_no_column_names(tmp_path):
     assert "column_names" not in entry and entry["num_columns"] == 1
 
 
-def test_client_build_failure_logs_warning_and_falls_back(monkeypatch, caplog):
+def test_client_build_failure_logs_error_and_is_not_ready(monkeypatch, caplog):
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example-foundry.openai.azure.com/")
     monkeypatch.setenv("LLM_AUTH", "key")
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-    with caplog.at_level("WARNING", logger="src.core.llm_client"):
+    with caplog.at_level("ERROR", logger="src.core.llm_client"):
         assert llm_client.build_llm_client() is None
-    warn = [r for r in caplog.records if r.levelname == "WARNING"]
-    assert warn and "AI DISABLED" in warn[0].getMessage()
-    assert "LLM_AUTH=key" in warn[0].getMessage()
+    err = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert err and "AI NOT READY" in err[0].getMessage()
+    assert "LLM_AUTH=key" in err[0].getMessage()
+    assert "LLM_AUTH=key" in llm_client.not_ready_reason

@@ -45,21 +45,6 @@ def test_boolean_column_does_not_break_extraction(extractor):
     assert stats["is_integer"] is True
 
 
-def test_boolean_column_survives_a_full_generation_round_trip(extractor):
-    """A bool column must still produce data through the fallback generator."""
-    from src.core.synthetic_generator import SyntheticDataGenerator
-
-    df = pd.DataFrame({"is_active": [True, False] * 10})
-    metadata = extractor.extract(df)
-
-    generator = SyntheticDataGenerator()
-    code, _ = generator._generate_fallback_code(metadata, num_rows=5)
-    result = generator._execute_generation_code(code, randomize_seed=False)
-
-    assert list(result.columns) == ["is_active"]
-    assert set(result["is_active"].unique()) <= {0, 1}
-
-
 # --------------------------------------------------------------------------- #
 # Text columns (object dtype on pandas 2, str dtype on pandas 3)
 # --------------------------------------------------------------------------- #

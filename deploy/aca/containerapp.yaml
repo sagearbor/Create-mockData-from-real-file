@@ -47,15 +47,28 @@ properties:
             value: gpt-5-nano
           - name: TELEMETRY_BLOB_ACCOUNT_URL
             value: "<TELEMETRY_BLOB_ACCOUNT_URL>"  # Storage endpoint from ~/dcri/azure-environment.md
+          # Optional: reasoning effort for gpt-5.x/o-series (default "low";
+          # "off" sends nothing). Completion budget stays 40000 regardless.
+          - name: LLM_REASONING_EFFORT
+            value: low
         probes:
+          # Liveness = "process is up" (/health is always 200). Generous timeout
+          # and threshold so a slow request never gets the container restarted.
           - type: Liveness
             httpGet: {path: /health, port: 8201}
             initialDelaySeconds: 10
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          # Readiness = "AI is configured" (/ready is 503 without an Azure
+          # OpenAI client; there is no template fallback), so a misconfigured
+          # revision never takes traffic.
           - type: Readiness
-            httpGet: {path: /health, port: 8201}
+            httpGet: {path: /ready, port: 8201}
             initialDelaySeconds: 5
             periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
     scale:
       minReplicas: 1
       maxReplicas: 1

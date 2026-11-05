@@ -1,7 +1,6 @@
 """Synthetic data generation using LLM and metadata."""
 
 import json
-import math
 import os
 import pandas as pd
 import numpy as np
@@ -26,62 +25,67 @@ LLM_MAX_COMPLETION_TOKENS = 40000
 _REASONING_MODEL_RE = re.compile(r"^(gpt-5|o\d)", re.I)
 
 
-class LLMOutputError(RuntimeError):
+# Reasoning effort sent to reasoning models. Default "low": gpt-5-nano at the
+# API default ("medium") spent ~9.5k of 9.8k output tokens thinking (59 s) for
+# one generation. LLM_REASONING_EFFORT=off sends nothing (deployment default).
+_REASONING_EFFORT_OFF = {"off", "default", ""}
+
+
+def reasoning_effort_setting() -> Optional[str]:
+    """Return the reasoning_effort to send, or None to omit the parameter."""
+    value = (os.environ.get("LLM_REASONING_EFFORT", "low") or "").strip().lower()
+    return None if value in _REASONING_EFFORT_OFF else value
+
+
+def _rejects_reasoning_effort(exc: Exception) -> bool:
+    """True if a 400 from the provider is about the reasoning_effort parameter."""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    return "reasoning_effort" in str(exc) or "reasoning_effort" in str(getattr(exc, "body", "") or "")
+
+
+class AIGenerationError(RuntimeError):
+    """AI generation failed; no data was generated.
+
+    There is deliberately no template fallback: the caller turns this into an
+    HTTP error the user sees. ``reason`` is short and content-free (never
+    prompt, metadata or provider message text).
+    """
+
+    http_status = 502
+
+    def __init__(self, reason: str, *, error_class: Optional[str] = None,
+                 finish_reason: Optional[str] = None, upstream_status: Optional[int] = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.error_class = error_class or type(self).__name__
+        self.finish_reason = finish_reason
+        self.upstream_status = upstream_status
+
+    @property
+    def user_message(self) -> str:
+        return f"AI generation failed: {self.reason}. No data was generated."
+
+
+class AINotConfiguredError(AIGenerationError):
+    """No usable Azure OpenAI client (endpoint unset or client build failed)."""
+
+    http_status = 503
+
+
+class LLMOutputError(AIGenerationError):
     """The LLM call returned but its output is unusable (truncated or empty)."""
 
 
-# Characters allowed to survive into a generated comment. Anything else (most
-# importantly newlines, which would end the comment and start a new statement)
-# is replaced, so an untrusted column name can never break out of a comment.
-_COMMENT_SAFE_PATTERN = re.compile(r"[^\w .,:;/@+-]", re.UNICODE)
-
-
-def _to_plain_python(value: Any) -> Any:
-    """Coerce a metadata value to plain built-in types.
-
-    numpy scalars repr() as expressions such as ``np.str_('x')`` that are not
-    valid on their own, so they are unwrapped before a literal is emitted.
-    """
-    if isinstance(value, np.generic):
-        value = value.item()
-    if isinstance(value, (str, bool, int, type(None))):
-        return value
-    if isinstance(value, float):
-        return value
-    if isinstance(value, (list, tuple, set, np.ndarray)):
-        return [_to_plain_python(item) for item in value]
-    if isinstance(value, dict):
-        return {_to_plain_python(k): _to_plain_python(v) for k, v in value.items()}
-    return str(value)
-
-
-def py_literal(value: Any) -> str:
-    """Render an untrusted metadata value as a self-contained Python literal.
-
-    Every value that reaches the generated source (column names, cell values,
-    detected formats, statistics) originates in a user-supplied file. Emitting
-    them with repr() instead of interpolating them as raw text is what keeps a
-    CSV header from becoming executable code.
-    """
-    plain = _to_plain_python(value)
-
-    # repr(float('nan')) is 'nan', which is not a valid expression on its own.
-    if isinstance(plain, float) and not math.isfinite(plain):
-        return f"float({repr(str(plain))})"
-
-    return repr(plain)
-
-
-def safe_comment(value: Any, max_length: int = 60) -> str:
-    """Render an untrusted value as text that is safe inside a ``#`` comment."""
-    text = _COMMENT_SAFE_PATTERN.sub("?", str(value))
-    if len(text) > max_length:
-        text = text[:max_length] + "..."
-    return text
+class CodeExecutionError(AIGenerationError):
+    """The AI-written (or cached) generation code failed in the sandbox."""
 
 
 class SyntheticDataGenerator:
     """Generate synthetic data based on metadata using LLM."""
+
+    # Set once a deployment rejects reasoning_effort, so we stop sending it.
+    _reasoning_effort_rejected = False
 
     def __init__(self, openai_client=None):
         """
@@ -148,10 +152,10 @@ class SyntheticDataGenerator:
             generation_code = None
 
         # Generate code if not cached
-        llm_error = None
         if generation_code is None:
             code_gen_start = time.time()
-            generation_code, generation_method, llm_response_time, llm_error = self._generate_code_with_llm(
+            # Raises AIGenerationError on any AI failure: there is no template fallback.
+            generation_code, generation_method, llm_response_time = self._generate_code_with_llm(
                 metadata, num_rows, match_threshold, operation="generate_code")
             # Only track llm_response time (code_generation is redundant as it's the same)
             if llm_response_time:
@@ -185,11 +189,6 @@ class SyntheticDataGenerator:
             "use_cached": use_cached,
             "step_timings": step_timings
         }
-        if llm_error:
-            # Surface AI failures (auth, truncation, empty output) instead of
-            # passing the template fallback off as a normal LLM result.
-            generation_info["llm_error"] = llm_error
-
         # Log usage for analytics
         self._log_usage(generation_method, metadata, num_rows, step_timings)
 
@@ -199,13 +198,11 @@ class SyntheticDataGenerator:
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
             # Try again with stricter threshold
-            generation_code, generation_method, _, llm_error = self._generate_code_with_llm(
+            generation_code, generation_method, _ = self._generate_code_with_llm(
                 metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code")
             synthetic_df = self._execute_generation_code(generation_code)
             generation_info["method"] = generation_method
             generation_info["regenerated"] = True
-            if llm_error:
-                generation_info["llm_error"] = llm_error
             return synthetic_df, generation_info
     
     def _generate_code_with_llm(
@@ -214,7 +211,7 @@ class SyntheticDataGenerator:
         num_rows: int,
         match_threshold: float,
         operation: str = "generate_code",
-    ) -> Tuple[str, str, Optional[float], Optional[str]]:
+    ) -> Tuple[str, str, float]:
         """
         Generate Python code using LLM based on metadata.
 
@@ -225,22 +222,22 @@ class SyntheticDataGenerator:
             operation: Stable telemetry name for this call (dcri_llm ``operation``)
 
         Returns:
-            Tuple of (code, generation method, LLM seconds or None, llm_error or None).
-            ``llm_error`` is a short, content-free reason when an AI call was
-            attempted but the template fallback was used instead.
-        """
-        # Construct the prompt
-        prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
+            Tuple of (code, ``"llm"``, LLM seconds).
 
+        Raises:
+            AINotConfiguredError: no Azure OpenAI client.
+            AIGenerationError: the call failed or returned unusable output.
+        """
+        model = settings.azure_openai_chat_deployment
         if not self.openai_client:
-            # Fallback to template-based generation when no LLM available
-            self.logger.warning("No OpenAI client available, using fallback template-based generation")
-            code, generation_method = self._generate_fallback_code(metadata, num_rows)
-            return code, generation_method, None, None
+            err = AINotConfiguredError("Azure OpenAI is not configured on this server")
+            self._log_ai_failure(err, operation, model)
+            raise err
+
+        prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
 
         from src.dcri_llm import llm_action  # lazy: keeps module import light
 
-        model = settings.azure_openai_chat_deployment
         request: Dict[str, Any] = {
             "model": model,
             "messages": [
@@ -249,39 +246,62 @@ class SyntheticDataGenerator:
             ],
             "max_completion_tokens": LLM_MAX_COMPLETION_TOKENS,
         }
-        if not _REASONING_MODEL_RE.match(model or ""):
+        is_reasoning = bool(_REASONING_MODEL_RE.match(model or ""))
+        if not is_reasoning:
             # Reasoning models only accept the default temperature.
             request["temperature"] = 0.3
+        effort = reasoning_effort_setting()
+        if is_reasoning and effort and not SyntheticDataGenerator._reasoning_effort_rejected:
+            request["reasoning_effort"] = effort
 
+        finish_reason = None
         try:
-            self.logger.info(f"Calling Azure OpenAI with model: {model}")
+            self.logger.info(f"Calling Azure OpenAI with model: {model} "
+                             f"(reasoning_effort={request.get('reasoning_effort', 'unset')})")
             self.logger.debug(f"Prompt length: {len(prompt)} characters")
 
             llm_start = time.time()
             with llm_action(operation):
-                response = self.openai_client.chat.completions.create(**request)
+                try:
+                    response = self.openai_client.chat.completions.create(**request)
+                except Exception as e:  # noqa: BLE001
+                    if "reasoning_effort" in request and _rejects_reasoning_effort(e):
+                        # Deployment doesn't take the parameter: drop it for good, retry once.
+                        SyntheticDataGenerator._reasoning_effort_rejected = True
+                        self.logger.warning(
+                            "Deployment %s rejected reasoning_effort; retrying without it", model)
+                        request.pop("reasoning_effort")
+                        response = self.openai_client.chat.completions.create(**request)
+                    else:
+                        raise
             llm_response_time = time.time() - llm_start
 
             choice = response.choices[0] if response.choices else None
             finish_reason = getattr(choice, "finish_reason", None)
             code = (choice.message.content if choice and choice.message else None) or ""
             if finish_reason == "length":
-                raise LLMOutputError("finish_reason=length (output truncated at token budget)")
+                raise LLMOutputError(
+                    "the model ran out of its token budget before finishing (finish_reason=length)",
+                    finish_reason=finish_reason)
             if not code.strip():
-                raise LLMOutputError(f"empty output (finish_reason={finish_reason})")
+                raise LLMOutputError(
+                    f"the model returned an empty response (finish_reason={finish_reason})",
+                    finish_reason=finish_reason)
 
             generation_method = "llm"
             self.logger.info(f"Successfully received LLM response ({len(code)} characters) in {llm_response_time:.2f}s")
+        except AIGenerationError as err:
+            self._log_ai_failure(err, operation, model)
+            raise
         except Exception as e:
-            # Log the error type/status only: provider messages can echo request content.
+            # Type/status only: provider messages can echo request content.
             status = getattr(e, "status_code", None)
-            reason = str(e) if isinstance(e, LLMOutputError) else type(e).__name__
-            if status:
-                reason = f"{reason} (HTTP {status})"
-            self.logger.error(f"Azure OpenAI call failed: {reason}")
-            self.logger.warning("Falling back to template-based generation")
-            code, generation_method = self._generate_fallback_code(metadata, num_rows)
-            return code, generation_method, None, f"AI generation failed, used template fallback: {reason}"
+            reason = f"the Azure OpenAI call failed ({type(e).__name__}"
+            reason += f", HTTP {status})" if status else ")"
+            err = AIGenerationError(reason, error_class=type(e).__name__,
+                                    finish_reason=finish_reason, upstream_status=status)
+            self._log_ai_failure(err, operation, model)
+            raise err from e
 
         # Cache the generated code (only usable LLM output reaches here)
         try:
@@ -296,7 +316,25 @@ class SyntheticDataGenerator:
         elif "```" in code:
             code = code.split("```")[1].split("```")[0]
 
-        return code.strip(), generation_method, llm_response_time, None
+        return code.strip(), generation_method, llm_response_time
+
+    def _log_ai_failure(self, err: "AIGenerationError", operation: str, model: Optional[str]) -> None:
+        """One structured ERROR line per AI failure (no prompt or data text)."""
+        try:
+            from src.dcri_llm import current_context
+            action_id = current_context().get("action_id")
+        except Exception:  # noqa: BLE001
+            action_id = None
+        self.logger.error(json.dumps({
+            "event": "ai_generation_failed",
+            "operation": operation,
+            "model": model,
+            "error_class": err.error_class,
+            "reason": err.reason,
+            "finish_reason": err.finish_reason,
+            "upstream_status": err.upstream_status,
+            "request_id": action_id,
+        }))
 
     def _get_system_prompt(self) -> str:
         """Get the system prompt for code generation."""
@@ -366,209 +404,6 @@ class SyntheticDataGenerator:
 
         return prompt
     
-    def _generate_fallback_code(self, metadata: Dict[str, Any], num_rows: int) -> tuple[str, str]:
-        """Generate synthetic data using template-based approach (fallback when no LLM).
-
-        Returns:
-            Tuple of (Python code string, generation method 'fallback')
-        """
-
-        code_lines = [
-            "import pandas as pd",
-            "import numpy as np",
-            "import random",
-            "from datetime import datetime, timedelta",
-            "import string",
-            "",
-            "def generate_synthetic_data():",
-            f"    num_rows = {py_literal(int(num_rows))}",
-            "    data = {}",
-            "",
-            "    # Helper functions for realistic data",
-            "    def generate_email(name):",
-            "        domains = ['gmail.com', 'yahoo.com', 'outlook.com', 'email.com', 'company.com']",
-            "        username = name.lower().replace(' ', '.') + str(random.randint(0, 99))",
-            "        return f'{username}@{random.choice(domains)}'",
-            "",
-            "    def generate_phone(format_type='dash'):",
-            "        if format_type == 'dash':",
-            "            return f'{random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}'",
-            "        elif format_type == 'simple':",
-            "            return f'{random.randint(555, 999)}-{random.randint(1000, 9999)}'",
-            "        elif format_type == 'dot':",
-            "            return f'{random.randint(200, 999)}.{random.randint(200, 999)}.{random.randint(1000, 9999)}'",
-            "        else:",
-            "            return f'({random.randint(200, 999)}) {random.randint(200, 999)}-{random.randint(1000, 9999)}'",
-            ""
-        ]
-        
-        # Generate code for each column.
-        #
-        # SECURITY: column names, cell values and detected formats all come from
-        # the user-supplied file. They are emitted with py_literal() (never
-        # interpolated as raw source) and helper variables are named by column
-        # index (never derived from the column name), so no part of the input
-        # can reach executable position. See
-        # tests/test_synthetic_generator_injection.py.
-        for col_index, col_info in enumerate(metadata['structure']['columns']):
-            col_name = col_info['name']
-            col_stats = metadata['statistics'].get(col_name, {})
-
-            col_lit = py_literal(col_name)
-            col_label = safe_comment(col_name)
-            target = f"data[{col_lit}]"
-
-            if col_stats.get('type') == 'numeric':
-                # Check if this is currency/money
-                if col_stats.get('is_likely_currency', False):
-                    decimal_places = col_stats.get('decimal_places', 2)
-                    if decimal_places is None:
-                        decimal_places = 2  # Default to 2 if None
-                    min_val = col_stats.get('min', 0)
-                    max_val = col_stats.get('max', 10000)
-                    code_lines.append(f"    # Generating currency values for '{col_label}'")
-                    code_lines.append(f"    {target} = np.round(np.random.uniform({py_literal(min_val)}, {py_literal(max_val)}, size=num_rows), {py_literal(int(decimal_places))})")
-                # Regular numeric column generation
-                elif col_stats.get('is_integer', False):
-                    min_val = int(col_stats.get('min', 0))
-                    max_val = int(col_stats.get('max', 100))
-                    code_lines.append(f"    {target} = np.random.randint({py_literal(min_val)}, {py_literal(max_val + 1)}, size=num_rows)")
-                else:
-                    mean = col_stats.get('mean', 0)
-                    std = col_stats.get('std', 1)
-                    code_lines.append(f"    {target} = np.random.normal({py_literal(mean)}, {py_literal(std)}, size=num_rows)")
-
-                    # Clip to min/max if specified
-                    if 'min' in col_stats and 'max' in col_stats:
-                        code_lines.append(f"    {target} = np.clip({target}, {py_literal(col_stats['min'])}, {py_literal(col_stats['max'])})")
-
-            elif col_stats.get('type') == 'string':
-                # First check if this is a datetime stored as string (detected from data)
-                if col_stats.get('is_datetime_string', False):
-                    datetime_format = col_stats.get('datetime_format') or '%Y-%m-%d %H:%M:%S'
-                    code_lines.append(f"    # Detected datetime string format: {safe_comment(datetime_format)}")
-                    code_lines.append(f"    base_date = datetime.now()")
-                    code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365), hours=random.randint(0, 23), minutes=random.randint(0, 59)) for _ in range(num_rows)]")
-                    if '%H' in datetime_format:  # Has time component
-                        code_lines.append(f"    {target} = [d.strftime({py_literal(datetime_format)}) for d in date_list]")
-                    else:
-                        code_lines.append(f"    {target} = [d.strftime('%Y-%m-%d') for d in date_list]")
-                # Fallback: Check if column name suggests date
-                elif any(keyword in col_name.lower() for keyword in ['date', 'time', 'created', 'updated', 'modified', 'dob', 'timestamp']):
-                    # Generate dates even if stored as string
-                    code_lines.append(f"    # Detected '{col_label}' as likely date column")
-                    code_lines.append(f"    base_date = datetime.now()")
-                    code_lines.append(f"    date_list = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
-                    code_lines.append(f"    {target} = [d.strftime('%Y-%m-%d') for d in date_list]")
-                # Check for categorical values
-                elif col_stats.get('is_categorical', False) or col_stats.get('unique_values', 100) <= 10:
-                    # Check if we have preserved actual categorical values
-                    if col_stats.get('preserve_values', False) and 'most_common_values' in col_stats:
-                        most_common = col_stats['most_common_values']
-                        # Check if these are actual values (not anonymized)
-                        if not any(str(k).startswith('value_') for k in most_common.keys()):
-                            # Use actual values with their distributions
-                            values = list(most_common.keys())
-                            counts = list(most_common.values())
-                            # Normalize to probabilities
-                            total = sum(counts)
-                            probabilities = [c/total for c in counts]
-                            code_lines.append(f"    # Using preserved categorical values for '{col_label}'")
-                            code_lines.append(f"    categories_{col_index} = {py_literal(values)}")
-                            code_lines.append(f"    probabilities_{col_index} = {py_literal(probabilities)}")
-                            code_lines.append(f"    {target} = np.random.choice(categories_{col_index}, size=num_rows, p=probabilities_{col_index})")
-                        else:
-                            # Fallback to generic categories if anonymized
-                            unique_count = min(col_stats.get('unique_values', 10), 20)
-                            code_lines.append(f"    categories_{col_index} = [f'Category_{{i}}' for i in range({py_literal(int(unique_count))})]")
-                            code_lines.append(f"    {target} = np.random.choice(categories_{col_index}, size=num_rows)")
-                    else:
-                        # No preserved values, use generic categories
-                        unique_count = min(col_stats.get('unique_values', 10), 20)
-                        code_lines.append(f"    categories_{col_index} = [f'Category_{{i}}' for i in range({py_literal(int(unique_count))})]")
-                        code_lines.append(f"    {target} = np.random.choice(categories_{col_index}, size=num_rows)")
-                else:
-                    # Check for specific detected types and patterns
-                    patterns = metadata.get('patterns', {}).get(col_name, {})
-
-                    # Check for email detection
-                    if col_stats.get('detected_type') == 'email' or col_stats.get('is_email_like'):
-                        code_lines.append(f"    # Generating emails for '{col_label}'")
-                        code_lines.append(f"    {target} = [generate_email(f'user{{i}}') for i in range(num_rows)]")
-
-                    # Check for phone detection
-                    elif col_stats.get('detected_type') == 'phone' or col_stats.get('is_phone_like'):
-                        phone_format = col_stats.get('phone_format', 'dash')
-                        code_lines.append(f"    # Generating phone numbers for '{col_label}'")
-                        code_lines.append(f"    {target} = [generate_phone({py_literal(phone_format)}) for _ in range(num_rows)]")
-
-                    # Check for ID pattern with prefix
-                    elif patterns.get('id_pattern', {}).get('type') == 'prefix_sequential':
-                        prefix = patterns['id_pattern']['prefix']
-                        code_lines.append(f"    # Generating IDs with prefix '{safe_comment(prefix)}' for '{col_label}'")
-                        code_lines.append(f"    {target} = [{py_literal(prefix)} + str(i+1).zfill(3) for i in range(num_rows)]")
-
-                    # Check for suggested values from clinical/reference context
-                    elif 'clinical_context' in col_stats or 'suggested_values' in col_stats:
-                        suggested = col_stats.get('suggested_values', col_stats.get('clinical_context', {}).get('suggested_values', []))
-                        if suggested:
-                            code_lines.append(f"    # Using suggested values for '{col_label}'")
-                            code_lines.append(f"    suggested_{col_index} = {py_literal(suggested)}")
-                            code_lines.append(f"    {target} = [random.choice(suggested_{col_index}) for _ in range(num_rows)]")
-                        else:
-                            # Fallback to random strings
-                            avg_length = int(col_stats.get('avg_length', 10))
-                            code_lines.append(f"    {target} = [''.join(random.choices(string.ascii_letters + string.digits, k={py_literal(avg_length)})) for _ in range(num_rows)]")
-
-                    # Check if column name suggests specific data type
-                    elif 'city' in col_name.lower():
-                        code_lines.append(f"    # Generating city names for '{col_label}'")
-                        cities = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
-                        code_lines.append(f"    cities = {py_literal(cities)}")
-                        code_lines.append(f"    {target} = [random.choice(cities) for _ in range(num_rows)]")
-
-                    elif 'name' in col_name.lower() and 'first' not in col_name.lower() and 'last' not in col_name.lower():
-                        code_lines.append(f"    # Generating full names for '{col_label}'")
-                        first_names = ["John", "Jane", "Bob", "Alice", "Charlie", "Mary", "Michael", "Sarah", "David", "Emily"]
-                        last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
-                        code_lines.append(f"    first_names = {py_literal(first_names)}")
-                        code_lines.append(f"    last_names = {py_literal(last_names)}")
-                        code_lines.append(f"    {target} = [f'{{random.choice(first_names)}} {{random.choice(last_names)}}' for _ in range(num_rows)]")
-
-                    else:
-                        # Default random strings
-                        avg_length = int(col_stats.get('avg_length', 10))
-                        code_lines.append(f"    {target} = [''.join(random.choices(string.ascii_letters + string.digits, k={py_literal(avg_length)})) for _ in range(num_rows)]")
-
-            elif col_stats.get('type') == 'datetime':
-                # DateTime column generation
-                code_lines.append(f"    base_date = datetime.now()")
-                code_lines.append(f"    {target} = [base_date - timedelta(days=random.randint(0, 365)) for _ in range(num_rows)]")
-
-            else:
-                # Default to None
-                code_lines.append(f"    {target} = [None] * num_rows")
-
-            # Add null values if needed
-            if col_info.get('nullable', False) and col_info.get('null_count', 0) > 0:
-                null_percentage = col_info['null_count'] / metadata['structure']['shape']['rows']
-                code_lines.append(f"    # Add null values")
-                code_lines.append(f"    null_mask = np.random.random(num_rows) < {py_literal(null_percentage)}")
-                code_lines.append(f"    {target} = pd.Series({target})")
-                code_lines.append(f"    {target}[null_mask] = None")
-
-            code_lines.append("")
-
-        code_lines.extend([
-            "    df = pd.DataFrame(data)",
-            "    return df",
-            "",
-            "# Generate the data",
-            "result = generate_synthetic_data()"
-        ])
-
-        return "\n".join(code_lines), "fallback"
-
     def _inject_random_seed(self, code: str, seed: int) -> str:
         """
         Inject or replace random seed in the code to ensure variety.
@@ -688,7 +523,7 @@ class SyntheticDataGenerator:
                 code_path.write_text(modified_code + f"\nresult.to_pickle('{pickle_path}')")
                 
                 # Execute the code with a minimal environment. The code being
-                # run is generated (by an LLM, from cache, or from a template),
+                # run is generated (by an LLM, or from the cache of LLM output),
                 # so it must not inherit credentials such as
                 # AZURE_OPENAI_API_KEY or cloud instance-metadata tokens.
                 result = subprocess.run(
@@ -703,89 +538,27 @@ class SyntheticDataGenerator:
                 if result.returncode != 0:
                     # stderr can quote generated values/column names: log its size only.
                     self.logger.error(f"Code execution failed (exit {result.returncode}, stderr {len(result.stderr or '')} chars)")
-                    # Try to execute directly as fallback
-                    return self._execute_code_directly(code)
-                
+                    raise CodeExecutionError(
+                        f"generated code failed in the sandbox (exit {result.returncode})")
+
                 # Load the generated data
-                if pickle_path.exists():
-                    df = pd.read_pickle(pickle_path)
-                    return df
-                else:
-                    # Fallback to direct execution
-                    return self._execute_code_directly(code)
-                    
+                if not pickle_path.exists():
+                    raise CodeExecutionError("generated code produced no result")
+                return pd.read_pickle(pickle_path)
+
         except subprocess.TimeoutExpired:
             self.logger.error("Code execution timeout")
-            raise ValueError("Code execution took too long")
+            raise CodeExecutionError("generated code timed out after 30s in the sandbox")
+        except AIGenerationError:
+            raise
         except Exception as e:
+            # No in-process exec fallback: generated code only ever runs in the sandbox.
             self.logger.error(f"Code execution error: {type(e).__name__}")
-            # Try direct execution as last resort
-            return self._execute_code_directly(code)
+            raise CodeExecutionError(f"generated code could not be run ({type(e).__name__})") from e
         finally:
             # Clean up temp file
             if Path(temp_file).exists():
                 Path(temp_file).unlink()
-    
-    def _execute_code_directly(self, code: str) -> pd.DataFrame:
-        """Execute code directly in current process (less safe but works as fallback)."""
-        self.logger.warning("Executing code directly (fallback mode)")
-        
-        # Create a restricted namespace
-        import random
-        import string
-        from datetime import datetime, timedelta
-
-        namespace = {
-            'pd': pd,
-            'np': np,
-            'random': random,
-            'datetime': datetime,
-            'timedelta': timedelta,
-            'string': string,
-            '__builtins__': {
-                'range': range,
-                'len': len,
-                'int': int,
-                'float': float,
-                'str': str,
-                'list': list,
-                'dict': dict,
-                'min': min,
-                'max': max,
-                'sum': sum,
-                'zip': zip,
-                'enumerate': enumerate,
-                'print': print,
-                'abs': abs,
-                'round': round,
-                'sorted': sorted,
-                'reversed': reversed,
-                '__import__': __import__,
-                'set': set,
-                'tuple': tuple,
-                'bool': bool,
-                'type': type,
-                'isinstance': isinstance,
-                'any': any,
-                'all': all
-            }
-        }
-        
-        try:
-            # Execute the code
-            exec(code, namespace)
-            
-            # Get the result
-            if 'result' in namespace:
-                return namespace['result']
-            elif 'generate_synthetic_data' in namespace:
-                return namespace['generate_synthetic_data']()
-            else:
-                raise ValueError("No result found in generated code")
-                
-        except Exception as e:
-            self.logger.error(f"Direct execution failed: {type(e).__name__}")
-            raise
     
     def _validate_synthetic_data(self, df: pd.DataFrame, metadata: Dict[str, Any]) -> bool:
         """

@@ -29,17 +29,32 @@ def test_generated_code_cannot_read_azure_credentials(monkeypatch):
     assert result["leaked"].tolist() == ["absent"]
 
 
+AGES_CODE = """
+import numpy as np
+import pandas as pd
+
+def generate_synthetic_data():
+    return pd.DataFrame({'age': np.arange(20, 25)})
+
+result = generate_synthetic_data()
+"""
+
+
 def test_generation_still_works_with_a_scrubbed_environment():
-    """Scrubbing the environment must not break ordinary generation."""
-    df = pd.DataFrame({"age": list(range(20, 40))})
-
-    from src.core.metadata_extractor import MetadataExtractor
-
-    metadata = MetadataExtractor().extract(df)
+    """Scrubbing the environment must not break ordinary generated code."""
     generator = SyntheticDataGenerator()
-
-    code, _ = generator._generate_fallback_code(metadata, num_rows=5)
-    result = generator._execute_generation_code(code, randomize_seed=False)
+    result = generator._execute_generation_code(AGES_CODE, randomize_seed=False)
 
     assert list(result.columns) == ["age"]
     assert len(result) == 5
+
+
+def test_broken_generated_code_raises_instead_of_running_in_process():
+    """A sandbox failure is an error, never a retry via in-process exec()."""
+    import pytest
+    from src.core.synthetic_generator import CodeExecutionError
+
+    generator = SyntheticDataGenerator()
+    with pytest.raises(CodeExecutionError) as exc:
+        generator._execute_generation_code("raise SystemExit(3)\n", randomize_seed=False)
+    assert "AI generation failed" in exc.value.user_message

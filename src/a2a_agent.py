@@ -82,7 +82,11 @@ class MockDataAgent:
         operation = payload.get("operation", "generate")
 
         if operation == "generate":
-            return generation_service.generate(payload)
+            # Off the event loop: the LLM call is synchronous and slow, and
+            # blocking the loop starves /health (ACA liveness restarts the app).
+            import anyio  # noqa: PLC0415
+
+            return await anyio.to_thread.run_sync(generation_service.generate, payload)
         elif operation in ("metadata", "extract_metadata"):
             return generation_service.extract_metadata(payload)
         else:

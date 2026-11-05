@@ -164,7 +164,10 @@ async def main() -> None:
         from src.core import generation_service  # noqa: PLC0415
 
         if name == "generate_synthetic_data":
-            result = generation_service.generate(arguments)
+            # Off the event loop: the LLM call is synchronous and slow.
+            import anyio  # noqa: PLC0415
+
+            result = await anyio.to_thread.run_sync(generation_service.generate, arguments)
         elif name == "extract_metadata":
             result = generation_service.extract_metadata(arguments)
         else:

@@ -325,7 +325,7 @@ async function generateSyntheticData() {
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(await responseErrorMessage(response));
         }
 
         // Read the streaming response
@@ -896,6 +896,18 @@ function updateProgressStep(stepName, status, durationSeconds) {
     }
 }
 
+// Turn a failed response into the server's own message. AI failures come back
+// as {"error": "AI generation failed: <reason>. No data was generated."}; there
+// is no template fallback, so this text is what tells the user why.
+async function responseErrorMessage(response) {
+    try {
+        const body = await response.json();
+        if (body.error) return body.error;
+        if (typeof body.detail === 'string') return body.detail;
+    } catch (e) { /* not JSON */ }
+    return `Request failed (HTTP ${response.status})`;
+}
+
 function showError(message) {
     // Handle both string and object messages
     let displayMessage = 'An unexpected error occurred';
@@ -1113,8 +1125,6 @@ function displayGenerationBadges(generationInfo, dictionaryApplied) {
             methodBadge = createHoverableBadge('🤖 LLM', 'badge-llm', 'Generated using AI model');
         } else if (generationInfo.method === 'cached') {
             methodBadge = createHoverableBadge('⚡ CACHED', 'badge-cached', 'Using cached generation pipeline');
-        } else if (generationInfo.method === 'fallback') {
-            methodBadge = createHoverableBadge('🔧 FALLBACK', 'badge-fallback', 'Template-based generation');
         }
         if (methodBadge) {
             badgesContainer.appendChild(methodBadge);
@@ -1312,10 +1322,6 @@ function showGenerationMethodsTooltip(target) {
                     <span class="badge badge-cached">⚡ CACHED</span>
                     <span>Using previously generated code for similar data</span>
                 </div>
-                <div class="badge-legend-item">
-                    <span class="badge badge-fallback">🔧 FALLBACK</span>
-                    <span>Template-based generation when LLM is unavailable</span>
-                </div>
             </div>
         </div>
     `;
@@ -1413,7 +1419,7 @@ async function downloadGeneratedData(preview = false) {
         });
 
         if (!response.ok) {
-            throw new Error('Download failed');
+            throw new Error(await responseErrorMessage(response));
         }
 
         const contentType = response.headers.get('content-type');
@@ -1585,7 +1591,7 @@ async function generateFromDictionary() {
         });
 
         if (!response.ok) {
-            throw new Error('Generation failed');
+            throw new Error(await responseErrorMessage(response));
         }
 
         const data = await response.json();

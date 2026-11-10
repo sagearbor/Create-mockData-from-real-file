@@ -1,31 +1,20 @@
 // BYOD Synthetic Data Generator - Frontend Application
 
-// Dynamically determine API base URL
-// Handle both localhost and 127.0.0.1 scenarios
-// If served from the FastAPI server, use relative paths
-// If opened as file:// or from different port, use same hostname format
-const API_BASE = (() => {
-    // If served from same origin (FastAPI at port 8201), use relative paths
-    if (window.location.port === '8201') {
-        // Normalize localhost to 127.0.0.1 for consistency
-        const origin = window.location.origin;
-        if (origin.includes('localhost')) {
-            return origin.replace('localhost', '127.0.0.1');
-        }
-        return origin;
-    }
-    // If file:// protocol, use 127.0.0.1
-    if (window.location.protocol === 'file:') {
+// API base URL.
+// The page is normally served by the FastAPI app itself (locally on :8201, on
+// Azure Container Apps behind HTTPS ingress on 443 with no port in the URL), so
+// API calls must go to the SAME origin: relative paths ('' base). Never rewrite
+// the scheme, host or port for an http(s) page -- doing so sent every hosted
+// request to http://<fqdn>:8201 and failed with "Failed to fetch".
+// Only a page opened straight from disk (file://) has no server origin; fall
+// back to the default local dev server there.
+function resolveApiBase(loc) {
+    if (loc && loc.protocol === 'file:') {
         return 'http://127.0.0.1:8201';
     }
-    // If served from different port (like VS Code preview), match the hostname format
-    let hostname = window.location.hostname || '127.0.0.1';
-    // Always use 127.0.0.1 instead of localhost for consistency
-    if (hostname === 'localhost') {
-        hostname = '127.0.0.1';
-    }
-    return `http://${hostname}:8201`;
-})();
+    return '';
+}
+const API_BASE = resolveApiBase(window.location);
 let currentFile = null;
 let currentMetadata = null;
 let currentSyntheticData = null;

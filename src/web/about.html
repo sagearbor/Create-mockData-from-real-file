@@ -472,6 +472,17 @@ curl -X POST http://localhost:8201/generate-with-dictionary \
         });
     </script>
 
+    <!-- Show curl examples against this server's own origin (e.g. the ACA FQDN),
+         not the local-dev default, whenever the page is served over http(s). -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!/^https?:$/.test(window.location.protocol)) return;
+            document.querySelectorAll('.code-example').forEach(function(el) {
+                el.textContent = el.textContent.split('http://localhost:8201').join(window.location.origin);
+            });
+        });
+    </script>
+
     <!-- Mermaid initialization -->
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js?v=3"></script>
     <script>

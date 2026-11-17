@@ -1,0 +1,690 @@
+{
+ "project": "ST",
+ "folder": "INT.AI Tools API 1.0/Mock Data Generator",
+ "source_repo": "sagearbor/Create-mockData-from-real-file",
+ "branch": "feature/api-json-ST-358",
+ "commit": "1a56bd2",
+ "run_command": "venv/bin/python -m pytest tests/test_api_v1.py --junitxml=results.xml",
+ "environment": "Developer workstation, offline (no network, AI model replaced by a stand-in), synthetic data",
+ "tests": [
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_csv_text_happy_path",
+   "name": "Mock Data Generator: generate from CSV text returns matching synthetic rows",
+   "objective": "Proves that sending a small table as plain CSV text to POST /api/v1/generate returns synthetic data, and that when no row count is requested the result has the same number of rows as the table sent.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate containing the table as CSV text, with no row count requested.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success); the reply has status \"success\"."
+    },
+    {
+     "action": "Check the size and content of the reply.",
+     "data": "",
+     "expected": "The reported shape is 5 rows by 3 columns; the data list holds 5 rows, each a set of named values; the generation details report the method as \"llm\" (AI model)."
+    },
+    {
+     "action": "Check how many times the AI stand-in was used.",
+     "data": "",
+     "expected": "It was called exactly once."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_csv_text_happy_path",
+   "key": "ST-T39"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_base64_data_content",
+   "name": "Mock Data Generator: generate accepts a base64-encoded CSV file",
+   "objective": "Proves that the source table can also be sent as encoded file content (base64, a text encoding of file bytes) with the format stated as CSV, and that the requested number of rows comes back with the original column names.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with the table as base64-encoded file content, format \"csv\", asking for 3 rows.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g), base64-encoded",
+     "expected": "HTTP 200 (success); the column names are widget_id, colour, weight_g in that order; the shape is 3 rows by 3 columns."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_base64_data_content",
+   "key": "ST-T55"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_base64_tsv_uses_format",
+   "name": "Mock Data Generator: generate reads a tab-separated file when format is tsv",
+   "objective": "Proves that the stated format is honoured: a tab-separated file sent as encoded content with format \"tsv\" is split into its three columns instead of being read as one wide column.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with a tab-separated version of the table as base64-encoded file content, format \"tsv\".",
+     "data": "The made-up 5-row widget table with tabs instead of commas, base64-encoded",
+     "expected": "HTTP 200 (success); the column names are widget_id, colour, weight_g (three separate columns)."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_base64_tsv_uses_format",
+   "key": "ST-T47"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_num_rows_respected",
+   "name": "Mock Data Generator: generate returns exactly the number of rows requested",
+   "objective": "Proves that the requested row count is respected. The test is repeated for three cases: 1 row, 7 rows and 40 rows (fewer than, more than, and far more than the 5 rows sent).",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with the table as CSV text and a requested row count. Repeated for 1, 7 and 40 rows.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g); row count 1, 7 or 40",
+     "expected": "HTTP 200 (success); the shape is the requested number of rows by 3 columns, and the data list holds exactly that many rows."
+    },
+    {
+     "action": "Check what row count was passed on to the AI stand-in.",
+     "data": "",
+     "expected": "It received the same requested row count (1, 7 or 40)."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_num_rows_respected",
+   "key": "ST-T54"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_response_matches_model_and_input_columns",
+   "name": "Mock Data Generator: generate reply has the documented fields and input columns",
+   "objective": "Proves that a successful reply contains exactly the documented fields (no more, no fewer) and that the synthetic rows have the same columns, in the same order, as the table sent.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with the table as CSV text, asking for 4 rows.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "The reply passes the application's own check of the documented success format, and its field names are exactly the documented set (status, data, shape, columns, generation details)."
+    },
+    {
+     "action": "Compare the columns in the reply with the columns sent.",
+     "data": "",
+     "expected": "The column list is widget_id, colour, weight_g in that order, and every returned row has those same columns in that same order."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_response_matches_model_and_input_columns",
+   "key": "ST-T41"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_options_reach_the_generator",
+   "name": "Mock Data Generator: generate passes the caller's options to the generator",
+   "objective": "Proves that optional settings in the request (how closely to match the source statistics, and whether to reuse a saved generation script) are passed through to the data generator unchanged.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with the table as CSV text, a matching threshold of 0.55, and reuse of saved scripts switched off; no row count requested.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success)."
+    },
+    {
+     "action": "Check the settings the AI stand-in received.",
+     "data": "",
+     "expected": "It received: no row count, matching threshold 0.55, and reuse of saved scripts switched off."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_options_reach_the_generator",
+   "key": "ST-T45"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_real_pipeline_with_fake_llm",
+   "name": "Mock Data Generator: generate works through the real generator with a canned AI reply",
+   "objective": "Proves that the real data generation code path works end to end through POST /api/v1/generate when only the AI model call is replaced by a canned reply, and that its generation details can be returned in the reply.",
+   "precondition": "Application loaded in the test harness using the real data generator, with only the AI model call replaced by a canned reply (a fixed script that builds 8 made-up widget rows) and the saved-script store switched off; no network. API key not configured.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with the table as CSV text, asking for 8 rows, reuse of saved scripts switched off.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success); the shape is 8 rows by 3 columns; the column names are widget_id, colour, weight_g."
+    },
+    {
+     "action": "Check the generation details in the reply.",
+     "data": "",
+     "expected": "The method is reported as \"llm\" (AI model)."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_real_pipeline_with_fake_llm",
+   "key": "ST-T53"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_in_openapi_with_request_model",
+   "name": "Mock Data Generator: generate is described in the published API description",
+   "objective": "Proves that the machine-readable API description (GET /openapi.json) documents POST /api/v1/generate: its request format, its success format, its error format and its input fields.",
+   "precondition": "Application loaded in the test harness; no network. No AI model is needed or called.",
+   "steps": [
+    {
+     "action": "Request the API description at GET /openapi.json and look up the entry for POST /api/v1/generate.",
+     "data": "",
+     "expected": "The entry names the documented request format for the JSON body and the documented success format for HTTP 200."
+    },
+    {
+     "action": "Check the documented error replies.",
+     "data": "",
+     "expected": "HTTP 401 (bad or missing API key), 413 (request too large), 422 (invalid request) and 502 (AI generation failed) are each documented with the single common error format."
+    },
+    {
+     "action": "Check the documented input fields of the request format.",
+     "data": "",
+     "expected": "They include CSV text, encoded file content, format, row count, matching threshold and the reuse-saved-script option."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_in_openapi_with_request_model",
+   "key": "ST-T33"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_362_generate_json_does_not_block_event_loop",
+   "name": "Mock Data Generator: health check still answers during a slow generation",
+   "objective": "Proves that the service stays responsive while a slow generation is running: GET /health answers before the generation finishes, so a hosting platform's liveness check would not fail.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that pauses until the test releases it; no network. API key not configured.",
+   "steps": [
+    {
+     "action": "Start a request to POST /api/v1/generate (CSV text, 2 rows) and wait until the stand-in reports that generation has started.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "Generation has started and is paused."
+    },
+    {
+     "action": "While generation is paused, send GET /health with a 2-second time limit.",
+     "data": "",
+     "expected": "HTTP 200 (success) is returned while the generation request is still in progress (not finished)."
+    },
+    {
+     "action": "Release the paused generation and wait for its reply.",
+     "data": "",
+     "expected": "HTTP 200 (success) with a shape of 2 rows by 3 columns."
+    }
+   ],
+   "issue": "ST-362",
+   "source": "tests/test_api_v1.py::test_ST_362_generate_json_does_not_block_event_loop",
+   "key": "ST-T51"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_validation_error_is_422_in_uniform_shape",
+   "name": "Mock Data Generator: invalid requests are refused with HTTP 422 in the common format",
+   "objective": "Proves that malformed requests to POST /api/v1/generate are refused with HTTP 422 (invalid request) in the single common error format, and that nothing is generated. Seven kinds of invalid request are covered.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send each of seven invalid requests to POST /api/v1/generate: (1) an empty request; (2) only a row count, no table; (3) both CSV text and encoded file content together; (4) encoded file content that is not valid base64; (5) a row count of 0; (6) a matching threshold of 1.5 (allowed range is 0 to 1); (7) a misspelled option name (\"nmu_rows\").",
+     "data": "Made-up widget CSV where a table is included",
+     "expected": "Each returns HTTP 422 (invalid request). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"RequestValidationError\"."
+    },
+    {
+     "action": "Check that the framework's default error field is not used.",
+     "data": "",
+     "expected": "The reply has no \"detail\" field."
+    },
+    {
+     "action": "Check whether the AI stand-in was used.",
+     "data": "",
+     "expected": "It was never called; no data was generated."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_validation_error_is_422_in_uniform_shape",
+   "key": "ST-T44"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_missing_both_inputs_says_what_to_send",
+   "name": "Mock Data Generator: empty request error message names the two accepted inputs",
+   "objective": "Proves that when no source table is sent, the error message tells the caller what to send by naming both accepted inputs.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send an empty request to POST /api/v1/generate.",
+     "data": "Empty JSON object",
+     "expected": "HTTP 422 (invalid request) in the common error format (status \"error\", error message, error category)."
+    },
+    {
+     "action": "Read the error message.",
+     "data": "",
+     "expected": "It mentions both \"csv_text\" and \"data_content\", the two accepted ways of sending the table."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_missing_both_inputs_says_what_to_send",
+   "key": "ST-T34"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_body_that_is_not_json_is_422_in_uniform_shape",
+   "name": "Mock Data Generator: a body that is not valid JSON is refused with HTTP 422",
+   "objective": "Proves that a request whose content is not valid JSON is refused with HTTP 422 (invalid request) in the single common error format.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate labelled as JSON but containing broken text.",
+     "data": "The text \"{not json\"",
+     "expected": "HTTP 422 (invalid request). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"RequestValidationError\"."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_body_that_is_not_json_is_422_in_uniform_shape",
+   "key": "ST-T48"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_ai_failure_is_502_in_uniform_shape",
+   "name": "Mock Data Generator: AI model failures return HTTP 502 and no data",
+   "objective": "Proves that when the AI model fails, the service answers HTTP 502 (upstream service failed) in the common error format, says clearly that no data was generated, and does not leak the AI provider's own error text. Three kinds of AI failure are covered.",
+   "precondition": "Application loaded in the test harness using the real data generator, with the AI model call replaced by a canned failure; saved-script store switched off; no network. API key not configured.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate (CSV text, 8 rows, reuse of saved scripts off) for each of three canned AI failures: (1) the AI provider raises an error with status 500 and the message \"provider said: secret prompt text\"; (2) the AI reply is cut off for length; (3) the AI reply is empty.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "Each returns HTTP 502 in the common error format (exactly three fields: status \"error\", error message, error category)."
+    },
+    {
+     "action": "Read the error message.",
+     "data": "",
+     "expected": "It starts with \"AI generation failed:\", ends with \"No data was generated.\", and contains the reason for the case: \"HTTP 500\", \"finish_reason=length\" (reply cut off for length) or \"empty response\"."
+    },
+    {
+     "action": "Search the whole reply for the provider's own text.",
+     "data": "",
+     "expected": "The phrase \"secret prompt text\" does not appear anywhere in the reply."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_ai_failure_is_502_in_uniform_shape",
+   "key": "ST-T52"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_ai_not_configured_is_503_in_uniform_shape",
+   "name": "Mock Data Generator: no AI model configured returns HTTP 503 and no data",
+   "objective": "Proves that when no AI model connection is configured, the service answers HTTP 503 (service unavailable) in the common error format and states that no data was generated.",
+   "precondition": "Application loaded in the test harness using the real data generator with no AI model connection at all; no network. API key not configured.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with the table as CSV text, reuse of saved scripts switched off.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 503 (service unavailable). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"AINotConfiguredError\"."
+    },
+    {
+     "action": "Read the error message.",
+     "data": "",
+     "expected": "It contains \"No data was generated\"."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_ai_not_configured_is_503_in_uniform_shape",
+   "key": "ST-T37"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_unreadable_source_data_is_400_in_uniform_shape",
+   "name": "Mock Data Generator: unreadable source data returns HTTP 400 in the common format",
+   "objective": "Proves that when the source content cannot be read in the stated format, the service answers HTTP 400 (bad request) in the common error format and nothing is generated.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with encoded file content that is not JSON, while stating the format as \"json\".",
+     "data": "The text \"this is not json\", base64-encoded",
+     "expected": "HTTP 400 (bad request). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"GenerationError\"."
+    },
+    {
+     "action": "Check whether the AI stand-in was used.",
+     "data": "",
+     "expected": "It was never called; no data was generated."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_unreadable_source_data_is_400_in_uniform_shape",
+   "key": "ST-T30"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_unknown_v1_path_is_404_in_uniform_shape",
+   "name": "Mock Data Generator: unknown address or wrong method under /api/v1 uses common format",
+   "objective": "Proves that asking for an address that does not exist under /api/v1, or using the wrong request method on an existing one, also returns the single common error format.",
+   "precondition": "Application loaded in the test harness; no network. API key not configured. No AI model is needed or called.",
+   "steps": [
+    {
+     "action": "Send GET /api/v1/nope (an address that does not exist).",
+     "data": "",
+     "expected": "HTTP 404 (not found). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category."
+    },
+    {
+     "action": "Send GET /api/v1/generate (this address only accepts POST).",
+     "data": "",
+     "expected": "HTTP 405 (method not allowed), in the same three-field error format."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_unknown_v1_path_is_404_in_uniform_shape",
+   "key": "ST-T43"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_api_key_check_is_off_when_env_unset",
+   "name": "Mock Data Generator: no API key is required when none is configured",
+   "objective": "Proves that when the service has no API key configured, requests under /api/v1 are accepted with or without a key.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default. The API key setting is absent.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with CSV text and no API key.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success)."
+    },
+    {
+     "action": "Send the same request with an arbitrary API key in the X-API-Key header.",
+     "data": "Key value \"anything\"",
+     "expected": "HTTP 200 (success)."
+    },
+    {
+     "action": "Send GET /api/v1/version with no API key.",
+     "data": "",
+     "expected": "HTTP 200 (success)."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_api_key_check_is_off_when_env_unset",
+   "key": "ST-T46"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_api_key_check_is_off_when_env_empty",
+   "name": "Mock Data Generator: no API key is required when the configured key is empty",
+   "objective": "Proves that an API key setting that is present but empty is treated the same as no key configured: the check is off.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in; no network. The API key setting is present but set to an empty value.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with CSV text and no API key.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success)."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_api_key_check_is_off_when_env_empty",
+   "key": "ST-T50"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_wrong_or_missing_api_key_is_401",
+   "name": "Mock Data Generator: wrong or missing API key is refused with HTTP 401",
+   "objective": "Proves that when an API key is configured, requests under /api/v1 without the exact key in the X-API-Key header are refused with HTTP 401 (not authorised), nothing is generated, and the expected key is not revealed. Five cases are covered.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in; no network. API key configured to a dummy test value (\"test-key-not-a-secret\").",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with CSV text for each of five cases: (1) no key; (2) a wrong key; (3) the right key with one extra character; (4) an empty key; (5) the right key value sent in the wrong header (Authorization: Bearer) instead of X-API-Key.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "Each returns HTTP 401 (not authorised). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"InvalidApiKey\"."
+    },
+    {
+     "action": "Read the error message and check the AI stand-in.",
+     "data": "",
+     "expected": "The message does not contain the expected key value, and the stand-in was never called (no data generated)."
+    },
+    {
+     "action": "Send GET /api/v1/version with the same headers, for each of the five cases.",
+     "data": "",
+     "expected": "Each returns HTTP 401 in the same error format with category \"InvalidApiKey\"."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_wrong_or_missing_api_key_is_401",
+   "key": "ST-T36"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_right_api_key_is_200",
+   "name": "Mock Data Generator: correct API key is accepted",
+   "objective": "Proves that when an API key is configured, requests carrying the correct key are accepted, and that the header name works regardless of upper or lower case.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in; no network. API key configured to a dummy test value (\"test-key-not-a-secret\").",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate with CSV text and the correct key, with the header name written in lower case (x-api-key).",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success)."
+    },
+    {
+     "action": "Send GET /api/v1/version with the same header.",
+     "data": "",
+     "expected": "HTTP 200 (success)."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_right_api_key_is_200",
+   "key": "ST-T40"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_api_key_does_not_apply_to_older_routes",
+   "name": "Mock Data Generator: API key requirement does not affect the older addresses",
+   "objective": "Proves that the API key requirement covers only /api/v1: the older addresses of the application keep working without a key even when a key is configured.",
+   "precondition": "Application loaded in the test harness; no network. API key configured to a dummy test value. No AI model is needed or called.",
+   "steps": [
+    {
+     "action": "Send GET /health with no API key.",
+     "data": "",
+     "expected": "HTTP 200 (success)."
+    },
+    {
+     "action": "Send GET /api with no API key.",
+     "data": "",
+     "expected": "HTTP 200 (success)."
+    },
+    {
+     "action": "Send GET /api/cache-info with no API key (an address that starts with /api/ but is not under /api/v1).",
+     "data": "",
+     "expected": "The reply is not HTTP 401 (not refused for a missing key)."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_api_key_does_not_apply_to_older_routes",
+   "key": "ST-T28"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_oversize_request_is_413_in_uniform_shape",
+   "name": "Mock Data Generator: request over the size limit is refused with HTTP 413",
+   "objective": "Proves that a request larger than the configured size limit is refused with HTTP 413 (request too large) in the common error format, that the message states the limit, that nothing is generated, and that a small request still works.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in; no network. API key not configured. Size limit set to 2000 bytes.",
+   "steps": [
+    {
+     "action": "Send a request to POST /api/v1/generate whose CSV text is larger than the limit.",
+     "data": "A made-up 500-row, 2-column widget CSV of about 4,500 bytes",
+     "expected": "HTTP 413 (request too large). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"RequestTooLarge\"."
+    },
+    {
+     "action": "Read the error message and check the AI stand-in.",
+     "data": "",
+     "expected": "The message contains the limit \"2000\", and the stand-in was never called (no data generated)."
+    },
+    {
+     "action": "Send a small request to POST /api/v1/generate.",
+     "data": "A made-up 5-row, 3-column CSV about widgets (widget_id, colour, weight_g)",
+     "expected": "HTTP 200 (success)."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_oversize_request_is_413_in_uniform_shape",
+   "key": "ST-T32"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_oversize_request_without_content_length_is_413",
+   "name": "Mock Data Generator: oversize request sent in pieces without a stated size gets HTTP 413",
+   "objective": "Proves that the size limit cannot be bypassed by sending the request in pieces without declaring its total size: the service counts the bytes as they arrive and still refuses with HTTP 413 (request too large).",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in; no network. API key not configured. Size limit set to 2000 bytes.",
+   "steps": [
+    {
+     "action": "Send an oversize request to POST /api/v1/generate as a stream of 512-byte pieces.",
+     "data": "A made-up 500-row, 2-column widget CSV of about 4,500 bytes, wrapped in JSON",
+     "expected": "The request that was sent carries no Content-Length header (no declared total size)."
+    },
+    {
+     "action": "Check the reply.",
+     "data": "",
+     "expected": "HTTP 413 (request too large). The reply holds exactly three fields: status \"error\", a non-empty error message, and an error category of \"RequestTooLarge\"."
+    },
+    {
+     "action": "Check whether the AI stand-in was used.",
+     "data": "",
+     "expected": "It was never called; no data was generated."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_oversize_request_without_content_length_is_413",
+   "key": "ST-T42"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_size_limit_default_and_bad_values",
+   "name": "Mock Data Generator: size limit defaults to 10 MB and ignores unusable settings",
+   "objective": "Proves that the request size limit is 10 MB (10,485,760 bytes) when not configured, that unusable settings fall back to that default, and that a valid setting is applied. This checks the limit calculation directly, without sending a request.",
+   "precondition": "Application code loaded in the test harness; size limit setting absent at the start. No request is sent and no AI model is needed.",
+   "steps": [
+    {
+     "action": "Read the size limit with no setting present.",
+     "data": "",
+     "expected": "The limit is the default of 10 MB (10 x 1024 x 1024 bytes)."
+    },
+    {
+     "action": "Set the size limit to each of four unusable values in turn and read the limit each time.",
+     "data": "Empty value, \"abc\", \"0\", \"-5\"",
+     "expected": "The limit is the 10 MB default every time."
+    },
+    {
+     "action": "Set the size limit to a valid number and read the limit.",
+     "data": "\"123\"",
+     "expected": "The limit is 123 bytes."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_size_limit_default_and_bad_values",
+   "key": "ST-T49"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_363_older_routes_keep_their_own_error_shapes",
+   "name": "Mock Data Generator: older addresses keep their original error replies",
+   "objective": "Proves that the common error format and the size limit apply only to /api/v1: error replies from the older addresses of the application are unchanged.",
+   "precondition": "Application loaded in the test harness; no network. API key not configured. Size limit set to 10 bytes (to show it does not affect the older addresses). No AI model is needed or called.",
+   "steps": [
+    {
+     "action": "Send GET /no-such-route (an address that does not exist, outside /api/v1).",
+     "data": "",
+     "expected": "HTTP 404 (not found) with the framework's original reply: a single \"detail\" field saying \"Not Found\"."
+    },
+    {
+     "action": "Send POST /metadata without the file upload it requires.",
+     "data": "",
+     "expected": "HTTP 422 (invalid request) with the framework's original reply: a \"detail\" field holding a list of problems."
+    },
+    {
+     "action": "Send GET /batch/does-not-exist-anywhere (a batch job that does not exist).",
+     "data": "",
+     "expected": "The reply does not contain the /api/v1 error category field (the status code of this reply is not checked)."
+    }
+   ],
+   "issue": "ST-363",
+   "source": "tests/test_api_v1.py::test_ST_363_older_routes_keep_their_own_error_shapes",
+   "key": "ST-T38"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_364_version_endpoint_uses_the_one_constant",
+   "name": "Mock Data Generator: version address reports the single application version",
+   "objective": "Proves that GET /api/v1/version reports the service name, application version and API version, and that the same version number is reported everywhere else the application states its version.",
+   "precondition": "Application loaded in the test harness; no network. API key not configured. No AI model is needed or called.",
+   "steps": [
+    {
+     "action": "Send GET /api/v1/version.",
+     "data": "",
+     "expected": "HTTP 200 (success). The reply is exactly: service \"BYOD Synthetic Data Generator\", version equal to the application's single version setting, API version \"v1\"."
+    },
+    {
+     "action": "Read the version the application itself declares.",
+     "data": "",
+     "expected": "It equals the same single version setting."
+    },
+    {
+     "action": "Send GET /api and read its version field.",
+     "data": "",
+     "expected": "It equals the same single version setting."
+    },
+    {
+     "action": "Send GET /openapi.json and read the version in its information section.",
+     "data": "",
+     "expected": "It equals the same single version setting."
+    }
+   ],
+   "issue": "ST-364",
+   "source": "tests/test_api_v1.py::test_ST_364_version_endpoint_uses_the_one_constant",
+   "key": "ST-T29"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_364_version_is_not_repeated_as_a_literal",
+   "name": "Mock Data Generator: version number is not typed out a second time in the source",
+   "objective": "Proves that the version number is defined in one place only, by checking that two main source files do not contain the version number typed out as quoted text (which could drift out of date).",
+   "precondition": "Source files of the repository available on disk. Nothing is run and no request is sent.",
+   "steps": [
+    {
+     "action": "Read the text of the source files main.py and src/api/v1.py and search each for the current version number in double quotes.",
+     "data": "",
+     "expected": "The quoted version number does not appear in either file."
+    }
+   ],
+   "issue": "ST-364",
+   "source": "tests/test_api_v1.py::test_ST_364_version_is_not_repeated_as_a_literal",
+   "key": "ST-T35"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_364_example_client_builds_correct_requests",
+   "name": "Mock Data Generator: example client program builds correct requests",
+   "objective": "Proves that the example client program supplied for other developers (scripts/api_client_example.py) builds correctly addressed and correctly formatted requests. Requests are built and inspected only; nothing is sent.",
+   "precondition": "Example client loaded from the repository with a made-up server address (http://mock.test:9000/) and a dummy API key (\"test-key-not-a-secret\"). No network; no request is sent; no AI model is needed.",
+   "steps": [
+    {
+     "action": "Build a health-check request and a version request.",
+     "data": "",
+     "expected": "The health request is a GET to http://mock.test:9000/health (the trailing slash of the address is handled); the version request carries the dummy key in the X-API-Key header."
+    },
+    {
+     "action": "Build a generate request from the client's built-in demo CSV, asking for 5 rows.",
+     "data": "The client's built-in made-up demo CSV",
+     "expected": "It is a POST to http://mock.test:9000/api/v1/generate, labelled as JSON, carrying the API key; its content holds the demo CSV text and row count 5, and passes the application's own check of the documented request format."
+    },
+    {
+     "action": "Build a generate request from raw file bytes with format \"csv\"; then try to build one with no input at all.",
+     "data": "The bytes of a tiny made-up 2-column, 1-row CSV",
+     "expected": "The content carries the bytes base64-encoded, with no CSV text field, and passes the request format check. Building with no input is refused with an error."
+    },
+    {
+     "action": "Create a client with no address or key given, with the server address supplied through the environment setting and no key setting present.",
+     "data": "Address http://from-env.test:1234",
+     "expected": "The health request goes to http://from-env.test:1234/health and carries no API key header."
+    }
+   ],
+   "issue": "ST-364",
+   "source": "tests/test_api_v1.py::test_ST_364_example_client_builds_correct_requests",
+   "key": "ST-T27"
+  },
+  {
+   "id": "tests.test_api_v1.test_ST_364_example_client_request_is_accepted_by_the_server",
+   "name": "Mock Data Generator: request built by the example client is accepted by the service",
+   "objective": "Proves that exactly what the example client program would send is accepted by the real application and produces the requested synthetic rows.",
+   "precondition": "Application loaded in the test harness with the AI model replaced by a stand-in that returns the requested number of rows; no network. API key not configured; size limit left at its default.",
+   "steps": [
+    {
+     "action": "Use the example client to build a generate request from its built-in demo CSV, asking for 5 rows (no API key).",
+     "data": "The client's built-in made-up demo CSV",
+     "expected": "A request is built (method, headers and content)."
+    },
+    {
+     "action": "Send that request's method, headers and content unchanged to POST /api/v1/generate on the application.",
+     "data": "",
+     "expected": "HTTP 200 (success); the shape is 5 rows by 3 columns; the column names are widget_id, colour, weight_g."
+    }
+   ],
+   "issue": "ST-364",
+   "source": "tests/test_api_v1.py::test_ST_364_example_client_request_is_accepted_by_the_server",
+   "key": "ST-T31"
+  }
+ ],
+ "issue_ids": {
+  "ST-358": 219381,
+  "ST-359": 219382,
+  "ST-360": 219383,
+  "ST-361": 219384,
+  "ST-362": 219385,
+  "ST-363": 219386,
+  "ST-364": 219387,
+  "ST-365": 219388,
+  "ST-366": 219389
+ },
+ "cycle_issues": [
+  "ST-358",
+  "ST-365"
+ ]
+}

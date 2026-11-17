@@ -201,6 +201,24 @@ This file contains all completed development tasks for the BYOD Synthetic Data G
   - Added explicit "Download File" and "Download ZIP" buttons
   - Added "Regenerate" and "New File" options
 
+## Development Tasks - November 17, 2026
+
+### Task: JSON API callable by other programs (4.2.0, Jira ST-358) ✅
+- **Status**: COMPLETED (on branch `feature/api-json-ST-358`; not deployed)
+- **Completion Date**: November 17, 2026
+- **Description**: `/api/v1` routes so other programs can call the generator with JSON
+- **Completion Notes**:
+  - ST-362: `POST /api/v1/generate` - JSON in (`csv_text` or base64 `data_content`),
+    typed JSON out; plain `def` handler, delegates to `generation_service.generate`
+  - ST-363: for `/api/v1` only - optional `X-API-Key` (env `MOCKDATA_API_KEY`), request
+    size limit (env `MOCKDATA_API_MAX_BYTES`, default 10 MB), one error shape
+    `{"status","error","error_class"}`; older routes unchanged
+  - ST-364: `GET /api/v1/version` (one `APP_VERSION` constant in `src/utils/config.py`),
+    `scripts/api_client_example.py`, `docs/API_DOCUMENTATION.md` refreshed
+  - ST-365: `tests/test_api_v1.py` (offline; fake generator, no LLM)
+  - Code: `src/api/v1.py`; wired in `main.py`
+  - Not done: `MOCKDATA_API_KEY` is not set on any server, so the key check is off
+
 ## Statistics
 
 **Total Completed Tasks**: 18

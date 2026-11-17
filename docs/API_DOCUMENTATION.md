@@ -6,7 +6,114 @@ http://localhost:8201
 ```
 
 ## Authentication
-Currently, the API does not require authentication for local usage. For production deployment, implement API key authentication.
+The JSON API under `/api/v1` has an optional API key. When the server has the
+environment variable `MOCKDATA_API_KEY` set, every `/api/v1` request must send the
+same value in the `X-API-Key` header, otherwise it gets `401`. When the variable is
+unset or empty the check is off (local use). The older routes (`/generate`,
+`/metadata`, ...) do not check the key.
+
+## JSON API for other programs (`/api/v1`)
+
+Use these routes to call the generator from another program: JSON in, JSON out, no
+file upload form. They are also described, with their request and response models,
+in `/openapi.json` and the interactive page at `/docs`. A small ready-to-copy client
+is in `scripts/api_client_example.py` (standard library only).
+
+### Version
+
+**Endpoint:** `GET /api/v1/version`
+
+```bash
+curl -s "http://localhost:8201/api/v1/version"
+```
+
+```json
+{"service": "BYOD Synthetic Data Generator", "version": "1.0.0", "api_version": "v1"}
+```
+
+### Generate synthetic data from JSON
+
+**Endpoint:** `POST /api/v1/generate` (`Content-Type: application/json`)
+
+**Body:** send exactly one of `csv_text` or `data_content`.
+- `csv_text` (string): the source data as plain CSV text, header row first
+- `data_content` (string): the source file's bytes, base64-encoded
+- `format` (string, optional): format of `data_content` - "csv", "tsv", "json", "excel" or "parquet" (default: "csv")
+- `num_rows` (integer, optional): rows to generate, 1-100000 (default: same as the source)
+- `match_threshold` (float, optional): statistical matching threshold, 0-1 (default: 0.8)
+- `safety_mode` (string, optional): "strict", "balanced" or "permissive" (default: "balanced")
+- `use_cache` (boolean, optional): reuse a cached generation script (default: true)
+
+Unknown field names are rejected with `422`, so a typo is not silently ignored.
+
+**Request (CSV text):**
+```bash
+curl -s -X POST "http://localhost:8201/api/v1/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $MOCKDATA_API_KEY" \
+  -d '{"csv_text": "widget_id,colour,weight_g\nW001,red,12.5\nW002,blue,14.1\n", "num_rows": 3}'
+```
+
+**Request (base64 file):**
+```bash
+curl -s -X POST "http://localhost:8201/api/v1/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $MOCKDATA_API_KEY" \
+  -d "{\"data_content\": \"$(base64 < data.csv | tr -d '\n')\", \"format\": \"csv\", \"num_rows\": 100}"
+```
+
+Leave the `X-API-Key` line out when the server has no key set.
+
+**Response (`200`):**
+```json
+{
+  "status": "success",
+  "data": [
+    {"widget_id": "W104", "colour": "blue", "weight_g": 13.4},
+    {"widget_id": "W221", "colour": "red", "weight_g": 12.1},
+    {"widget_id": "W087", "colour": "red", "weight_g": 14.0}
+  ],
+  "shape": [3, 3],
+  "columns": ["widget_id", "colour", "weight_g"],
+  "generation_info": {"method": "llm", "num_rows": 3}
+}
+```
+
+Generation calls an AI model and can take a minute or more: set the client timeout
+to several minutes.
+
+### Request size limit
+
+A `/api/v1` request body larger than the limit is refused with `413`. The limit is
+10 MB (10485760 bytes) by default; change it with the environment variable
+`MOCKDATA_API_MAX_BYTES` (bytes). Base64 makes a file about one third larger.
+
+### Errors on `/api/v1`
+
+Every failure on `/api/v1` has the same JSON shape:
+
+```json
+{"status": "error", "error": "what went wrong, in words", "error_class": "ShortName"}
+```
+
+| Status | `error_class` | Meaning |
+|--------|---------------|---------|
+| `400` | `GenerationError` | The source data could not be read or used |
+| `401` | `InvalidApiKey` | `X-API-Key` missing or wrong (only when the server has a key set) |
+| `404` / `405` | `HTTPException` | No such `/api/v1` route, or wrong method |
+| `413` | `RequestTooLarge` | Body larger than the size limit |
+| `422` | `RequestValidationError` | Body is not valid JSON, or a field is missing or out of range |
+| `500` | `InternalError` | Unexpected server error |
+| `502` | `AIGenerationError` or a more specific name | The AI call failed. No data was generated (there is no template fallback) |
+| `503` | `AINotConfiguredError` | The server has no AI configured. No data was generated |
+
+```bash
+curl -s -X POST "http://localhost:8201/api/v1/generate" -H "Content-Type: application/json" -d '{}'
+```
+
+```json
+{"status": "error", "error": "Invalid request: body: Value error, provide exactly one of csv_text or data_content", "error_class": "RequestValidationError"}
+```
 
 ## Endpoints
 
@@ -233,7 +340,9 @@ curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 
 ## Error Responses
 
-All endpoints may return error responses in the following format:
+The `/api/v1` routes use the single error shape described under "Errors on `/api/v1`"
+above. The older routes return errors in the following format (and, when the AI call
+fails, `{"status": "error", "error": "...", "error_class": "..."}` with `502` or `503`):
 
 ```json
 {
@@ -279,26 +388,29 @@ ws.onmessage = (event) => {
 };
 ```
 
-## SDK Examples
+## Client Examples
 
-### Python SDK
+There is no installable SDK package. Call the HTTP API directly, or copy the small
+client in `scripts/api_client_example.py`.
+
+### Python
 ```python
-from byod_synthetic import SyntheticGenerator
+# from the repo root; standard library only
+from scripts.api_client_example import MockDataClient
 
-# Initialize client
-generator = SyntheticGenerator(base_url="http://localhost:8201")
+client = MockDataClient(base_url="http://localhost:8201", api_key=None)  # or MOCKDATA_API_URL / MOCKDATA_API_KEY
 
-# Generate synthetic data
-result = generator.generate(
-    file_path="data.csv",
-    num_rows=10000,
-    match_threshold=0.85,
-    safety_mode="balanced"  # or "strict", "permissive"
-)
+print(client.health())    # (200, {...})
+print(client.version())   # (200, {"version": "1.0.0", ...})
 
-# Save result
-result.to_csv("synthetic_data.csv")
+status, body = client.generate(csv_text="widget_id,colour\nW001,red\nW002,blue\n", num_rows=10)
+if status == 200:
+    rows = body["data"]            # list of dicts, one per row
+else:
+    print(body["error_class"], body["error"])
 ```
+
+Run the demo: `python scripts/api_client_example.py --base-url http://localhost:8201`
 
 ### JavaScript/Node.js
 ```javascript
@@ -357,10 +469,8 @@ curl -X POST "http://localhost:8201/generate/batch" \
 
 ## Versioning
 
-API version is included in response headers:
-```
-X-API-Version: 1.0.0
-```
+The service version is returned by `GET /api/v1/version` (and in `/openapi.json`).
+The `v1` in the path is the API version; there is no version response header.
 
 ## Support
 

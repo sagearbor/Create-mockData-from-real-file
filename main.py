@@ -27,7 +27,8 @@ from src.core.metadata_extractor import MetadataExtractor
 from src.core.synthetic_generator import SyntheticDataGenerator, AIGenerationError
 from src.core.cache_manager import CacheManager
 from src.core.data_dictionary import DataDictionary
-from src.utils.config import settings
+from src.utils.config import settings, APP_VERSION
+from src.api import v1 as api_v1
 from src.utils.logger import logger
 
 # Initialize components
@@ -85,7 +86,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BYOD Synthetic Data Generator",
     description="Generate privacy-safe synthetic data that preserves statistical properties",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 
@@ -93,6 +94,10 @@ app = FastAPI(
 # Per-request action_id + Easy Auth user for LLM telemetry (dcri_llm).
 from src.dcri_llm import asgi_middleware as _dcri_llm_middleware
 app.add_middleware(_dcri_llm_middleware)
+
+# /api/v1 only: optional X-API-Key check and request size limit. Added before
+# CORS so CORS stays outermost and 401/413 answers still carry CORS headers.
+app.add_middleware(api_v1.ApiV1Guard)
 
 app.add_middleware(
     CORSMiddleware,
@@ -133,7 +138,7 @@ async def root():
         # Fallback to API info if HTML not found
         return {
             "service": "BYOD Synthetic Data Generator",
-            "version": "1.0.0",
+            "version": APP_VERSION,
             "status": "running",
             "endpoints": {
                 "upload": "/upload",
@@ -200,7 +205,7 @@ async def api_info():
     """API information endpoint."""
     return {
         "service": "BYOD Synthetic Data Generator",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "status": "running",
         "endpoints": {
             "upload": "/upload",
@@ -1344,6 +1349,12 @@ async def a2a_dispatch(agent_id: str, raw_request: Dict[str, Any]):
         agent_id=agent_id,
     )
     return JSONResponse(content=response_message)
+
+
+# ---------------------------------------------------------------------------
+# JSON API for other programs (/api/v1): routes and uniform error shape
+# ---------------------------------------------------------------------------
+api_v1.install(app)
 
 
 # Main entry point

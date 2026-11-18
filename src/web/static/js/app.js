@@ -122,6 +122,16 @@ function init() {
     if (generateBtn) {
         generateBtn.addEventListener('click', async () => {
             // Check what we have available for generation
+            // A multi-table dictionary is uploaded but no table is loaded yet
+            if (!currentDictionary && pendingDictionaryTables) {
+                const select = document.getElementById('dictionaryTableSelect');
+                if (!select || !select.value) {
+                    showError(`Your dictionary has ${pendingDictionaryTables.count} tables. Choose one in the "Upload Data Dictionary" box, then generate.`);
+                    return;
+                }
+                await chooseDictionaryTable(select.value, pendingDictionaryTables.fileName);
+                if (!currentDictionary) return;  // loading the table failed; its error is already shown
+            }
             if (!currentFile && !currentDictionary) {
                 showError('Please upload a data file or dictionary first');
                 return;
@@ -1515,8 +1525,11 @@ async function processDictionaryFile(file) {
 
 // A file with several tables (e.g. a FHIR Bundle): let the user pick one.
 // The server keeps the parsed tables, so choosing does not re-upload the file.
+let pendingDictionaryTables = null;  // {fileName, count} while a table still has to be chosen
+
 function showDictionaryTableChooser(data, fileName) {
     currentDictionary = null;
+    pendingDictionaryTables = {fileName: fileName, count: data.table_count};
     const dictionaryInfo = document.getElementById('dictionaryInfo');
     const dictionaryFileName = document.getElementById('dictionaryFileName');
     const dictionaryStats = document.getElementById('dictionaryStats');
@@ -1531,15 +1544,35 @@ function showDictionaryTableChooser(data, fileName) {
     if (details) details.style.display = 'none';
     if (!chooser || !select || !useBtn) return;
 
-    select.innerHTML = '';
-    (data.tables || []).forEach(name => {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        select.appendChild(option);
-    });
+    const filter = document.getElementById('dictionaryTableFilter');
+    const fill = (text) => {
+        const want = (text || '').trim().toLowerCase();
+        const names = (data.tables || []).filter(n => !want || n.toLowerCase().includes(want));
+        select.innerHTML = '';
+        const first = document.createElement('option');
+        first.value = '';
+        first.textContent = want ? `${names.length} match` : `Choose a table (${names.length})`;
+        select.appendChild(first);
+        names.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            select.appendChild(option);
+        });
+        if (want && names.length === 1) select.value = names[0];
+    };
+    fill('');
+    if (filter) {
+        filter.value = '';
+        filter.oninput = () => fill(filter.value);
+    }
     chooser.style.display = 'block';
-    useBtn.onclick = () => chooseDictionaryTable(select.value, fileName);
+    // Picking a name loads it straight away; the button stays for a filter that leaves one match
+    select.onchange = () => chooseDictionaryTable(select.value, fileName);
+    useBtn.onclick = () => {
+        if (!select.value) { showError('Choose a table from the list first'); return; }
+        chooseDictionaryTable(select.value, fileName);
+    };
     updateQuickActionButtons();
 }
 
@@ -1569,6 +1602,7 @@ async function chooseDictionaryTable(table, fileName) {
 // Show a loaded (single-table) dictionary.
 function showLoadedDictionary(data, fileName) {
         currentDictionary = data.dictionary;
+        pendingDictionaryTables = null;
 
         // Update dictionary info display
         const dictionaryInfo = document.getElementById('dictionaryInfo');
@@ -1681,6 +1715,7 @@ function showDictionaryOnlyMode() {
 
 function clearDataDictionary() {
     currentDictionary = null;
+    pendingDictionaryTables = null;
 
     // Hide dictionary info and details
     const dictionaryInfo = document.getElementById('dictionaryInfo');

@@ -652,7 +652,8 @@ def generate_synthetic_data(
             preview_df = synthetic_df.head(preview_rows)
 
             # Convert DataFrame to dict for JSON serialization
-            preview_data = preview_df.to_dict('records')
+            # to_json handles dates, NaN and numpy types; to_dict leaves Timestamps that JSON cannot carry
+            preview_data = json.loads(preview_df.to_json(orient="records", date_format="iso"))
 
             # Generate download data for all files
             download_data = {}
@@ -1215,7 +1216,7 @@ def generate_with_dictionary(
 
             return JSONResponse(content={
                 "status": "success",
-                "preview": preview_df.to_dict('records'),
+                "preview": json.loads(preview_df.to_json(orient="records", date_format="iso")),
                 "total_rows": len(synthetic_df),
                 "total_columns": len(synthetic_df.columns),
                 "column_names": list(synthetic_df.columns),

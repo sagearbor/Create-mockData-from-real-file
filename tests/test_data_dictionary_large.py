@@ -635,3 +635,18 @@ def test_dict_route_upload_of_unusual_existing_shapes_still_loads(name, body, co
     resp = _post("/dictionary/upload", files={"file": (name, body, "application/octet-stream")})
     assert resp.status_code == 200, resp.text
     assert resp.json()["columns_defined"] == columns
+
+
+def test_dict_route_preview_with_date_column_is_json(monkeypatch):
+    """A generated date column (pandas Timestamp) must not break the preview response."""
+    import pandas as pd
+
+    df = pd.DataFrame({"id": [1, 2], "birthDate": pd.to_datetime(["1980-01-02", None])})
+    stub = SimpleNamespace(generate=lambda **k: (df, {}))
+    monkeypatch.setattr(main, "synthetic_generator", stub)
+    resp = _post("/generate-with-dictionary",
+                 data={"preview_only": "true", "num_rows": "2", "table": "Widget"},
+                 files=_dict_file(BUNDLE))
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["preview"]
+    assert rows[0]["birthDate"].startswith("1980-01-02") and rows[1]["birthDate"] is None

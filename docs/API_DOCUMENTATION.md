@@ -338,11 +338,45 @@ curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 }
 ```
 
+### 8. Data dictionaries
+
+`POST /dictionary/upload` (form: `file`, optional `format`, optional `table`),
+`POST /dictionary/table` (form: `table`), `POST /dictionary/validate` and
+`POST /generate-with-dictionary` (both take an optional `table`).
+
+Recognised shapes: CSV/Excel with one row per column; JSON/YAML `{"columns": {...}}`;
+a list of `{"name": ...}` objects; a `{column: type-or-definition}` mapping; JSON Schema
+(`properties`, or several tables in `$defs`/`definitions`); Frictionless Table Schema
+(`fields`); a FHIR StructureDefinition; a FHIR Bundle of StructureDefinitions (one table
+per resource). For FHIR, each element of the snapshot (or the differential when there is
+no snapshot) becomes a column: nested backbone elements are flattened with dotted names
+(`contact.name`), `[x]` choice elements become one column (`deceased`, first type,
+all types in the description), `meta`/`text`/extensions/slices are skipped, `min >= 1`
+means required, and a required code binding with a `a | b | c` short gives allowed values.
+
+Several tables and no `table`: the upload answers `200` with `"status": "choose_table"`
+and `"tables": [...]` (then call `/dictionary/table`, no re-upload); generation answers
+`400` `DictionaryTableRequired` listing the names. Anything that is not a dictionary is
+refused with `400` `UnrecognizedDictionary`.
+
+Limits (environment variables):
+
+- `MOCKDATA_DICTIONARY_MAX_BYTES` (default 64 MB): largest dictionary file; above it `413`
+  `DictionaryTooLarge`.
+- `MOCKDATA_DICTIONARY_PROMPT_MAX_CHARS` (default 60000): dictionary text sent to the AI.
+  Over it, a copy is trimmed (value lists to 20, descriptions to 160/60/none, value lists
+  to 5, then optional columns, then required ones, from the end) and the response says so in
+  `dictionary_trimming` (header `X-Dictionary-Trimmed` on downloads).
+
+If the AI model still refuses the request as too large, the answer is `413`
+`AIRequestTooLargeError` with a plain message (no provider text).
+
 ## Error Responses
 
 The `/api/v1` routes use the single error shape described under "Errors on `/api/v1`"
 above. The older routes return errors in the following format (and, when the AI call
-fails, `{"status": "error", "error": "...", "error_class": "..."}` with `502` or `503`):
+fails, `{"status": "error", "error": "...", "error_class": "..."}` with `502`, `503` or
+`413`; data dictionary problems use the same shape with `400` or `413`):
 
 ```json
 {

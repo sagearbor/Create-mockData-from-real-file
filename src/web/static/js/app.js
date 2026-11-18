@@ -1495,21 +1495,99 @@ async function processDictionaryFile(file) {
         });
 
         if (!response.ok) {
-            throw new Error('Dictionary upload failed');
+            throw new Error(await responseErrorMessage(response));
         }
 
         const data = await response.json();
+        if (data.status === 'choose_table') {
+            showDictionaryTableChooser(data, file.name);
+            return;
+        }
+        showLoadedDictionary(data, file.name);
+        showSuccess('Data dictionary uploaded successfully');
+
+    } catch (error) {
+        showError('Failed to upload dictionary: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// A file with several tables (e.g. a FHIR Bundle): let the user pick one.
+// The server keeps the parsed tables, so choosing does not re-upload the file.
+function showDictionaryTableChooser(data, fileName) {
+    currentDictionary = null;
+    const dictionaryInfo = document.getElementById('dictionaryInfo');
+    const dictionaryFileName = document.getElementById('dictionaryFileName');
+    const dictionaryStats = document.getElementById('dictionaryStats');
+    const chooser = document.getElementById('dictionaryTableChooser');
+    const select = document.getElementById('dictionaryTableSelect');
+    const useBtn = document.getElementById('dictionaryTableUseBtn');
+    const details = document.getElementById('dictionaryDetails');
+
+    if (dictionaryInfo) dictionaryInfo.style.display = 'block';
+    if (dictionaryFileName) dictionaryFileName.textContent = fileName;
+    if (dictionaryStats) dictionaryStats.textContent = `${data.table_count} tables found; none chosen yet`;
+    if (details) details.style.display = 'none';
+    if (!chooser || !select || !useBtn) return;
+
+    select.innerHTML = '';
+    (data.tables || []).forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+    });
+    chooser.style.display = 'block';
+    useBtn.onclick = () => chooseDictionaryTable(select.value, fileName);
+    updateQuickActionButtons();
+}
+
+async function chooseDictionaryTable(table, fileName) {
+    if (!table) return;
+    showLoading(`Loading table ${table}...`);
+    const formData = new FormData();
+    formData.append('table', table);
+    try {
+        const response = await fetch(`${API_BASE}/dictionary/table`, {
+            method: 'POST',
+            body: formData
+        });
+        if (!response.ok) {
+            throw new Error(await responseErrorMessage(response));
+        }
+        const data = await response.json();
+        showLoadedDictionary(data, fileName);
+        showSuccess(`Table ${data.table || table} loaded`);
+    } catch (error) {
+        showError('Failed to load table: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// Show a loaded (single-table) dictionary.
+function showLoadedDictionary(data, fileName) {
         currentDictionary = data.dictionary;
 
         // Update dictionary info display
         const dictionaryInfo = document.getElementById('dictionaryInfo');
         const dictionaryFileName = document.getElementById('dictionaryFileName');
         const dictionaryStats = document.getElementById('dictionaryStats');
+        const chooser = document.getElementById('dictionaryTableChooser');
 
         if (dictionaryInfo) dictionaryInfo.style.display = 'block';
-        if (dictionaryFileName) dictionaryFileName.textContent = file.name;
+        if (dictionaryFileName) {
+            dictionaryFileName.textContent = data.table ? `${fileName} (table ${data.table})` : fileName;
+        }
+        if (chooser) chooser.style.display = data.table_count > 1 ? 'block' : 'none';
         if (dictionaryStats) {
-            dictionaryStats.textContent = `${data.columns_defined} columns defined`;
+            let stats = `${data.columns_defined} columns defined`;
+            const budget = data.prompt_budget;
+            if (budget && budget.trimmed) {
+                stats += ` (large: ${budget.columns_kept} of ${budget.columns_total} columns will be sent to the AI)`;
+            }
+            dictionaryStats.textContent = stats;
         }
 
         // Display dictionary details section
@@ -1520,16 +1598,19 @@ async function processDictionaryFile(file) {
             // Display column definitions
             const columnsDiv = document.getElementById('dictionaryColumns');
             if (columnsDiv) {
+                // Names and values come from the uploaded file: escape before inserting as HTML.
+                const esc = (s) => String(s).replace(/[&<>"']/g, c => (
+                    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
                 columnsDiv.innerHTML = '<h4>Defined Columns:</h4><ul>' +
                     Object.keys(data.dictionary.columns || {}).map(col => {
                         const colDef = data.dictionary.columns[col];
-                        let details = `<li><strong>${col}</strong>: ${colDef.type || 'string'}`;
+                        let details = `<li><strong>${esc(col)}</strong>: ${esc(colDef.type || 'string')}`;
                         if (colDef.constraints) {
                             if (colDef.constraints.min_value !== undefined || colDef.constraints.max_value !== undefined) {
-                                details += ` (range: ${colDef.constraints.min_value || '*'}-${colDef.constraints.max_value || '*'})`;
+                                details += ` (range: ${esc(colDef.constraints.min_value || '*')}-${esc(colDef.constraints.max_value || '*')})`;
                             }
                             if (colDef.constraints.allowed_values) {
-                                details += ` (values: ${colDef.constraints.allowed_values.slice(0, 3).join(', ')}${colDef.constraints.allowed_values.length > 3 ? '...' : ''})`;
+                                details += ` (values: ${esc(colDef.constraints.allowed_values.slice(0, 3).join(', '))}${colDef.constraints.allowed_values.length > 3 ? '...' : ''})`;
                             }
                         }
                         details += '</li>';
@@ -1546,14 +1627,6 @@ async function processDictionaryFile(file) {
 
         // Update quick action buttons
         updateQuickActionButtons();
-
-        showSuccess('Data dictionary uploaded successfully');
-
-    } catch (error) {
-        showError('Failed to upload dictionary: ' + error.message);
-    } finally {
-        hideLoading();
-    }
 }
 
 // Generate from dictionary only
@@ -1586,6 +1659,9 @@ async function generateFromDictionary() {
         const data = await response.json();
         if (data.preview) {
             displayPreview(data);
+        }
+        if (data.dictionary_trimming && data.dictionary_trimming.trimmed) {
+            showError(data.dictionary_trimming.message);  // say it, don't hide it
         }
 
     } catch (error) {

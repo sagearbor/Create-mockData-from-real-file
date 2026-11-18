@@ -650,3 +650,51 @@ def test_dict_route_preview_with_date_column_is_json(monkeypatch):
     assert resp.status_code == 200, resp.text
     rows = resp.json()["preview"]
     assert rows[0]["birthDate"].startswith("1980-01-02") and rows[1]["birthDate"] is None
+
+
+@pytest.mark.parametrize("fmt", ["csv", "json", "excel"])
+def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch, fmt):
+    """Download with reuse_last returns the preview's rows without a second generation."""
+    import pandas as pd
+
+    calls = []
+
+    def generate(**k):
+        calls.append(k)
+        n = len(calls)
+        return pd.DataFrame({"id": [n] * 11, "birthDate": pd.to_datetime(["1980-01-02"] * 11)}), {}
+
+    monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(generate=generate))
+    monkeypatch.setattr(main, "_last_dictionary_generation", {})
+    common = {"num_rows": "11", "table": "Widget", "output_format": fmt}
+    prev = _post("/generate-with-dictionary", data={**common, "preview_only": "true"}, files=_dict_file(BUNDLE))
+    assert prev.status_code == 200, prev.text
+    assert prev.json()["total_rows"] == 11 and len(prev.json()["preview"]) == 10
+    down = _post("/generate-with-dictionary",
+                 data={**common, "preview_only": "false", "reuse_last": "true", "use_stored_dictionary": "true"})
+    assert down.status_code == 200, down.text
+    assert len(calls) == 1  # the download did not generate again
+    if fmt == "csv":
+        assert len(down.text.strip().splitlines()) == 12 and "1980-01-02" in down.text
+    elif fmt == "json":
+        rows = down.json()
+        assert isinstance(rows, list) and len(rows) == 11 and rows[0]["birthDate"].startswith("1980-01-02")
+    else:
+        assert down.content[:2] == b"PK"
+
+
+def test_dict_route_download_without_preview_still_generates(monkeypatch):
+    import pandas as pd
+
+    calls = []
+
+    def generate(**k):
+        calls.append(k)
+        return pd.DataFrame({"id": [1, 2]}), {}
+
+    monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(generate=generate))
+    monkeypatch.setattr(main, "_last_dictionary_generation", {})
+    down = _post("/generate-with-dictionary",
+                 data={"num_rows": "2", "table": "Widget", "preview_only": "false", "reuse_last": "true"},
+                 files=_dict_file(BUNDLE))
+    assert down.status_code == 200 and len(calls) == 1

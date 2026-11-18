@@ -1048,7 +1048,7 @@ function displayPreview(data) {
     // Display info
     const info = document.getElementById('previewInfo');
     const fileCountText = data.file_count > 1 ? `${data.file_count} files generated` : '1 file generated';
-    info.innerHTML = `<strong>${fileCountText}</strong> - Showing preview of first 10 rows (Total: ${data.total_rows} rows × ${data.total_columns} columns)`;
+    info.innerHTML = `<strong>${fileCountText}</strong> - ${data.total_rows} rows × ${data.total_columns} columns generated; the preview below shows the first ${Math.min(10, data.total_rows)}. Download gives all ${data.total_rows}.`;
 
     // Build table
     const thead = document.getElementById('previewHead');
@@ -1375,8 +1375,41 @@ function showGenerationMethodsTooltip(target) {
     }, 100);
 }
 
+// Download for dictionary-only generation: the same rows the preview showed
+async function downloadDictionaryData() {
+    const fileCount = currentSyntheticData?.file_count || parseInt(document.getElementById('fileCount')?.value || 1);
+    showLoading(`Preparing download of ${fileCount} file${fileCount > 1 ? 's' : ''}...`);
+    const formData = new FormData();
+    formData.append('use_stored_dictionary', 'true');
+    formData.append('num_rows', numRows.value || '100');
+    formData.append('output_format', outputFormat.value);
+    formData.append('file_count', fileCount);
+    formData.append('preview_only', 'false');
+    formData.append('reuse_last', 'true');
+    try {
+        const response = await fetch(`${API_BASE}/generate-with-dictionary`, {method: 'POST', body: formData});
+        if (!response.ok) {
+            throw new Error(await responseErrorMessage(response));
+        }
+        const contentType = response.headers.get('content-type') || '';
+        const blob = await response.blob();
+        const ext = contentType.includes('application/zip') ? 'zip'
+            : outputFormat.value === 'excel' ? 'xlsx' : outputFormat.value;
+        downloadFile(blob, `synthetic_data_${new Date().toISOString().slice(0,10)}.${ext}`);
+    } catch (error) {
+        showError('Download failed: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
 // Download generated data
 async function downloadGeneratedData(preview = false) {
+    // Generated from a dictionary alone: there is no data file to send back
+    if (!currentFile && !window.currentEditedData && currentDictionary) {
+        await downloadDictionaryData();
+        return;
+    }
     if (!currentFile && !window.currentEditedData) {
         showError('No data to download');
         return;

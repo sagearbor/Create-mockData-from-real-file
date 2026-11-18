@@ -42,6 +42,8 @@ data_loader = DataLoader()
 metadata_extractor = None  # Will be created with safety_mode per request
 cache_manager = CacheManager()
 data_dictionary = DataDictionary()
+# Rows of the last dictionary-only preview, so the download that follows sends the same rows
+_last_dictionary_generation: Dict[str, Any] = {}
 
 # Initialize synthetic generator (OpenAI client will be added when API key is provided)
 synthetic_generator = None
@@ -1137,9 +1139,12 @@ def generate_with_dictionary(
     output_format: str = Form("csv"),
     file_count: int = Form(1),
     preview_only: bool = Form(False),
-    table: Optional[str] = Form(None)
+    table: Optional[str] = Form(None),
+    reuse_last: bool = Form(False)
 ):
     """
+    ``reuse_last``: for a download right after a preview, send the rows that preview
+    showed instead of generating a different set (falls back to generating).
     Generate synthetic data using data dictionary constraints.
 
     The dictionary text sent to the model is kept under the prompt budget
@@ -1210,6 +1215,7 @@ def generate_with_dictionary(
                 match_threshold=0.9
             )
             generation_info["dictionary_trimming"] = dictionary_trimming
+            _last_dictionary_generation.update(df=synthetic_df, info=generation_info, num_rows=num_rows)
 
             preview_rows = min(10, len(synthetic_df))
             preview_df = synthetic_df.head(preview_rows)
@@ -1227,15 +1233,19 @@ def generate_with_dictionary(
             })
 
         # Generate actual files
+        last = _last_dictionary_generation
+        reusable = reuse_last and last.get("df") is not None and last.get("num_rows") == num_rows
+
+        def _generate(index):
+            if reusable and index == 0:
+                return last["df"], dict(last["info"])
+            return synthetic_generator.generate(metadata=metadata, num_rows=num_rows, match_threshold=0.9)
+
         if file_count > 1:
             synthetic_files = []
             zip_info = None
             for i in range(file_count):
-                synthetic_df, zip_info = synthetic_generator.generate(
-                    metadata=metadata,
-                    num_rows=num_rows,
-                    match_threshold=0.9
-                )
+                synthetic_df, zip_info = _generate(i)
                 zip_info["dictionary_trimming"] = dictionary_trimming
                 synthetic_files.append((f"synthetic_{i+1:03d}", synthetic_df))
 
@@ -1263,13 +1273,17 @@ def generate_with_dictionary(
             )
         else:
             # Single file
-            synthetic_df, generation_info = synthetic_generator.generate(
-                metadata=metadata,
-                num_rows=num_rows,
-                match_threshold=0.9
-            )
+            synthetic_df, generation_info = _generate(0)
             generation_info["dictionary_trimming"] = dictionary_trimming
 
+            if output_format == "json" and reuse_last:
+                # A download: the file holds the rows themselves, not a status wrapper
+                rows = synthetic_df.to_json(orient="records", date_format="iso", indent=2)
+                return StreamingResponse(
+                    io.BytesIO(rows.encode()),
+                    media_type="application/json",
+                    headers=_download_headers("dictionary_generated.json", generation_info)
+                )
             if output_format == "json":
                 output_data = synthetic_df.to_json(orient="records")
                 return JSONResponse(content={

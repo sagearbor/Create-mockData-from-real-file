@@ -161,7 +161,8 @@ class CacheManager:
     def find_similar_cached(
         self, 
         metadata: Dict[str, Any], 
-        match_threshold: float = 0.8
+        match_threshold: float = 0.8,
+        num_rows: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Find similar cached generation script based on metadata.
@@ -169,6 +170,9 @@ class CacheManager:
         Args:
             metadata: Metadata dictionary
             match_threshold: Similarity threshold (0-1)
+            num_rows: Rows wanted. A script writes a fixed number of rows, so entries
+                recorded for a different count are skipped (entries with no recorded
+                count are still offered; the caller checks the result's length)
             
         Returns:
             Cached entry if found, None otherwise
@@ -176,7 +180,10 @@ class CacheManager:
         # First, try exact format match
         format_hash = self.generate_format_hash(metadata)
         if format_hash in self.cache_index:
-            exact_matches = self.cache_index[format_hash]
+            exact_matches = [
+                e for e in self.cache_index[format_hash]
+                if num_rows is None or e.get("num_rows") in (None, num_rows)
+            ]
             
             if match_threshold >= 0.95:
                 # Try full hash for exact match
@@ -212,7 +219,8 @@ class CacheManager:
         self, 
         metadata: Dict[str, Any], 
         generation_code: str,
-        synthetic_data: Any = None
+        synthetic_data: Any = None,
+        num_rows: Optional[int] = None
     ) -> str:
         """
         Cache a generation script with its metadata.
@@ -266,6 +274,7 @@ class CacheManager:
             "embedding_file": str(embedding_file),
             "data_file": str(data_file) if data_file else None,
             "timestamp": timestamp,
+            "num_rows": num_rows,
             "version": settings.generator_version
         })
         

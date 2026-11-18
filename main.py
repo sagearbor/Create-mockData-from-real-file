@@ -75,13 +75,18 @@ def _recall_preview(preview_id, num_rows):
 synthetic_generator = None
 
 
-def _run_cached_code(cached_result):
-    """Run a cached script. Returns None, and drops the entry, if it no longer runs,
-    so the caller generates fresh code instead of failing the request."""
+def _run_cached_code(cached_result, num_rows=None):
+    """Run a cached script. Returns None when it cannot serve this request, so the
+    caller generates fresh code instead: the script no longer runs (the entry is
+    dropped), or it writes a different number of rows than asked for (entry kept)."""
     if not (cached_result and "generation_code" in cached_result):
         return None
     try:
-        return synthetic_generator._execute_generation_code(cached_result["generation_code"])
+        df = synthetic_generator._execute_generation_code(cached_result["generation_code"])
+        if num_rows is not None and len(df) != num_rows:
+            logger.info("Cached generation script makes a different number of rows; generating new code")
+            return None
+        return df
     except CodeExecutionError:
         logger.warning("Cached generation script failed to run; generating new code instead")
         synthetic_generator.forget_cached(cached_result)
@@ -665,7 +670,7 @@ def generate_synthetic_data(
         if preview_only:
             # Generate single synthetic dataset
             code_start = time.time()
-            synthetic_df = _run_cached_code(cached_result)
+            synthetic_df = _run_cached_code(cached_result, num_rows or metadata["structure"]["shape"]["rows"])
             if synthetic_df is not None:
                 logger.info("Used cached generation script for preview")
                 all_timings['code_execution'] = time.time() - code_start
@@ -748,7 +753,7 @@ def generate_synthetic_data(
 
             zip_info = None
             for i in range(file_count):
-                synthetic_df = _run_cached_code(cached_result)
+                synthetic_df = _run_cached_code(cached_result, num_rows or metadata["structure"]["shape"]["rows"])
                 if synthetic_df is not None:
                     logger.info(f"Used cached generation script for file {i+1}/{file_count}")
                     zip_info = zip_info or {"method": "cached"}
@@ -792,7 +797,7 @@ def generate_synthetic_data(
 
         # Single file generation (existing logic)
         code_start = time.time()
-        synthetic_df = _run_cached_code(cached_result)
+        synthetic_df = _run_cached_code(cached_result, num_rows or metadata["structure"]["shape"]["rows"])
         if synthetic_df is not None:
             logger.info("Used cached generation script")
             code_execution_time = time.time() - code_start
@@ -941,7 +946,7 @@ async def generate_with_sse(
             synthetic_df = None
             if cache_hit:
                 exec_start = time.time()
-                synthetic_df = await run_in_threadpool(_run_cached_code, cached_result)
+                synthetic_df = await run_in_threadpool(_run_cached_code, cached_result, num_rows or metadata["structure"]["shape"]["rows"])
 
             if synthetic_df is not None:
                 yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'skipped'})}\n\n"

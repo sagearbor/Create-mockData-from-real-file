@@ -735,7 +735,7 @@ def test_generator_dictionary_only_matching_columns_is_one_model_call():
     assert list(df.columns) == ["a", "b"] and len(seq.calls) == 1 and "regenerated" not in info
 
 
-def test_generator_code_that_fails_to_run_is_retried_once():
+def test_generator_code_that_fails_to_run_is_corrected():
     seq = _Sequence("raise SystemExit(1)\n", _df_code(["a", "b"]))
     df, info = _generator(seq).generate(metadata=_dict_only_metadata(["a", "b"]), num_rows=3)
     assert list(df.columns) == ["a", "b"] and len(seq.calls) == 2 and info["retried_after_failure"]
@@ -826,3 +826,36 @@ def test_generate_route_falls_back_when_cached_script_fails(monkeypatch):
                  files={"file": ("d.csv", b"a\n1\n2\n", "text/csv")})
     assert resp.status_code == 200, resp.text
     assert len(forgotten) == 1 and resp.text.strip().splitlines() == ["a", "1", "2"]
+
+
+def test_cached_code_for_another_row_count_is_not_reused(tmp_path):
+    def rows(n):
+        return f"import pandas as pd\nresult = pd.DataFrame({{'a': [1] * {n}, 'b': [1] * {n}}})\n"
+
+    seq = _Sequence(rows(3), rows(5))
+    gen = _real_cache_generator(seq, tmp_path)
+    meta = _dict_only_metadata(["a", "b"])
+    assert len(gen.generate(metadata=meta, num_rows=3)[0]) == 3
+    df, info = gen.generate(metadata=meta, num_rows=5)  # same file shape, different count
+    assert len(df) == 5 and info["method"] == "llm" and len(seq.calls) == 2
+    # both scripts stay cached, each served for its own count without a model call
+    assert len(gen.generate(metadata=meta, num_rows=3)[0]) == 3
+    assert len(gen.generate(metadata=meta, num_rows=5)[0]) == 5
+    assert len(seq.calls) == 2
+
+    # an old entry with no recorded count is caught by the length check
+    legacy = _real_cache_generator(_Sequence(rows(5)), tmp_path / "legacy")
+    legacy.cache_manager.cache_generation(meta, rows(3))
+    assert len(legacy.generate(metadata=meta, num_rows=5)[0]) == 5
+
+
+def test_sandbox_error_text_reaches_neither_the_response_nor_the_log(monkeypatch, caplog):
+    seq = _Sequence("raise ValueError('boom-marker-xyz')\n")
+    monkeypatch.setattr(main, "synthetic_generator", _generator(seq))
+    monkeypatch.setattr(main.cache_manager, "find_similar_cached", lambda *a, **k: None)
+    with caplog.at_level("DEBUG"):
+        resp = _post("/generate", data={"output_format": "csv", "preview_only": "false"},
+                     files={"file": ("d.csv", b"a\n1\n2\n", "text/csv")})
+    assert resp.status_code == 502 and len(seq.calls) == 3
+    assert "boom-marker-xyz" in seq.calls[1]["messages"][1]["content"]  # the model is told
+    assert "boom-marker-xyz" not in resp.text and "boom-marker-xyz" not in caplog.text

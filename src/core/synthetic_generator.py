@@ -80,13 +80,13 @@ class LLMOutputError(AIGenerationError):
 class CodeExecutionError(AIGenerationError):
     """The AI-written (or cached) generation code failed in the sandbox.
 
-    ``detail`` is the end of the sandbox's error output. It is only ever handed back
+    ``sandbox_stderr`` is the end of the sandbox's error output. It is only ever handed back
     to the model so it can correct its own code: never logged, never shown to the user.
     """
 
     def __init__(self, reason: str, *, detail: str = "", **kwargs):
         super().__init__(reason, **kwargs)
-        self.detail = detail
+        self.sandbox_stderr = detail
 
 
 # How many times the model is asked to correct code that failed to run.
@@ -182,7 +182,8 @@ class SyntheticDataGenerator:
         if use_cached:
             cache_start = time.time()
             try:
-                cached_entry = self.cache_manager.find_similar_cached(metadata, match_threshold=0.95)
+                cached_entry = self.cache_manager.find_similar_cached(
+                    metadata, match_threshold=0.95, num_rows=num_rows)
                 cache_check_time = time.time() - cache_start
                 step_timings['cache_check'] = cache_check_time
 
@@ -226,6 +227,13 @@ class SyntheticDataGenerator:
         while True:
             try:
                 synthetic_df = self._execute_generation_code(generation_code)
+                if generation_method == 'cached' and len(synthetic_df) != num_rows:
+                    # A cached script writes the row count it was made for. It is a good
+                    # script, just not for this request: leave it cached, write new code.
+                    self.logger.info("Cached code makes a different number of rows; generating new code")
+                    generation_code, generation_method, _ = self._generate_code_with_llm(
+                        metadata, num_rows, match_threshold, operation="generate_code")
+                    continue
                 break
             except CodeExecutionError as failure:
                 if generation_method == 'cached':
@@ -240,7 +248,7 @@ class SyntheticDataGenerator:
                 retried_after_failure = True
                 generation_code, generation_method, _ = self._generate_code_with_llm(
                     metadata, num_rows, match_threshold, operation="regenerate_code",
-                    failed_error=failure.detail)
+                    failed_error=failure.sandbox_stderr)
         step_timings['code_execution'] = time.time() - exec_start
         
         # Validate the generated data
@@ -267,7 +275,7 @@ class SyntheticDataGenerator:
         if validation_passed:
             self.logger.info(f"Successfully generated synthetic data with shape {synthetic_df.shape}")
             if generation_method == 'llm':
-                self._remember_code(metadata, generation_code)
+                self._remember_code(metadata, generation_code, num_rows)
             return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
@@ -286,13 +294,13 @@ class SyntheticDataGenerator:
             if not self._validate_synthetic_data(second_df, metadata):
                 generation_info["structure_mismatch"] = True
             else:
-                self._remember_code(metadata, generation_code)
+                self._remember_code(metadata, generation_code, num_rows)
             return second_df, generation_info
 
-    def _remember_code(self, metadata: Dict[str, Any], code: str) -> None:
+    def _remember_code(self, metadata: Dict[str, Any], code: str, num_rows: Optional[int] = None) -> None:
         """Cache code only once it has run and produced the expected columns."""
         try:
-            self.cache_manager.cache_generation(metadata, code)
+            self.cache_manager.cache_generation(metadata, code, num_rows=num_rows)
             self.logger.info("Cached generation code for future use")
         except Exception as e:
             self.logger.warning(f"Failed to cache: {type(e).__name__}")

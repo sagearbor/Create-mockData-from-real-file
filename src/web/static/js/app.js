@@ -1048,7 +1048,7 @@ function displayPreview(data) {
     // Display info
     const info = document.getElementById('previewInfo');
     const fileCountText = data.file_count > 1 ? `${data.file_count} files generated` : '1 file generated';
-    info.innerHTML = `<strong>${fileCountText}</strong> - Showing preview of first 10 rows (Total: ${data.total_rows} rows × ${data.total_columns} columns)`;
+    info.innerHTML = `<strong>${fileCountText}</strong> - ${data.total_rows} rows × ${data.total_columns} columns generated; the preview below shows the first ${Math.min(10, data.total_rows)}. Download gives all ${data.total_rows}.`;
 
     // Build table
     const thead = document.getElementById('previewHead');
@@ -1073,9 +1073,11 @@ function displayPreview(data) {
         data.column_names.forEach(col => {
             const td = document.createElement('td');
             let value = row[col];
-            // Format dates if they look like ISO strings
-            if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}/)) {
-                value = new Date(value).toLocaleDateString();
+            // A midnight ISO timestamp is a plain date: show just the date, as the file holds it.
+            // Anything else (ranges like "2024-01-01 to 2024-01-02", real times) is shown unchanged.
+            if (typeof value === 'string') {
+                const m = value.match(/^(\d{4}-\d{2}-\d{2})T00:00:00(\.0+)?(Z|[+-]00:?00)?$/);
+                if (m) value = m[1];
             }
             td.textContent = value !== null && value !== undefined ? value : '';
             tr.appendChild(td);
@@ -1375,8 +1377,43 @@ function showGenerationMethodsTooltip(target) {
     }, 100);
 }
 
+// Download for dictionary-only generation: the same rows the preview showed
+async function downloadDictionaryData() {
+    const fileCount = currentSyntheticData?.file_count || parseInt(document.getElementById('fileCount')?.value || 1);
+    showLoading(`Preparing download of ${fileCount} file${fileCount > 1 ? 's' : ''}...`);
+    const formData = new FormData();
+    formData.append('use_stored_dictionary', 'true');
+    formData.append('num_rows', numRows.value || '100');
+    formData.append('output_format', outputFormat.value);
+    formData.append('file_count', fileCount);
+    formData.append('preview_only', 'false');
+    if (currentSyntheticData?.preview_id) {
+        formData.append('preview_id', currentSyntheticData.preview_id);
+    }
+    try {
+        const response = await fetch(`${API_BASE}/generate-with-dictionary`, {method: 'POST', body: formData});
+        if (!response.ok) {
+            throw new Error(await responseErrorMessage(response));
+        }
+        const contentType = response.headers.get('content-type') || '';
+        const blob = await response.blob();
+        const ext = contentType.includes('application/zip') ? 'zip'
+            : outputFormat.value === 'excel' ? 'xlsx' : outputFormat.value;
+        downloadFile(blob, `synthetic_data_${new Date().toISOString().slice(0,10)}.${ext}`);
+    } catch (error) {
+        showError('Download failed: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
 // Download generated data
 async function downloadGeneratedData(preview = false) {
+    // Generated from a dictionary alone: there is no data file to send back
+    if (!currentFile && !window.currentEditedData && currentDictionary) {
+        await downloadDictionaryData();
+        return;
+    }
     if (!currentFile && !window.currentEditedData) {
         showError('No data to download');
         return;

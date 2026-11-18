@@ -203,9 +203,17 @@ class SyntheticDataGenerator:
             # Cache hit - already set llm_response to 0 above
             pass
         
-        # Execute the code safely
+        # Execute the code safely. Model-written code sometimes fails to run: ask once more.
         exec_start = time.time()
-        synthetic_df = self._execute_generation_code(generation_code)
+        retried_after_failure = False
+        try:
+            synthetic_df = self._execute_generation_code(generation_code)
+        except CodeExecutionError:
+            self.logger.warning("Generated code failed to run; asking the model for new code once")
+            retried_after_failure = True
+            generation_code, generation_method, _ = self._generate_code_with_llm(
+                metadata, num_rows, match_threshold, operation="regenerate_code")
+            synthetic_df = self._execute_generation_code(generation_code)
         step_timings['code_execution'] = time.time() - exec_start
         
         # Validate the generated data
@@ -224,6 +232,8 @@ class SyntheticDataGenerator:
             "use_cached": use_cached,
             "step_timings": step_timings
         }
+        if retried_after_failure:
+            generation_info["retried_after_failure"] = True
         # Log usage for analytics
         self._log_usage(generation_method, metadata, num_rows, step_timings)
 
@@ -232,13 +242,21 @@ class SyntheticDataGenerator:
             return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
-            # Try again with stricter threshold
-            generation_code, generation_method, _ = self._generate_code_with_llm(
-                metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code")
-            synthetic_df = self._execute_generation_code(generation_code)
+            # Try again with stricter threshold. If that attempt cannot be run, keep the
+            # first result (it ran) and say its columns differ, rather than return nothing.
+            try:
+                generation_code, generation_method, _ = self._generate_code_with_llm(
+                    metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code")
+                second_df = self._execute_generation_code(generation_code)
+            except AIGenerationError as e:
+                self.logger.warning(f"Regeneration failed ({type(e).__name__}); keeping the first result")
+                generation_info["structure_mismatch"] = True
+                return synthetic_df, generation_info
             generation_info["method"] = generation_method
             generation_info["regenerated"] = True
-            return synthetic_df, generation_info
+            if not self._validate_synthetic_data(second_df, metadata):
+                generation_info["structure_mismatch"] = True
+            return second_df, generation_info
     
     def _generate_code_with_llm(
         self,
@@ -616,14 +634,21 @@ class SyntheticDataGenerator:
             True if validation passes
         """
         try:
+            # Expected column names: from the data file's structure, or, when generating from a
+            # dictionary alone (no structure columns), from the dictionary's column names.
+            expected_names = [col['name'] for col in metadata['structure']['columns']]
+            if not expected_names:
+                expected_names = list(metadata.get('expected_columns') or [])
+            if not expected_names:
+                return len(df.columns) > 0
+
             # Check column count
-            expected_cols = len(metadata['structure']['columns'])
+            expected_cols = len(expected_names)
             if len(df.columns) != expected_cols:
                 self.logger.warning(f"Column count mismatch: expected {expected_cols}, got {len(df.columns)}")
                 return False
             
             # Check column names
-            expected_names = [col['name'] for col in metadata['structure']['columns']]
             missing_cols = set(expected_names) - set(df.columns)
             if missing_cols:
                 self.logger.warning(f"Missing columns: {len(missing_cols)}")

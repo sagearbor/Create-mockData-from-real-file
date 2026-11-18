@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 import json
 import io
 import time
+import secrets
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -42,8 +43,30 @@ data_loader = DataLoader()
 metadata_extractor = None  # Will be created with safety_mode per request
 cache_manager = CacheManager()
 data_dictionary = DataDictionary()
-# Rows of the last dictionary-only preview, so the download that follows sends the same rows
-_last_dictionary_generation: Dict[str, Any] = {}
+# Rows of recent dictionary-only previews, so the download that follows sends the same rows.
+# Keyed by an unguessable id handed only to the browser that made the preview; a few
+# entries, each dropped after 30 minutes.
+_dictionary_previews: Dict[str, Dict[str, Any]] = {}
+_PREVIEW_KEEP_SECONDS = 1800
+_PREVIEW_KEEP_COUNT = 20
+
+
+def _remember_preview(df, info, num_rows) -> str:
+    now = time.time()
+    for key in [k for k, v in _dictionary_previews.items() if now - v["at"] > _PREVIEW_KEEP_SECONDS]:
+        _dictionary_previews.pop(key, None)
+    while len(_dictionary_previews) >= _PREVIEW_KEEP_COUNT:
+        _dictionary_previews.pop(min(_dictionary_previews, key=lambda k: _dictionary_previews[k]["at"]), None)
+    preview_id = secrets.token_urlsafe(24)
+    _dictionary_previews[preview_id] = {"df": df, "info": info, "num_rows": num_rows, "at": now}
+    return preview_id
+
+
+def _recall_preview(preview_id, num_rows):
+    entry = _dictionary_previews.get(preview_id or "")
+    if not entry or time.time() - entry["at"] > _PREVIEW_KEEP_SECONDS or entry["num_rows"] != num_rows:
+        return None
+    return entry
 
 # Initialize synthetic generator (OpenAI client will be added when API key is provided)
 synthetic_generator = None
@@ -1140,11 +1163,12 @@ def generate_with_dictionary(
     file_count: int = Form(1),
     preview_only: bool = Form(False),
     table: Optional[str] = Form(None),
-    reuse_last: bool = Form(False)
+    preview_id: Optional[str] = Form(None)
 ):
     """
-    ``reuse_last``: for a download right after a preview, send the rows that preview
-    showed instead of generating a different set (falls back to generating).
+    ``preview_id``: the id a preview response returned. A download that sends it gets the
+    rows that preview showed instead of a newly generated set (falls back to generating
+    if the id is unknown or has expired).
     Generate synthetic data using data dictionary constraints.
 
     The dictionary text sent to the model is kept under the prompt budget
@@ -1203,6 +1227,11 @@ def generate_with_dictionary(
         # Apply dictionary constraints to metadata
         metadata = data_dictionary.apply_to_metadata(metadata, dictionary)
 
+        # With no data file there are no structure columns: the check after generation
+        # compares against the dictionary's column names instead.
+        if not metadata.get("structure", {}).get("columns"):
+            metadata["expected_columns"] = list((dictionary.get("columns") or {}).keys())
+
         # Add dictionary constraints to generation prompt
         if "generation_constraints" not in metadata:
             metadata["generation_constraints"] = data_dictionary.to_generation_constraints(dictionary)
@@ -1215,7 +1244,7 @@ def generate_with_dictionary(
                 match_threshold=0.9
             )
             generation_info["dictionary_trimming"] = dictionary_trimming
-            _last_dictionary_generation.update(df=synthetic_df, info=generation_info, num_rows=num_rows)
+            new_preview_id = _remember_preview(synthetic_df, generation_info, num_rows)
 
             preview_rows = min(10, len(synthetic_df))
             preview_df = synthetic_df.head(preview_rows)
@@ -1229,15 +1258,15 @@ def generate_with_dictionary(
                 "file_count": file_count,
                 "dictionary_applied": True,
                 "dictionary_trimming": dictionary_trimming,
+                "preview_id": new_preview_id,
                 "generation_info": generation_info
             })
 
         # Generate actual files
-        last = _last_dictionary_generation
-        reusable = reuse_last and last.get("df") is not None and last.get("num_rows") == num_rows
+        last = _recall_preview(preview_id, num_rows)
 
         def _generate(index):
-            if reusable and index == 0:
+            if last and index == 0:
                 return last["df"], dict(last["info"])
             return synthetic_generator.generate(metadata=metadata, num_rows=num_rows, match_threshold=0.9)
 
@@ -1276,7 +1305,7 @@ def generate_with_dictionary(
             synthetic_df, generation_info = _generate(0)
             generation_info["dictionary_trimming"] = dictionary_trimming
 
-            if output_format == "json" and reuse_last:
+            if output_format == "json" and preview_id:
                 # A download: the file holds the rows themselves, not a status wrapper
                 rows = synthetic_df.to_json(orient="records", date_format="iso", indent=2)
                 return StreamingResponse(

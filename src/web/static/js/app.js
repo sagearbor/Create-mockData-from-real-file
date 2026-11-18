@@ -1385,7 +1385,9 @@ async function downloadDictionaryData() {
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');
-    formData.append('reuse_last', 'true');
+    if (currentSyntheticData?.preview_id) {
+        formData.append('preview_id', currentSyntheticData.preview_id);
+    }
     try {
         const response = await fetch(`${API_BASE}/generate-with-dictionary`, {method: 'POST', body: formData});
         if (!response.ok) {

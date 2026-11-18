@@ -654,7 +654,7 @@ def test_dict_route_preview_with_date_column_is_json(monkeypatch):
 
 @pytest.mark.parametrize("fmt", ["csv", "json", "excel"])
 def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch, fmt):
-    """Download with reuse_last returns the preview's rows without a second generation."""
+    """Download with the preview id returns the preview's rows without a second generation."""
     import pandas as pd
 
     calls = []
@@ -665,15 +665,20 @@ def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch,
         return pd.DataFrame({"id": [n] * 11, "birthDate": pd.to_datetime(["1980-01-02"] * 11)}), {}
 
     monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(generate=generate))
-    monkeypatch.setattr(main, "_last_dictionary_generation", {})
+    monkeypatch.setattr(main, "_dictionary_previews", {})
     common = {"num_rows": "11", "table": "Widget", "output_format": fmt}
     prev = _post("/generate-with-dictionary", data={**common, "preview_only": "true"}, files=_dict_file(BUNDLE))
     assert prev.status_code == 200, prev.text
     assert prev.json()["total_rows"] == 11 and len(prev.json()["preview"]) == 10
     down = _post("/generate-with-dictionary",
-                 data={**common, "preview_only": "false", "reuse_last": "true", "use_stored_dictionary": "true"})
+                 data={**common, "preview_only": "false", "preview_id": prev.json()["preview_id"]})
     assert down.status_code == 200, down.text
     assert len(calls) == 1  # the download did not generate again
+    # someone without the id gets a newly generated set, never the previewed rows
+    other = _post("/generate-with-dictionary", data={**common, "preview_only": "false", "preview_id": "guess"})
+    assert other.status_code == 200 and len(calls) == 2
+    if fmt == "csv":
+        assert other.text.strip().splitlines()[1].startswith("2,")
     if fmt == "csv":
         assert len(down.text.strip().splitlines()) == 12 and "1980-01-02" in down.text
     elif fmt == "json":
@@ -693,8 +698,49 @@ def test_dict_route_download_without_preview_still_generates(monkeypatch):
         return pd.DataFrame({"id": [1, 2]}), {}
 
     monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(generate=generate))
-    monkeypatch.setattr(main, "_last_dictionary_generation", {})
+    monkeypatch.setattr(main, "_dictionary_previews", {})
     down = _post("/generate-with-dictionary",
-                 data={"num_rows": "2", "table": "Widget", "preview_only": "false", "reuse_last": "true"},
+                 data={"num_rows": "2", "table": "Widget", "preview_only": "false", "preview_id": "unknown"},
                  files=_dict_file(BUNDLE))
     assert down.status_code == 200 and len(calls) == 1
+
+
+def _df_code(columns):
+    cols = ", ".join(f"'{c}': [1] * 3" for c in columns)
+    return f"import pandas as pd\nresult = pd.DataFrame({{{cols}}})\n"
+
+
+class _Sequence:
+    """Fake chat.completions answering with each given code in turn."""
+
+    def __init__(self, *contents):
+        self.contents, self.calls = list(contents), []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        content = self.contents[min(len(self.calls), len(self.contents)) - 1]
+        msg = SimpleNamespace(content=content)
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=msg)])
+
+
+def _dict_only_metadata(names):
+    return {"structure": {"columns": [], "shape": {"rows": 3, "columns": len(names)}},
+            "statistics": {}, "expected_columns": list(names)}
+
+
+def test_generator_dictionary_only_matching_columns_is_one_model_call():
+    seq = _Sequence(_df_code(["a", "b"]))
+    df, info = _generator(seq).generate(metadata=_dict_only_metadata(["a", "b"]), num_rows=3)
+    assert list(df.columns) == ["a", "b"] and len(seq.calls) == 1 and "regenerated" not in info
+
+
+def test_generator_code_that_fails_to_run_is_retried_once():
+    seq = _Sequence("raise SystemExit(1)\n", _df_code(["a", "b"]))
+    df, info = _generator(seq).generate(metadata=_dict_only_metadata(["a", "b"]), num_rows=3)
+    assert list(df.columns) == ["a", "b"] and len(seq.calls) == 2 and info["retried_after_failure"]
+
+
+def test_generator_keeps_first_result_when_regeneration_cannot_run():
+    seq = _Sequence(_df_code(["a", "extra"]), "raise SystemExit(1)\n")
+    df, info = _generator(seq).generate(metadata=_dict_only_metadata(["a", "b"]), num_rows=3)
+    assert list(df.columns) == ["a", "extra"] and info["structure_mismatch"] is True

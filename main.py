@@ -26,8 +26,15 @@ from src.core.data_loader import DataLoader
 from src.core.metadata_extractor import MetadataExtractor
 from src.core.synthetic_generator import SyntheticDataGenerator, AIGenerationError
 from src.core.cache_manager import CacheManager
-from src.core.data_dictionary import DataDictionary
-from src.utils.config import settings
+from src.core.data_dictionary import (
+    DataDictionary,
+    DictionaryError,
+    DictionaryTooLarge,
+    NoDictionaryLoaded,
+    max_dictionary_bytes,
+)
+from src.utils.config import settings, APP_VERSION
+from src.api import v1 as api_v1
 from src.utils.logger import logger
 
 # Initialize components
@@ -85,7 +92,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="BYOD Synthetic Data Generator",
     description="Generate privacy-safe synthetic data that preserves statistical properties",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 
@@ -93,6 +100,10 @@ app = FastAPI(
 # Per-request action_id + Easy Auth user for LLM telemetry (dcri_llm).
 from src.dcri_llm import asgi_middleware as _dcri_llm_middleware
 app.add_middleware(_dcri_llm_middleware)
+
+# /api/v1 only: optional X-API-Key check and request size limit. Added before
+# CORS so CORS stays outermost and 401/413 answers still carry CORS headers.
+app.add_middleware(api_v1.ApiV1Guard)
 
 app.add_middleware(
     CORSMiddleware,
@@ -113,13 +124,66 @@ async def ai_generation_error_handler(request: Request, exc: AIGenerationError):
     )
 
 
+@app.exception_handler(DictionaryError)
+async def dictionary_error_handler(request: Request, exc: DictionaryError):
+    """Dictionary unreadable, ambiguous or too big: 4xx in the same error shape."""
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"status": "error", "error": str(exc), "error_class": exc.error_class},
+    )
+
+
 def _download_headers(filename: str, generation_info: Optional[Dict[str, Any]]) -> Dict[str, str]:
     """Headers for file downloads: say how the data was made (llm or cached)."""
     headers = {"Content-Disposition": f"attachment; filename={filename}"}
     method = (generation_info or {}).get("method")
     if method:
         headers["X-Generation-Method"] = str(method)
+    trimming = (generation_info or {}).get("dictionary_trimming") or {}
+    if trimming.get("trimmed"):
+        headers["X-Dictionary-Trimmed"] = (
+            f"kept={trimming['columns_kept']}; dropped={trimming['columns_dropped']}; "
+            f"total={trimming['columns_total']}")
     return headers
+
+
+def _read_dictionary_upload(upload: UploadFile) -> bytes:
+    """Read an uploaded dictionary file, refusing (413) anything over the size limit.
+
+    Reads at most limit + 1 bytes, so an oversized upload is never held in memory.
+    """
+    limit = max_dictionary_bytes()
+    too_large = DictionaryTooLarge(
+        f"The dictionary file is larger than the {limit}-byte limit "
+        f"(MOCKDATA_DICTIONARY_MAX_BYTES).")
+    if upload.size is not None and upload.size > limit:
+        raise too_large
+    upload.file.seek(0)
+    content = upload.file.read(limit + 1)
+    if len(content) > limit:
+        raise too_large
+    return content
+
+
+def _dictionary_loaded_response(filename: Optional[str], catalog, table_name: str,
+                                dictionary: Dict[str, Any]) -> Dict[str, Any]:
+    """Success body for a loaded dictionary (one table)."""
+    try:
+        _, budget = data_dictionary.fit_to_prompt_budget(dictionary)
+    except Exception as exc:  # noqa: BLE001 - a preview must never fail an upload
+        logger.warning(f"Prompt budget preview skipped: {type(exc).__name__}")
+        budget = None
+    return {
+        "status": "success",
+        "filename": filename,
+        "columns_defined": len(dictionary.get("columns", {})),
+        "dictionary": dictionary,
+        "dictionary_format": catalog.shape,
+        "table": table_name or None,
+        "table_count": len(catalog.names),
+        "notes": catalog.notes[:20],
+        "prompt_budget": budget,
+    }
 
 @app.get("/")
 async def root():
@@ -133,7 +197,7 @@ async def root():
         # Fallback to API info if HTML not found
         return {
             "service": "BYOD Synthetic Data Generator",
-            "version": "1.0.0",
+            "version": APP_VERSION,
             "status": "running",
             "endpoints": {
                 "upload": "/upload",
@@ -200,7 +264,7 @@ async def api_info():
     """API information endpoint."""
     return {
         "service": "BYOD Synthetic Data Generator",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "status": "running",
         "endpoints": {
             "upload": "/upload",
@@ -588,7 +652,8 @@ def generate_synthetic_data(
             preview_df = synthetic_df.head(preview_rows)
 
             # Convert DataFrame to dict for JSON serialization
-            preview_data = preview_df.to_dict('records')
+            # to_json handles dates, NaN and numpy types; to_dict leaves Timestamps that JSON cannot carry
+            preview_data = json.loads(preview_df.to_json(orient="records", date_format="iso"))
 
             # Generate download data for all files
             download_data = {}
@@ -952,43 +1017,75 @@ async def generate_with_sse(
     )
 
 @app.post("/dictionary/upload")
-async def upload_data_dictionary(
+def upload_data_dictionary(
     file: UploadFile = File(...),
-    format: Optional[str] = Form("auto")
+    format: Optional[str] = Form("auto"),
+    table: Optional[str] = Form(None)
 ):
     """
     Upload and parse a data dictionary.
 
+    Plain ``def``: parsing a large file (tens of MB) runs in the threadpool.
+
     Args:
         file: Data dictionary file (JSON, YAML, CSV, Excel, or text)
         format: Format hint ('json', 'yaml', 'csv', 'excel', 'text', 'auto')
+        table: Which table to load when the file defines several (e.g. a FHIR
+            resource name in a Bundle). Without it such a file answers
+            ``status: "choose_table"`` with the table names; pick one with
+            ``POST /dictionary/table`` (no re-upload needed).
     """
     try:
-        content = await file.read()
+        content = _read_dictionary_upload(file)
 
-        # Parse the dictionary
-        parsed_dict = data_dictionary.parse_dictionary(content, format)
+        # Parse the dictionary into its table(s)
+        catalog = data_dictionary.load_catalog(content, format or "auto", filename=file.filename or "")
+
+        if catalog.is_multi_table and not (table or "").strip():
+            data_dictionary.catalog = catalog
+            data_dictionary.dictionary = {}  # nothing usable until a table is chosen
+            return JSONResponse(content={
+                "status": "choose_table",
+                "filename": file.filename,
+                "dictionary_format": catalog.shape,
+                "table_count": len(catalog.names),
+                "tables": catalog.names,
+                "message": (f"This file defines {len(catalog.names)} tables. Choose one "
+                            f"to generate data for."),
+            })
+
+        table_name, parsed_dict = catalog.select(table)
 
         # Store it for later use
+        data_dictionary.catalog = catalog
         data_dictionary.dictionary = parsed_dict
 
         # Return parsed structure
-        return JSONResponse(content={
-            "status": "success",
-            "filename": file.filename,
-            "columns_defined": len(parsed_dict.get("columns", {})),
-            "dictionary": parsed_dict
-        })
+        return JSONResponse(content=_dictionary_loaded_response(
+            file.filename, catalog, table_name, parsed_dict))
 
+    except DictionaryError:
+        raise
     except Exception as e:
         logger.error(f"Error parsing data dictionary: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/dictionary/table")
+def select_dictionary_table(table: str = Form(...)):
+    """Choose one table of the last uploaded multi-table dictionary (no re-upload)."""
+    catalog = data_dictionary.catalog
+    if catalog is None:
+        raise NoDictionaryLoaded("No data dictionary has been uploaded yet; upload one first.")
+    table_name, parsed_dict = catalog.select(table)
+    data_dictionary.dictionary = parsed_dict
+    return JSONResponse(content=_dictionary_loaded_response(None, catalog, table_name, parsed_dict))
 
 @app.post("/dictionary/validate")
 async def validate_with_dictionary(
     data_file: UploadFile = File(...),
     dictionary_file: Optional[UploadFile] = File(None),
-    use_stored: bool = Form(True)
+    use_stored: bool = Form(True),
+    table: Optional[str] = Form(None)
 ):
     """
     Validate data against a data dictionary.
@@ -1005,8 +1102,9 @@ async def validate_with_dictionary(
 
         # Get dictionary
         if dictionary_file:
-            dict_content = await dictionary_file.read()
-            dictionary = data_dictionary.parse_dictionary(dict_content)
+            dict_content = _read_dictionary_upload(dictionary_file)
+            dictionary = data_dictionary.parse_dictionary(
+                dict_content, filename=dictionary_file.filename or "", table=table)
         elif use_stored and data_dictionary.dictionary:
             dictionary = data_dictionary.dictionary
         else:
@@ -1024,6 +1122,8 @@ async def validate_with_dictionary(
             "valid": len(errors) == 0
         })
 
+    except DictionaryError:
+        raise
     except Exception as e:
         logger.error(f"Error validating data: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -1036,10 +1136,15 @@ def generate_with_dictionary(
     num_rows: Optional[int] = Form(100),
     output_format: str = Form("csv"),
     file_count: int = Form(1),
-    preview_only: bool = Form(False)
+    preview_only: bool = Form(False),
+    table: Optional[str] = Form(None)
 ):
     """
     Generate synthetic data using data dictionary constraints.
+
+    The dictionary text sent to the model is kept under the prompt budget
+    (env MOCKDATA_DICTIONARY_PROMPT_MAX_CHARS); if it had to be trimmed the
+    response says so (``dictionary_trimming``, header ``X-Dictionary-Trimmed``).
 
     Args:
         dictionary_file: Optional dictionary file
@@ -1049,17 +1154,30 @@ def generate_with_dictionary(
         output_format: Output format
         file_count: Number of files to generate
         preview_only: Return preview instead of download
+        table: Which table to use when the dictionary defines several
     """
     try:
         # Get dictionary
+        stored_catalog = data_dictionary.catalog
         if dictionary_file:
-            dict_content = dictionary_file.file.read()
-            dictionary = data_dictionary.parse_dictionary(dict_content)
+            dict_content = _read_dictionary_upload(dictionary_file)
+            catalog = data_dictionary.load_catalog(
+                dict_content, filename=dictionary_file.filename or "")
+            _, dictionary = catalog.select(table)  # several tables, no choice: 400 with names
+            data_dictionary.catalog = catalog
+            data_dictionary.dictionary = dictionary
+        elif use_stored_dictionary and table and stored_catalog is not None:
+            _, dictionary = stored_catalog.select(table)
             data_dictionary.dictionary = dictionary
         elif use_stored_dictionary and data_dictionary.dictionary:
             dictionary = data_dictionary.dictionary
+        elif use_stored_dictionary and stored_catalog is not None and stored_catalog.is_multi_table:
+            stored_catalog.select(None)  # raises DictionaryTableRequired listing the tables
         else:
             raise HTTPException(status_code=400, detail="No data dictionary provided")
+
+        # Only a bounded copy of the dictionary goes into the prompt.
+        dictionary, dictionary_trimming = data_dictionary.fit_to_prompt_budget(dictionary)
 
         # Create metadata from dictionary
         metadata = {
@@ -1091,18 +1209,20 @@ def generate_with_dictionary(
                 num_rows=num_rows,
                 match_threshold=0.9
             )
+            generation_info["dictionary_trimming"] = dictionary_trimming
 
             preview_rows = min(10, len(synthetic_df))
             preview_df = synthetic_df.head(preview_rows)
 
             return JSONResponse(content={
                 "status": "success",
-                "preview": preview_df.to_dict('records'),
+                "preview": json.loads(preview_df.to_json(orient="records", date_format="iso")),
                 "total_rows": len(synthetic_df),
                 "total_columns": len(synthetic_df.columns),
                 "column_names": list(synthetic_df.columns),
                 "file_count": file_count,
                 "dictionary_applied": True,
+                "dictionary_trimming": dictionary_trimming,
                 "generation_info": generation_info
             })
 
@@ -1116,6 +1236,7 @@ def generate_with_dictionary(
                     num_rows=num_rows,
                     match_threshold=0.9
                 )
+                zip_info["dictionary_trimming"] = dictionary_trimming
                 synthetic_files.append((f"synthetic_{i+1:03d}", synthetic_df))
 
             # Create ZIP
@@ -1147,12 +1268,14 @@ def generate_with_dictionary(
                 num_rows=num_rows,
                 match_threshold=0.9
             )
+            generation_info["dictionary_trimming"] = dictionary_trimming
 
             if output_format == "json":
                 output_data = synthetic_df.to_json(orient="records")
                 return JSONResponse(content={
                     "status": "success",
                     "data": json.loads(output_data),
+                    "dictionary_trimming": dictionary_trimming,
                     "generation_info": generation_info
                 })
             elif output_format == "excel":
@@ -1174,7 +1297,7 @@ def generate_with_dictionary(
                     headers=_download_headers("dictionary_generated.csv", generation_info)
                 )
 
-    except (HTTPException, AIGenerationError):
+    except (HTTPException, AIGenerationError, DictionaryError):
         raise
     except Exception as e:
         logger.error(f"Error generating with dictionary: {e}")
@@ -1344,6 +1467,12 @@ async def a2a_dispatch(agent_id: str, raw_request: Dict[str, Any]):
         agent_id=agent_id,
     )
     return JSONResponse(content=response_message)
+
+
+# ---------------------------------------------------------------------------
+# JSON API for other programs (/api/v1): routes and uniform error shape
+# ---------------------------------------------------------------------------
+api_v1.install(app)
 
 
 # Main entry point

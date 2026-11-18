@@ -92,6 +92,12 @@
                         <div id="dictionaryInfo" class="file-info" style="display: none;">
                             <strong>Loaded:</strong> <span id="dictionaryFileName"></span>
                             <div id="dictionaryStats"></div>
+                            <div id="dictionaryTableChooser" style="display: none;">
+                                <label for="dictionaryTableSelect">This file defines several tables. Choose one:</label>
+                                <input type="text" id="dictionaryTableFilter" placeholder="Type to filter, e.g. Patient" autocomplete="off">
+                                <select id="dictionaryTableSelect"></select>
+                                <button type="button" id="dictionaryTableUseBtn" class="btn btn-small btn-secondary">Use this table</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -413,7 +419,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=20261118"></script>
     <script src="/static/js/data-editor.js"></script>
 </body>
 </html>

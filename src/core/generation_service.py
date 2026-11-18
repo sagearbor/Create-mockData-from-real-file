@@ -35,7 +35,7 @@ def _get_generator():
 # Public API — one function per logical operation
 # ---------------------------------------------------------------------------
 
-def generate(payload: Dict[str, Any]) -> Dict[str, Any]:
+def generate(payload: Dict[str, Any], *, raise_ai_errors: bool = False) -> Dict[str, Any]:
     """Generate synthetic data from a base64-encoded source file.
 
     This is the single entry point called by all three transports (REST, MCP,
@@ -61,6 +61,10 @@ def generate(payload: Dict[str, Any]) -> Dict[str, Any]:
               ``"balanced"``.
             * ``use_cache`` (bool, optional) — whether to use the
               generation-code cache.  Defaults to ``True``.
+        raise_ai_errors: When ``True``, an ``AIGenerationError`` propagates
+            to the caller instead of becoming an error dict, so the REST
+            ``/api/v1`` route can report its HTTP status and ``error_class``.
+            MCP and A2A keep the default (``False``).
 
     Returns:
         A JSON-serialisable dict::
@@ -69,6 +73,7 @@ def generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "success",
                 "format": "csv",
                 "shape": [<rows>, <cols>],
+                "columns": ["<column name>", ...],
                 "data": "<csv text or json records>",
                 "generation_info": { ... },
             }
@@ -129,6 +134,7 @@ def generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "success",
                 "format": "json",
                 "shape": [rows, cols],
+                "columns": [str(c) for c in synthetic_df.columns],
                 "data": records,
                 "generation_info": generation_info,
             }
@@ -138,11 +144,17 @@ def generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "success",
                 "format": "csv",
                 "shape": [rows, cols],
+                "columns": [str(c) for c in synthetic_df.columns],
                 "data": csv_text,
                 "generation_info": generation_info,
             }
 
     except Exception as exc:  # noqa: BLE001
+        if raise_ai_errors:
+            from src.core.synthetic_generator import AIGenerationError  # lazy
+
+            if isinstance(exc, AIGenerationError):
+                raise
         logger.error("generation_service.generate error: %s", exc, exc_info=True)
         return {"status": "error", "error": str(exc)}
 

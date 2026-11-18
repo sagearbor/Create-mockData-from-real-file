@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# The one place the service version is written (FastAPI app, /api, /api/v1/version).
+APP_VERSION = "1.0.0"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""

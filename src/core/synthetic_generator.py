@@ -81,6 +81,41 @@ class CodeExecutionError(AIGenerationError):
     """The AI-written (or cached) generation code failed in the sandbox."""
 
 
+class AIRequestTooLargeError(AIGenerationError):
+    """The provider refused the request as too large (over the model's context)."""
+
+    http_status = 413
+
+
+# Provider error codes meaning "the prompt is too big" (OpenAI / Azure OpenAI).
+_TOO_LARGE_CODES = {"context_length_exceeded", "string_above_max_length",
+                    "tokens_limit_reached", "request_too_large"}
+_TOO_LARGE_TEXT = re.compile(
+    r"context[_ ]length|maximum context|too many tokens|reduce the length|request too large", re.I)
+
+
+def _is_request_too_large(exc: Exception) -> bool:
+    """True if a provider error says the request was too large.
+
+    Uses the status, the error ``code`` and, last, the message text; the text is
+    only inspected here and never shown to the user.
+    """
+    status = getattr(exc, "status_code", None)
+    if status == 413:
+        return True
+    if status != 400:
+        return False
+    codes = {getattr(exc, "code", None)}
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        codes.add(body.get("code"))
+        if isinstance(body.get("error"), dict):
+            codes.add(body["error"].get("code"))
+    if codes & _TOO_LARGE_CODES:
+        return True
+    return bool(_TOO_LARGE_TEXT.search(f"{exc} {body or ''}"))
+
+
 class SyntheticDataGenerator:
     """Generate synthetic data based on metadata using LLM."""
 
@@ -296,6 +331,15 @@ class SyntheticDataGenerator:
         except Exception as e:
             # Type/status only: provider messages can echo request content.
             status = getattr(e, "status_code", None)
+            if _is_request_too_large(e):
+                from src.core.data_dictionary import PROMPT_BUDGET_ENV  # lazy
+                err = AIRequestTooLargeError(
+                    "the request was too large for the AI model (the data dictionary or data "
+                    "description sent to it is over the model's limit). Use a smaller table or "
+                    f"fewer columns, or lower {PROMPT_BUDGET_ENV} on the server",
+                    finish_reason=finish_reason, upstream_status=status)
+                self._log_ai_failure(err, operation, model)
+                raise err from e
             reason = f"the Azure OpenAI call failed ({type(e).__name__}"
             reason += f", HTTP {status})" if status else ")"
             err = AIGenerationError(reason, error_class=type(e).__name__,

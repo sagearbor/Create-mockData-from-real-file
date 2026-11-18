@@ -67,6 +67,11 @@
 - [ ] **4.1.4**: Progress indicator for multi-file generation
 
 ### Task 4.2: API Enhancements
+- [x] **4.2.0**: JSON API callable by other programs (`/api/v1`, Jira ST-358) ✅ DONE
+  - Details in `archived/developer_tasklist_ARCHIVED.md`; code in `src/api/v1.py`,
+    tests in `tests/test_api_v1.py`, how to call it in `docs/API_DOCUMENTATION.md`
+  - Still open: not deployed; `MOCKDATA_API_KEY` is not set anywhere yet, so the key
+    check is off until someone sets it on the server
 - [ ] **4.2.1**: Add endpoint for data dictionary validation
 - [ ] **4.2.2**: Return detailed generation metadata in response
 - [ ] **4.2.3**: Support batch processing with progress webhooks
@@ -108,6 +113,7 @@
 ### Task 6.2: Production Readiness
 - [ ] **6.2.1**: Add rate limiting and quotas
 - [ ] **6.2.2**: Implement file size limits and validation
+  - Done for `/api/v1` only (ST-363, `MOCKDATA_API_MAX_BYTES`); upload routes still unlimited
 - [ ] **6.2.3**: Add monitoring and alerting
 - [ ] **6.2.4**: Security hardening and penetration testing
 - [x] **SEC.1**: Fix code injection in the fallback generator ✅
@@ -219,6 +225,9 @@ AZURE_OPENAI_CHAT_DEPLOYMENT_NAME="gpt-4"
 # Full suite. Tests needing a live API server skip themselves cleanly;
 # start the server first to run them too.
 pytest
+
+# JSON API for other programs (/api/v1): offline, no LLM
+pytest tests/test_api_v1.py -q
 
 # Security regression tests for the code-generation path (must always pass)
 pytest tests/test_synthetic_generator_injection.py \

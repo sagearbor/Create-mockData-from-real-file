@@ -274,6 +274,32 @@ class CacheManager:
         self.logger.info(f"Cached generation with key: {cache_key}")
         return cache_key
     
+    def remove_entry(self, cache_file: str, save: bool = True) -> bool:
+        """Remove one cached script (index entry and its files), e.g. code that failed to run.
+
+        Returns True if an entry was removed. ``save=False`` only updates this
+        instance's in-memory index.
+        """
+        removed = False
+        for format_hash in list(self.cache_index):
+            kept = []
+            for entry in self.cache_index[format_hash]:
+                if entry.get("cache_file") != str(cache_file):
+                    kept.append(entry)
+                    continue
+                removed = True
+                if save:
+                    for key in ("cache_file", "metadata_file", "embedding_file", "data_file"):
+                        if entry.get(key):
+                            Path(entry[key]).unlink(missing_ok=True)
+            if kept:
+                self.cache_index[format_hash] = kept
+            else:
+                del self.cache_index[format_hash]
+        if removed and save:
+            self._save_cache_index()
+        return removed
+
     def _load_cached_entry(self, cache_file: str) -> Dict[str, Any]:
         """Load a cached entry."""
         cache_file = Path(cache_file)

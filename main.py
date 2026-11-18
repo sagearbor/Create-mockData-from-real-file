@@ -25,7 +25,7 @@ from datetime import datetime
 
 from src.core.data_loader import DataLoader
 from src.core.metadata_extractor import MetadataExtractor
-from src.core.synthetic_generator import SyntheticDataGenerator, AIGenerationError
+from src.core.synthetic_generator import SyntheticDataGenerator, AIGenerationError, CodeExecutionError
 from src.core.cache_manager import CacheManager
 from src.core.data_dictionary import (
     DataDictionary,
@@ -73,6 +73,21 @@ def _recall_preview(preview_id, num_rows):
 
 # Initialize synthetic generator (OpenAI client will be added when API key is provided)
 synthetic_generator = None
+
+
+def _run_cached_code(cached_result):
+    """Run a cached script. Returns None, and drops the entry, if it no longer runs,
+    so the caller generates fresh code instead of failing the request."""
+    if not (cached_result and "generation_code" in cached_result):
+        return None
+    try:
+        return synthetic_generator._execute_generation_code(cached_result["generation_code"])
+    except CodeExecutionError:
+        logger.warning("Cached generation script failed to run; generating new code instead")
+        synthetic_generator.forget_cached(cached_result)
+        # This module's own index copy: forget it in memory only (the generator's is saved).
+        cache_manager.remove_entry(cached_result.get("cache_file") or "", save=False)
+        return None
 
 def initialize_openai_client():
     """Build the generator with an Azure OpenAI client when AI is configured.
@@ -649,11 +664,10 @@ def generate_synthetic_data(
         # If preview only, generate single file and return preview data
         if preview_only:
             # Generate single synthetic dataset
-            if cached_result and "generation_code" in cached_result:
-                logger.info("Using cached generation script for preview")
-                code_start = time.time()
-                generation_code = cached_result["generation_code"]
-                synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+            code_start = time.time()
+            synthetic_df = _run_cached_code(cached_result)
+            if synthetic_df is not None:
+                logger.info("Used cached generation script for preview")
                 all_timings['code_execution'] = time.time() - code_start
                 generation_info = {"method": "cached", "cache_hit": True}
                 # Log usage for cached generation
@@ -734,12 +748,12 @@ def generate_synthetic_data(
 
             zip_info = None
             for i in range(file_count):
-                if cached_result and "generation_code" in cached_result:
-                    logger.info(f"Using cached generation script for file {i+1}/{file_count}")
-                    generation_code = cached_result["generation_code"]
-                    synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+                synthetic_df = _run_cached_code(cached_result)
+                if synthetic_df is not None:
+                    logger.info(f"Used cached generation script for file {i+1}/{file_count}")
                     zip_info = zip_info or {"method": "cached"}
                 else:
+                    cached_result = None  # failed once: do not try it again for later files
                     # Generate new synthetic data
                     synthetic_df, zip_info = synthetic_generator.generate(
                         metadata=metadata,
@@ -777,11 +791,10 @@ def generate_synthetic_data(
             )
 
         # Single file generation (existing logic)
-        if cached_result and "generation_code" in cached_result:
-            logger.info("Using cached generation script")
-            code_start = time.time()
-            generation_code = cached_result["generation_code"]
-            synthetic_df = synthetic_generator._execute_generation_code(generation_code)
+        code_start = time.time()
+        synthetic_df = _run_cached_code(cached_result)
+        if synthetic_df is not None:
+            logger.info("Used cached generation script")
             code_execution_time = time.time() - code_start
             generation_info = {
                 "method": "cached",
@@ -924,16 +937,16 @@ async def generate_with_sse(
             cache_text = 'Cache Hit ✓' if cache_hit else 'Cache Miss'
             yield f"data: {json.dumps({'step': 'check-cache', 'status': 'completed', 'duration': cache_time, 'text': cache_text})}\n\n"
 
-            # Generate code
+            # Generate code. Cached code that no longer runs is dropped and replaced by new code.
+            synthetic_df = None
             if cache_hit:
+                exec_start = time.time()
+                synthetic_df = await run_in_threadpool(_run_cached_code, cached_result)
+
+            if synthetic_df is not None:
                 yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'skipped'})}\n\n"
                 yield f"data: {json.dumps({'step': 'generate-code', 'status': 'skipped', 'text': 'Using Cached Code'})}\n\n"
-
-                # Execute cached code
                 yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
-                exec_start = time.time()
-                generation_code = cached_result["generation_code"]
-                synthetic_df = await run_in_threadpool(synthetic_generator._execute_generation_code, generation_code)
                 exec_time = time.time() - exec_start
                 all_timings['code_execution'] = exec_time
                 yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': exec_time})}\n\n"

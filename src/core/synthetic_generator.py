@@ -78,7 +78,21 @@ class LLMOutputError(AIGenerationError):
 
 
 class CodeExecutionError(AIGenerationError):
-    """The AI-written (or cached) generation code failed in the sandbox."""
+    """The AI-written (or cached) generation code failed in the sandbox.
+
+    ``detail`` is the end of the sandbox's error output. It is only ever handed back
+    to the model so it can correct its own code: never logged, never shown to the user.
+    """
+
+    def __init__(self, reason: str, *, detail: str = "", **kwargs):
+        super().__init__(reason, **kwargs)
+        self.detail = detail
+
+
+# How many times the model is asked to correct code that failed to run.
+MAX_CODE_FIX_ATTEMPTS = 2
+# How much of the sandbox's error output goes back to the model.
+_ERROR_DETAIL_CHARS = 1500
 
 
 class AIRequestTooLargeError(AIGenerationError):
@@ -164,6 +178,7 @@ class SyntheticDataGenerator:
 
         # Check cache first if enabled
         cache_check_time = 0
+        cached_entry = None
         if use_cached:
             cache_start = time.time()
             try:
@@ -203,17 +218,29 @@ class SyntheticDataGenerator:
             # Cache hit - already set llm_response to 0 above
             pass
         
-        # Execute the code safely. Model-written code sometimes fails to run: ask once more.
+        # Execute the code safely. Model-written code sometimes fails to run: hand the
+        # error back to the model and ask for corrected code, a limited number of times.
         exec_start = time.time()
         retried_after_failure = False
-        try:
-            synthetic_df = self._execute_generation_code(generation_code)
-        except CodeExecutionError:
-            self.logger.warning("Generated code failed to run; asking the model for new code once")
-            retried_after_failure = True
-            generation_code, generation_method, _ = self._generate_code_with_llm(
-                metadata, num_rows, match_threshold, operation="regenerate_code")
-            synthetic_df = self._execute_generation_code(generation_code)
+        fix_attempts = 0
+        while True:
+            try:
+                synthetic_df = self._execute_generation_code(generation_code)
+                break
+            except CodeExecutionError as failure:
+                if generation_method == 'cached':
+                    # Cached code that no longer runs must not be served again.
+                    self.forget_cached(cached_entry)
+                if fix_attempts >= MAX_CODE_FIX_ATTEMPTS:
+                    raise
+                fix_attempts += 1
+                self.logger.warning(
+                    f"Generated code failed to run; asking the model to correct it "
+                    f"(attempt {fix_attempts} of {MAX_CODE_FIX_ATTEMPTS})")
+                retried_after_failure = True
+                generation_code, generation_method, _ = self._generate_code_with_llm(
+                    metadata, num_rows, match_threshold, operation="regenerate_code",
+                    failed_error=failure.detail)
         step_timings['code_execution'] = time.time() - exec_start
         
         # Validate the generated data
@@ -239,6 +266,8 @@ class SyntheticDataGenerator:
 
         if validation_passed:
             self.logger.info(f"Successfully generated synthetic data with shape {synthetic_df.shape}")
+            if generation_method == 'llm':
+                self._remember_code(metadata, generation_code)
             return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
@@ -256,7 +285,28 @@ class SyntheticDataGenerator:
             generation_info["regenerated"] = True
             if not self._validate_synthetic_data(second_df, metadata):
                 generation_info["structure_mismatch"] = True
+            else:
+                self._remember_code(metadata, generation_code)
             return second_df, generation_info
+
+    def _remember_code(self, metadata: Dict[str, Any], code: str) -> None:
+        """Cache code only once it has run and produced the expected columns."""
+        try:
+            self.cache_manager.cache_generation(metadata, code)
+            self.logger.info("Cached generation code for future use")
+        except Exception as e:
+            self.logger.warning(f"Failed to cache: {type(e).__name__}")
+
+    def forget_cached(self, cached_entry: Optional[Dict[str, Any]]) -> None:
+        """Drop a cache entry whose code failed to run, so it is not served again."""
+        cache_file = (cached_entry or {}).get("cache_file")
+        if not cache_file:
+            return
+        try:
+            self.cache_manager.remove_entry(cache_file)
+            self.logger.warning("Removed cached code that failed to run")
+        except Exception as e:
+            self.logger.warning(f"Could not remove failed cache entry: {type(e).__name__}")
     
     def _generate_code_with_llm(
         self,
@@ -264,6 +314,7 @@ class SyntheticDataGenerator:
         num_rows: int,
         match_threshold: float,
         operation: str = "generate_code",
+        failed_error: Optional[str] = None,
     ) -> Tuple[str, str, float]:
         """
         Generate Python code using LLM based on metadata.
@@ -273,6 +324,8 @@ class SyntheticDataGenerator:
             num_rows: Number of rows to generate
             match_threshold: Statistical matching threshold
             operation: Stable telemetry name for this call (dcri_llm ``operation``)
+            failed_error: End of the error output from a previous attempt's code, so the
+                model can avoid the same mistake
 
         Returns:
             Tuple of (code, ``"llm"``, LLM seconds).
@@ -288,6 +341,13 @@ class SyntheticDataGenerator:
             raise err
 
         prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
+        if failed_error is not None:
+            prompt += (
+                "\n\nYour previous code for this request failed when it was run. "
+                "Write the code again, complete, avoiding this error. Keep it simple: "
+                "standard library, pandas and numpy only.\n"
+                f"ERROR OUTPUT:\n{failed_error[-_ERROR_DETAIL_CHARS:] or '(none captured)'}"
+            )
 
         from src.dcri_llm import llm_action  # lazy: keeps module import light
 
@@ -365,13 +425,7 @@ class SyntheticDataGenerator:
             self._log_ai_failure(err, operation, model)
             raise err from e
 
-        # Cache the generated code (only usable LLM output reaches here)
-        try:
-            self.cache_manager.cache_generation(metadata, code)
-            self.logger.info("Cached generation code for future use")
-        except Exception as e:
-            self.logger.warning(f"Failed to cache: {type(e).__name__}")
-
+        # Not cached here: code is cached by generate() only after it has run.
         # Extract code from markdown if present
         if "```python" in code:
             code = code.split("```python")[1].split("```")[0]
@@ -483,8 +537,11 @@ class SyntheticDataGenerator:
         seed_patterns = [
             (r'random\.seed\(\d+\)', f'random.seed({seed})'),
             (r'np\.random\.seed\(\d+\)', f'np.random.seed({seed})'),
-            (r'fake = Faker\(\)', f'fake = Faker()\n    fake.seed_instance({seed})'),
-            (r'Faker\(seed=\d+\)', f'Faker(seed={seed})')
+            # Keep the line's own indentation: a fixed indent breaks module-level code.
+            (r'(?m)^([ \t]*)fake = Faker\(\)', rf'\1fake = Faker()\n\1fake.seed_instance({seed})'),
+            (r'Faker\(seed=\d+\)', f'Faker(seed={seed})'),
+            (r'default_rng\(\d+\)', f'default_rng({seed})'),
+            (r'RandomState\(\d+\)', f'RandomState({seed})'),
         ]
 
         modified_code = code
@@ -495,26 +552,23 @@ class SyntheticDataGenerator:
                 modified_code = re.sub(pattern, replacement, modified_code)
                 seed_found = True
 
-        # If no seed found, add one at the beginning of the function
+        # If no seed found, seed at the very top of the module. Inserting inside the
+        # function body breaks code whose signature or indentation is not the usual shape.
         if not seed_found:
-            # Find the function definition
-            if 'def generate_synthetic_data' in modified_code:
-                lines = modified_code.split('\n')
-                for i, line in enumerate(lines):
-                    if 'def generate_synthetic_data' in line and i + 1 < len(lines):
-                        # Add seed after imports within the function
-                        indent = '    '
-                        seed_lines = [
-                            f'{indent}import random',
-                            f'{indent}import numpy as np',
-                            f'{indent}random.seed({seed})',
-                            f'{indent}np.random.seed({seed})',
-                            ''
-                        ]
-                        # Insert after the function definition
-                        lines = lines[:i+1] + seed_lines + lines[i+1:]
-                        modified_code = '\n'.join(lines)
-                        break
+            modified_code = (
+                f"import random as _seed_random\nimport numpy as _seed_np\n"
+                f"_seed_random.seed({seed})\n_seed_np.random.seed({seed})\n" + modified_code
+            )
+
+        # Never let seeding turn runnable code into code that does not parse.
+        try:
+            compile(modified_code, "<generated>", "exec")
+        except SyntaxError:
+            try:
+                compile(code, "<generated>", "exec")
+            except SyntaxError:
+                return modified_code  # the original is broken too; let the sandbox report it
+            return code
 
         return modified_code
 
@@ -601,7 +655,8 @@ class SyntheticDataGenerator:
                     # stderr can quote generated values/column names: log its size only.
                     self.logger.error(f"Code execution failed (exit {result.returncode}, stderr {len(result.stderr or '')} chars)")
                     raise CodeExecutionError(
-                        f"generated code failed in the sandbox (exit {result.returncode})")
+                        f"generated code failed in the sandbox (exit {result.returncode})",
+                        detail=(result.stderr or "")[-_ERROR_DETAIL_CHARS:])
 
                 # Load the generated data
                 if not pickle_path.exists():

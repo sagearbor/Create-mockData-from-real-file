@@ -178,9 +178,11 @@ _TYPE_WORDS = (
 
 _SCALARS = (str, int, float, bool)
 
-# FHIR elements that are infrastructure, not data: skipped at any depth.
-_FHIR_SKIP = {"meta", "implicitRules", "language", "text", "contained", "extension",
-              "modifierExtension"}
+# FHIR elements that are infrastructure, not data. Resource-level ones are only
+# skipped at the top (Patient.communication.language is real data); extensions
+# are skipped at any depth.
+_FHIR_SKIP_TOP = {"meta", "implicitRules", "language", "text", "contained"}
+_FHIR_SKIP_ANY = {"extension", "modifierExtension"}
 _FHIR_TYPE_MAP = {
     "boolean": "boolean", "integer": "integer", "integer64": "integer",
     "positiveint": "integer", "unsignedint": "integer", "decimal": "float",
@@ -624,7 +626,8 @@ class DataDictionary:
                 continue  # slices repeat an element already seen
             types = [str(t.get("code")) for t in el.get("type") or []
                      if isinstance(t, dict) and t.get("code")]
-            if (str(el.get("max")) == "0" or any(p.replace("[x]", "") in _FHIR_SKIP for p in parts)
+            if (str(el.get("max")) == "0" or (len(parts) == 1 and parts[0] in _FHIR_SKIP_TOP)
+                    or any(p in _FHIR_SKIP_ANY for p in parts)
                     or el.get("contentReference") or not types):
                 excluded.append(rel)
                 continue

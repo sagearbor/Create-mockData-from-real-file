@@ -217,6 +217,19 @@ def test_dict_fhir_structure_definition_becomes_columns():
     assert "1..1" in cols["part.label"]["description"]
 
 
+def test_dict_fhir_nested_language_and_text_are_data_not_infrastructure():
+    sd = copy.deepcopy(GADGET_SD)
+    sd["snapshot"]["element"] += [
+        _el("Gadget.note", ["BackboneElement"], mx="*"),
+        _el("Gadget.note.language", ["code"], mn=1, short="Note language"),
+        _el("Gadget.note.text", ["string"], short="Note text"),
+        _el("Gadget.note.extension", ["Extension"], mx="*"),
+    ]
+    cols = _parse(sd)["columns"]
+    assert "note.language" in cols and "note.text" in cols
+    assert "note.extension" not in cols and "text" not in cols and "language" not in cols
+
+
 def test_dict_fhir_differential_only_definition_is_used():
     cols = _parse(WIDGET_SD)["columns"]
     assert list(cols) == ["size", "label"]

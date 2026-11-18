@@ -1073,9 +1073,11 @@ function displayPreview(data) {
         data.column_names.forEach(col => {
             const td = document.createElement('td');
             let value = row[col];
-            // Format dates if they look like ISO strings
-            if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}/)) {
-                value = new Date(value).toLocaleDateString();
+            // A midnight ISO timestamp is a plain date: show just the date, as the file holds it.
+            // Anything else (ranges like "2024-01-01 to 2024-01-02", real times) is shown unchanged.
+            if (typeof value === 'string') {
+                const m = value.match(/^(\d{4}-\d{2}-\d{2})T00:00:00(\.0+)?(Z|[+-]00:?00)?$/);
+                if (m) value = m[1];
             }
             td.textContent = value !== null && value !== undefined ? value : '';
             tr.appendChild(td);

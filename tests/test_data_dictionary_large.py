@@ -601,3 +601,37 @@ def test_dict_route_model_says_too_large_is_clear_413(monkeypatch, exc):
     assert "too large" in body["error"]
     assert dd_module.PROMPT_BUDGET_ENV in body["error"]
     assert "secret prompt text" not in resp.text and "maximum context" not in resp.text
+
+
+# --------------------------------------------------------------------------- #
+# More no-regression: Excel, text, and shapes whose prompt rendering is fragile
+# --------------------------------------------------------------------------- #
+
+def test_dict_existing_excel_dictionary_unchanged():
+    import io
+    import pandas as pd
+    pytest.importorskip("openpyxl")
+    buf = io.BytesIO()
+    pd.DataFrame({"Variable": ["age", "colour"], "Type": ["integer", "text"],
+                  "Description": ["Gadget age", "Gadget colour"]}).to_excel(buf, index=False)
+    out = DataDictionary().parse_dictionary(buf.getvalue(), "auto", filename="d.xlsx")
+    assert out == {"columns": {"age": {"type": "integer", "description": "Gadget age"},
+                               "colour": {"type": "string", "description": "Gadget colour"}}}
+
+
+def test_dict_existing_text_dictionary_unchanged():
+    text = "age: integer age of the gadget\nmade_on: date the gadget was made\n"
+    out = DataDictionary().parse_dictionary(text.encode(), "text", filename="d.txt")
+    assert out == {"columns": {
+        "age": {"description": "integer age of the gadget", "type": "integer"},
+        "made_on": {"description": "date the gadget was made", "type": "datetime"}}}
+
+
+@pytest.mark.parametrize("name,body,columns", [
+    ("a.json", b'{"columns": {"age": "integer"}}', 1),
+    ("b.csv", b"column,data_type,constraint\nage,integer,min 0\ncolour,string,\n", 2),
+])
+def test_dict_route_upload_of_unusual_existing_shapes_still_loads(name, body, columns):
+    resp = _post("/dictionary/upload", files={"file": (name, body, "application/octet-stream")})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["columns_defined"] == columns

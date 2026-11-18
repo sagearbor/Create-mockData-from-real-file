@@ -248,6 +248,8 @@ class DataDictionary:
         elif format == 'pdf':
             catalog = DictionaryCatalog("pdf", {"": self._parse_pdf(content)})
         elif format == 'text':
+            if isinstance(content, bytes):  # uploads arrive as bytes; the parser splits text
+                content = content.decode('utf-8', errors='replace')
             catalog = DictionaryCatalog("text", {"": self._parse_text_with_llm(content)})
         else:
             # Try to parse as text with LLM

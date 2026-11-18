@@ -168,7 +168,11 @@ def _read_dictionary_upload(upload: UploadFile) -> bytes:
 def _dictionary_loaded_response(filename: Optional[str], catalog, table_name: str,
                                 dictionary: Dict[str, Any]) -> Dict[str, Any]:
     """Success body for a loaded dictionary (one table)."""
-    _, budget = data_dictionary.fit_to_prompt_budget(dictionary)
+    try:
+        _, budget = data_dictionary.fit_to_prompt_budget(dictionary)
+    except Exception as exc:  # noqa: BLE001 - a preview must never fail an upload
+        logger.warning(f"Prompt budget preview skipped: {type(exc).__name__}")
+        budget = None
     return {
         "status": "success",
         "filename": filename,

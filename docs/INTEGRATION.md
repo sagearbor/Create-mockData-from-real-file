@@ -1,5 +1,7 @@
 # Integration Guide — Calling the BYOD Mock Data Generator
 
+**Default deploy target: Azure Container Apps. Google Cloud Run is an optional alternative.**
+
 The BYOD Synthetic Data Generator exposes its capabilities over **three
 independent interfaces** that share a single core pipeline
 (`src/core/generation_service.py`).  Choose the interface that best fits your
@@ -254,16 +256,137 @@ authentication before traffic reaches these endpoints.
 
 ---
 
-## Deploying to Google Cloud Run (public, unauthenticated)
+## Deploying (default: Azure Container Apps)
 
 The repo ships everything needed to deploy `main:app` (agent_id
-`"mock-data-generator"`) as a real, publicly-reachable Cloud Run service.
+`"mock-data-generator"`) as a publicly-reachable Azure Container App.  This is
+**the default and recommended deploy target**.
 
-> **WARNING:** `--allow-unauthenticated` makes the synthetic-data generation
-> endpoint reachable by anyone on the internet.  This is acceptable for a
-> **temporary demo or development smoke-test** but must not be used for
-> long-running production workloads.  Add Cloud Run IAM bindings, a managed
-> API gateway, or a Cloud Armor policy before promoting to production.
+> **WARNING:** External ingress is PUBLIC (unauthenticated) — acceptable for a
+> **temporary demo or smoke-test** but not for long-running production
+> workloads.  Add Azure API Management, Container App auth (Easy Auth / Azure
+> AD), or a reverse proxy with authN before promoting to production.
+> The service sends only **statistical metadata** (never raw data rows) to the
+> LLM, per the BYOD privacy design.
+
+### One-command deploy
+
+```bash
+# Authenticate first:
+az login
+
+# Deploy (ACR_NAME must be globally unique, 5-50 alphanumeric):
+ACR_NAME=<your-acr-name> ./deploy/azure-containerapp.sh
+
+# Pass Azure OpenAI credentials for full-fidelity generation.
+# Without them the service deploys successfully using the deterministic
+# fallback path (lower statistical fidelity, fully functional for smoke tests):
+ACR_NAME=<your-acr-name> \
+  AZURE_OPENAI_API_KEY=<key> \
+  AZURE_OPENAI_ENDPOINT=<endpoint> \
+  AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=<deployment> \
+  AZURE_OPENAI_API_VERSION=2024-02-01 \
+  ./deploy/azure-containerapp.sh
+```
+
+The script:
+1. Creates the resource group and ACR (both idempotent).
+2. Builds `Dockerfile.api` via `az acr build` (no local Docker required).
+3. Creates the Container Apps environment (idempotent).
+4. Creates or updates the Container App with external ingress on port 8080.
+5. If `AZURE_OPENAI_API_KEY` is set, stores it as a Container App secret
+   (`openai-key`) so it is never visible as a plain environment variable.
+6. Prints the live HTTPS URL.
+
+Optional environment variables for `azure-containerapp.sh`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ACR_NAME` | *(required)* | Globally-unique ACR name (5-50 alphanumeric) |
+| `RESOURCE_GROUP` | `rg-mock-data-generator` | Azure resource group |
+| `LOCATION` | `eastus` | Azure region |
+| `ACA_ENV` | `aca-env-mock-data` | Container Apps environment name |
+| `APP_NAME` | `mock-data-generator-api` | Container App name |
+| `IMAGE_TAG` | `latest` | Image tag |
+
+### GitHub Actions (default workflow)
+
+The workflow `.github/workflows/deploy-azure.yml` performs the same steps from
+CI via `workflow_dispatch`.
+
+**Required secret** (Settings > Secrets and variables > Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CREDENTIALS` | JSON from `az ad sp create-for-rbac --sdk-auth` |
+
+> **More secure alternative:** OIDC (OpenID Connect) avoids storing a
+> long-lived JSON credential in GitHub.  See the inline comments in
+> `.github/workflows/deploy-azure.yml` for the OIDC migration path.
+
+**Optional secrets** (enable full-fidelity Azure OpenAI generation; without
+them the service uses the deterministic fallback path):
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_OPENAI_API_KEY` | Stored as a Container App secret — never plain env |
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Chat model deployment name |
+| `AZURE_OPENAI_API_VERSION` | API version (e.g. `2024-02-01`) |
+
+### Getting the FQDN
+
+After deployment the URL is printed by the deploy script.  You can also
+retrieve it any time:
+
+```bash
+az containerapp show \
+  --name mock-data-generator-api \
+  --resource-group rg-mock-data-generator \
+  --query "properties.configuration.ingress.fqdn" \
+  --output tsv
+```
+
+### End-to-end check
+
+Run the stdlib-only proof script against the live URL to verify all three
+layers (health, agent card, A2A generation):
+
+```bash
+python3 scripts/e2e_a2a_check.py --url https://<fqdn>
+# or
+E2E_URL=https://<fqdn> python3 scripts/e2e_a2a_check.py
+```
+
+The script:
+- Checks `/health` and asserts `a2a_backend` is present in the response.
+- Checks `/.well-known/agent.json` and asserts `url == "/a2a/mock-data-generator"`.
+- Posts a tiny base64-encoded CSV to `/a2a/mock-data-generator` via the
+  canonical DCRI JSON envelope and asserts a non-error result.
+- Prints a ready-to-paste `curl` example.
+- Exits `0` on full pass, `1` on any failure.
+
+**Fallback-path note:** Without Azure OpenAI credentials the service uses the
+built-in deterministic fallback generator (lower statistical fidelity but
+fully functional).  The e2e script treats a non-empty `"data"` or
+`"generation_info"` key as success even when `method == "fallback"`, so the
+check passes in either mode.
+
+---
+
+## Deploying (optional / non-default: Google Cloud Run)
+
+> **Not the default — the default deploy target is Azure Container Apps (above).**
+
+The repo also ships scripts to deploy `main:app` to Google Cloud Run as an
+optional public demo path.  Use these files only when explicitly deploying to
+Google Cloud.
+
+> **WARNING:** `--allow-unauthenticated` makes the endpoint reachable by anyone
+> on the internet.  This is acceptable for a **temporary demo or smoke-test**
+> but must not be used for long-running production workloads.  Add Cloud Run
+> IAM bindings, a managed API gateway, or a Cloud Armor policy before promoting
+> to production.
 
 ### One-command deploy
 
@@ -299,7 +422,7 @@ Optional environment variables for `cloudrun.sh`:
 | `REGION` | `us-central1` | GCP region |
 | `SERVICE` | `mock-data-generator-api` | Cloud Run service name |
 
-### GitHub Actions alternative
+### GitHub Actions alternative (non-default)
 
 The workflow `.github/workflows/deploy-cloudrun.yml` performs the same steps
 from CI via `workflow_dispatch`.
@@ -324,7 +447,7 @@ service uses the deterministic fallback path):
 | `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Chat model deployment name |
 | `AZURE_OPENAI_API_VERSION` | API version (e.g. `2024-02-01`) |
 
-### Getting the service URL
+### Getting the Cloud Run service URL
 
 After deployment the URL is printed by the deploy script.  You can also
 retrieve it any time:
@@ -337,28 +460,11 @@ gcloud run services describe mock-data-generator-api \
 
 ### End-to-end check
 
-Run the stdlib-only proof script against the live URL to verify all three
-layers (health, agent card, A2A generation):
-
 ```bash
 python3 scripts/e2e_a2a_check.py --url https://<service-url>
 # or
 E2E_URL=https://<service-url> python3 scripts/e2e_a2a_check.py
 ```
-
-The script:
-- Checks `/health` and asserts `a2a_backend` is present in the response.
-- Checks `/.well-known/agent.json` and asserts `url == "/a2a/mock-data-generator"`.
-- Posts a tiny base64-encoded CSV to `/a2a/mock-data-generator` via the
-  canonical DCRI JSON envelope and asserts a non-error result.
-- Prints a ready-to-paste `curl` example.
-- Exits `0` on full pass, `1` on any failure.
-
-**Fallback-path note:** Without Azure OpenAI credentials the service uses the
-built-in deterministic fallback generator (lower statistical fidelity but
-fully functional).  The e2e script treats a non-empty `"data"` or
-`"generation_info"` key as success even when `method == "fallback"`, so the
-check passes in either mode.
 
 ### A2A wire contract note
 

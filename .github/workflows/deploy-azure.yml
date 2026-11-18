@@ -1,0 +1,320 @@
+# .github/workflows/deploy-azure.yml
+#
+# DEFAULT deploy workflow — Azure Container Apps.
+#
+# ============================================================
+# This is the DEFAULT deploy target for this project.
+# The Google Cloud Run workflow (.github/workflows/deploy-cloudrun.yml)
+# is OPTIONAL / non-default.
+# ============================================================
+#
+# REQUIRED secret (Settings > Secrets and variables > Actions):
+#
+#   AZURE_CREDENTIALS — JSON output from:
+#     az ad sp create-for-rbac \
+#       --name "gh-byod-mock-data-deploy" \
+#       --role contributor \
+#       --scopes /subscriptions/<sub-id>/resourceGroups/<rg> \
+#       --sdk-auth
+#     The JSON blob contains clientId, clientSecret, subscriptionId, tenantId.
+#     Store the entire JSON as the secret value.
+#
+# OPTIONAL secrets (enable full-fidelity LLM generation; without them the
+# service deploys successfully and uses the deterministic fallback path):
+#
+#   AZURE_OPENAI_API_KEY              — Azure OpenAI API key (stored as
+#                                       Container App secret; never plain env)
+#   AZURE_OPENAI_ENDPOINT             — Azure OpenAI endpoint URL
+#   AZURE_OPENAI_CHAT_DEPLOYMENT_NAME — Chat model deployment name
+#   AZURE_OPENAI_API_VERSION          — API version, e.g. "2024-02-01"
+#
+# OIDC (more secure alternative to AZURE_CREDENTIALS):
+#   Replace the azure/login@v2 `creds` input with:
+#     client-id: ${{ secrets.AZURE_CLIENT_ID }}
+#     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+#     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+#   and add `permissions: id-token: write` to the job.
+#   See https://docs.github.com/en/actions/security-guides/automatic-token-authentication
+#   for the full OIDC setup guide.
+# ============================================================
+
+name: "Deploy to Azure Container Apps (DEFAULT)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: 'Azure Resource Group'
+        required: false
+        default: 'rg-mock-data-generator'
+        type: string
+      location:
+        description: 'Azure region'
+        required: false
+        default: 'eastus'
+        type: string
+      acr_name:
+        description: 'Azure Container Registry name (globally-unique, 5-50 alphanumeric)'
+        required: true
+        type: string
+      app_name:
+        description: 'Container App name'
+        required: false
+        default: 'mock-data-generator-api'
+        type: string
+      aca_env:
+        description: 'Container Apps Environment name'
+        required: false
+        default: 'aca-env-mock-data'
+        type: string
+
+jobs:
+  deploy:
+    name: Build and Deploy to Azure Container Apps
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required when using OIDC instead of AZURE_CREDENTIALS
+
+    steps:
+      # -------------------------------------------------------------------
+      # 1. Checkout source
+      # -------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------------------------
+      # 2. Authenticate to Azure
+      # -------------------------------------------------------------------
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          # OIDC alternative — replace the line above with:
+          #   client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          #   tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          #   subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # -------------------------------------------------------------------
+      # 3. Ensure resource group exists (idempotent)
+      # -------------------------------------------------------------------
+      - name: Ensure resource group
+        run: |
+          az group create \
+            --name "${{ inputs.resource_group }}" \
+            --location "${{ inputs.location }}" \
+            --output none
+          echo "Resource group '${{ inputs.resource_group }}' ready."
+
+      # -------------------------------------------------------------------
+      # 4. Ensure ACR exists and build image
+      # -------------------------------------------------------------------
+      - name: Create ACR (idempotent)
+        run: |
+          az acr create \
+            --resource-group "${{ inputs.resource_group }}" \
+            --name "${{ inputs.acr_name }}" \
+            --sku Basic \
+            --location "${{ inputs.location }}" \
+            --output none \
+            2>/dev/null || true
+          echo "ACR '${{ inputs.acr_name }}' ready."
+
+      - name: Build image via ACR build
+        run: |
+          IMAGE_TAG="${{ github.sha }}"
+          ACR_LOGIN_SERVER="${{ inputs.acr_name }}.azurecr.io"
+          IMAGE_REF="${ACR_LOGIN_SERVER}/${{ inputs.app_name }}:${IMAGE_TAG}"
+          echo "IMAGE_REF=${IMAGE_REF}" >> "${GITHUB_ENV}"
+          echo "ACR_LOGIN_SERVER=${ACR_LOGIN_SERVER}" >> "${GITHUB_ENV}"
+          az acr build \
+            --registry "${{ inputs.acr_name }}" \
+            --image "${{ inputs.app_name }}:${IMAGE_TAG}" \
+            --file Dockerfile.api \
+            .
+
+      # -------------------------------------------------------------------
+      # 5. Install Container Apps extension + ensure ACA environment
+      # -------------------------------------------------------------------
+      - name: Install containerapp CLI extension
+        run: az extension add --name containerapp --upgrade --output none 2>/dev/null || true
+
+      - name: Ensure Container Apps environment
+        run: |
+          az containerapp env create \
+            --name "${{ inputs.aca_env }}" \
+            --resource-group "${{ inputs.resource_group }}" \
+            --location "${{ inputs.location }}" \
+            --output none \
+            2>/dev/null || true
+          echo "ACA environment '${{ inputs.aca_env }}' ready."
+
+      # -------------------------------------------------------------------
+      # 6. Retrieve ACR admin credentials for registry auth
+      # -------------------------------------------------------------------
+      - name: Get ACR credentials
+        run: |
+          az acr update \
+            --name "${{ inputs.acr_name }}" \
+            --admin-enabled true \
+            --output none
+          ACR_USERNAME=$(az acr credential show \
+            --name "${{ inputs.acr_name }}" \
+            --query "username" --output tsv)
+          ACR_PASSWORD=$(az acr credential show \
+            --name "${{ inputs.acr_name }}" \
+            --query "passwords[0].value" --output tsv)
+          echo "ACR_USERNAME=${ACR_USERNAME}" >> "${GITHUB_ENV}"
+          # Mask the password so it never appears in logs
+          echo "::add-mask::${ACR_PASSWORD}"
+          echo "ACR_PASSWORD=${ACR_PASSWORD}" >> "${GITHUB_ENV}"
+
+      # -------------------------------------------------------------------
+      # 7. Build Azure OpenAI secret + env-var arguments
+      #    API key is stored as a Container App secret; other vars are plain.
+      # -------------------------------------------------------------------
+      - name: Prepare Azure OpenAI configuration
+        id: openai_cfg
+        run: |
+          if [[ -n "${{ secrets.AZURE_OPENAI_API_KEY }}" ]]; then
+            echo "has_openai=true" >> "${GITHUB_OUTPUT}"
+            echo "Azure OpenAI credentials present — full-fidelity generation enabled."
+          else
+            echo "has_openai=false" >> "${GITHUB_OUTPUT}"
+            echo "No AZURE_OPENAI_API_KEY secret found — deploying with fallback generation."
+          fi
+
+      # -------------------------------------------------------------------
+      # 8a. Create or update Container App — WITH Azure OpenAI
+      # -------------------------------------------------------------------
+      - name: Deploy Container App (with Azure OpenAI)
+        if: steps.openai_cfg.outputs.has_openai == 'true'
+        run: |
+          APP="${{ inputs.app_name }}"
+          RG="${{ inputs.resource_group }}"
+
+          SECRETS_ARG="openai-key=${{ secrets.AZURE_OPENAI_API_KEY }}"
+          ENV_VARS_ARG="AZURE_OPENAI_API_KEY=secretref:openai-key \
+            AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }} \
+            AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }} \
+            AZURE_OPENAI_API_VERSION=${{ secrets.AZURE_OPENAI_API_VERSION }}"
+
+          if az containerapp show --name "${APP}" --resource-group "${RG}" --output none 2>/dev/null; then
+            echo "Updating existing Container App..."
+            az containerapp update \
+              --name "${APP}" \
+              --resource-group "${RG}" \
+              --image "${IMAGE_REF}" \
+              --registry-server "${ACR_LOGIN_SERVER}" \
+              --registry-username "${ACR_USERNAME}" \
+              --registry-password "${ACR_PASSWORD}" \
+              --secrets "${SECRETS_ARG}" \
+              --env-vars ${ENV_VARS_ARG} \
+              --output none
+          else
+            echo "Creating new Container App..."
+            az containerapp create \
+              --name "${APP}" \
+              --resource-group "${RG}" \
+              --environment "${{ inputs.aca_env }}" \
+              --image "${IMAGE_REF}" \
+              --target-port 8080 \
+              --ingress external \
+              --registry-server "${ACR_LOGIN_SERVER}" \
+              --registry-username "${ACR_USERNAME}" \
+              --registry-password "${ACR_PASSWORD}" \
+              --secrets "${SECRETS_ARG}" \
+              --env-vars ${ENV_VARS_ARG} \
+              --output none
+          fi
+
+      # -------------------------------------------------------------------
+      # 8b. Create or update Container App — WITHOUT Azure OpenAI
+      # -------------------------------------------------------------------
+      - name: Deploy Container App (fallback generation only)
+        if: steps.openai_cfg.outputs.has_openai == 'false'
+        run: |
+          APP="${{ inputs.app_name }}"
+          RG="${{ inputs.resource_group }}"
+
+          if az containerapp show --name "${APP}" --resource-group "${RG}" --output none 2>/dev/null; then
+            echo "Updating existing Container App..."
+            az containerapp update \
+              --name "${APP}" \
+              --resource-group "${RG}" \
+              --image "${IMAGE_REF}" \
+              --registry-server "${ACR_LOGIN_SERVER}" \
+              --registry-username "${ACR_USERNAME}" \
+              --registry-password "${ACR_PASSWORD}" \
+              --output none
+          else
+            echo "Creating new Container App..."
+            az containerapp create \
+              --name "${APP}" \
+              --resource-group "${RG}" \
+              --environment "${{ inputs.aca_env }}" \
+              --image "${IMAGE_REF}" \
+              --target-port 8080 \
+              --ingress external \
+              --registry-server "${ACR_LOGIN_SERVER}" \
+              --registry-username "${ACR_USERNAME}" \
+              --registry-password "${ACR_PASSWORD}" \
+              --output none
+          fi
+
+      # -------------------------------------------------------------------
+      # 9. Retrieve FQDN and write job summary
+      # -------------------------------------------------------------------
+      - name: Get Container App FQDN
+        id: fqdn
+        run: |
+          FQDN=$(az containerapp show \
+            --name "${{ inputs.app_name }}" \
+            --resource-group "${{ inputs.resource_group }}" \
+            --query "properties.configuration.ingress.fqdn" \
+            --output tsv)
+          echo "fqdn=${FQDN}" >> "${GITHUB_OUTPUT}"
+          echo "APP_URL=https://${FQDN}" >> "${GITHUB_ENV}"
+
+      - name: Write job summary
+        run: |
+          APP_URL="${APP_URL}"
+          OPENAI_STATUS="${{ steps.openai_cfg.outputs.has_openai == 'true' && 'Full-fidelity (Azure OpenAI)' || 'Deterministic fallback (no Azure OpenAI secrets)' }}"
+          cat >> "${GITHUB_STEP_SUMMARY}" <<EOF
+          ## Azure Container Apps Deployment Complete
+
+          | Field | Value |
+          |-------|-------|
+          | App name | \`${{ inputs.app_name }}\` |
+          | Resource Group | \`${{ inputs.resource_group }}\` |
+          | Location | \`${{ inputs.location }}\` |
+          | ACR | \`${{ inputs.acr_name }}.azurecr.io\` |
+          | Image SHA | \`${{ github.sha }}\` |
+          | Generation mode | ${OPENAI_STATUS} |
+          | **App URL** | **${APP_URL}** |
+
+          ### Quick checks
+
+          \`\`\`bash
+          # Health
+          curl ${APP_URL}/health
+
+          # Agent card
+          curl ${APP_URL}/.well-known/agent.json
+
+          # End-to-end A2A proof
+          python3 scripts/e2e_a2a_check.py --url ${APP_URL}
+          \`\`\`
+
+          ### Notes
+
+          - The endpoint is **public and unauthenticated** — intended for
+            temporary demos / smoke-tests only.  Add Azure API Management,
+            Container App auth (Easy Auth / Azure AD), or a reverse proxy with
+            authN before real-data or production use.
+          - If \`AZURE_OPENAI_API_KEY\` was not configured as a secret, the
+            service uses the **deterministic fallback path** (lower statistical
+            fidelity; still fully functional for smoke testing).
+          - The service sends only **statistical metadata** (never raw data rows)
+            to the LLM, per the BYOD privacy design.
+          EOF

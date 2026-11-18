@@ -1048,7 +1048,11 @@ function displayPreview(data) {
     // Display info
     const info = document.getElementById('previewInfo');
     const fileCountText = data.file_count > 1 ? `${data.file_count} files generated` : '1 file generated';
-    info.innerHTML = `<strong>${fileCountText}</strong> - ${data.total_rows} rows × ${data.total_columns} columns generated; the preview below shows the first ${Math.min(10, data.total_rows)}. Download gives all ${data.total_rows}.`;
+    const shown = (data.preview || []).length;
+    const shownText = shown >= data.total_rows
+        ? `all ${data.total_rows} rows are shown below.`
+        : `the first ${shown} are shown below. Download gives all ${data.total_rows}.`;
+    info.innerHTML = `<strong>${fileCountText}</strong> - ${data.total_rows} rows × ${data.total_columns} columns generated; ${shownText}`;
 
     // Build table
     const thead = document.getElementById('previewHead');

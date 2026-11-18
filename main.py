@@ -47,6 +47,9 @@ data_dictionary = DataDictionary()
 # Keyed by an unguessable id handed only to the browser that made the preview; a few
 # entries, each dropped after 30 minutes.
 _dictionary_previews: Dict[str, Dict[str, Any]] = {}
+# Rows shown in the on-page preview. Small files are shown whole, so the table
+# matches the row count beside it; bigger ones show the first PREVIEW_ROWS.
+PREVIEW_ROWS = 50
 _PREVIEW_KEEP_SECONDS = 1800
 _PREVIEW_KEEP_COUNT = 20
 
@@ -672,8 +675,8 @@ def generate_synthetic_data(
             # Always add all_timings to generation_info
             generation_info['all_timings'] = all_timings
 
-            # Prepare preview data (first 10 rows)
-            preview_rows = min(10, len(synthetic_df))
+            # Prepare preview data (first PREVIEW_ROWS rows)
+            preview_rows = min(PREVIEW_ROWS, len(synthetic_df))
             preview_df = synthetic_df.head(preview_rows)
 
             # Convert DataFrame to dict for JSON serialization
@@ -994,7 +997,7 @@ async def generate_with_sse(
 
             # Prepare result
             if preview_only:
-                preview_rows = min(10, len(synthetic_df))
+                preview_rows = min(PREVIEW_ROWS, len(synthetic_df))
                 preview_df = synthetic_df.head(preview_rows)
 
                 # Always use to_json() for proper datetime serialization, regardless of output_format
@@ -1246,7 +1249,7 @@ def generate_with_dictionary(
             generation_info["dictionary_trimming"] = dictionary_trimming
             new_preview_id = _remember_preview(synthetic_df, generation_info, num_rows)
 
-            preview_rows = min(10, len(synthetic_df))
+            preview_rows = min(PREVIEW_ROWS, len(synthetic_df))
             preview_df = synthetic_df.head(preview_rows)
 
             return JSONResponse(content={

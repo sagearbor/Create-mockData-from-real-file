@@ -657,19 +657,20 @@ def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch,
     """Download with the preview id returns the preview's rows without a second generation."""
     import pandas as pd
 
+    total = main.PREVIEW_ROWS + 1  # one more than the preview shows
     calls = []
 
     def generate(**k):
         calls.append(k)
         n = len(calls)
-        return pd.DataFrame({"id": [n] * 11, "birthDate": pd.to_datetime(["1980-01-02"] * 11)}), {}
+        return pd.DataFrame({"id": [n] * total, "birthDate": pd.to_datetime(["1980-01-02"] * total)}), {}
 
     monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(generate=generate))
     monkeypatch.setattr(main, "_dictionary_previews", {})
-    common = {"num_rows": "11", "table": "Widget", "output_format": fmt}
+    common = {"num_rows": str(total), "table": "Widget", "output_format": fmt}
     prev = _post("/generate-with-dictionary", data={**common, "preview_only": "true"}, files=_dict_file(BUNDLE))
     assert prev.status_code == 200, prev.text
-    assert prev.json()["total_rows"] == 11 and len(prev.json()["preview"]) == 10
+    assert prev.json()["total_rows"] == total and len(prev.json()["preview"]) == main.PREVIEW_ROWS
     down = _post("/generate-with-dictionary",
                  data={**common, "preview_only": "false", "preview_id": prev.json()["preview_id"]})
     assert down.status_code == 200, down.text
@@ -680,10 +681,10 @@ def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch,
     if fmt == "csv":
         assert other.text.strip().splitlines()[1].startswith("2,")
     if fmt == "csv":
-        assert len(down.text.strip().splitlines()) == 12 and "1980-01-02" in down.text
+        assert len(down.text.strip().splitlines()) == total + 1 and "1980-01-02" in down.text
     elif fmt == "json":
         rows = down.json()
-        assert isinstance(rows, list) and len(rows) == 11 and rows[0]["birthDate"].startswith("1980-01-02")
+        assert isinstance(rows, list) and len(rows) == total and rows[0]["birthDate"].startswith("1980-01-02")
     else:
         assert down.content[:2] == b"PK"
 

@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     azure_search_index_name: str = Field(default="program-vectors", env="AZURE_SEARCH_INDEX_NAME")
     
     # Application Settings
-    generator_version: str = Field(default="1.0", env="GENERATOR_VERSION")
+    # 1.1: cell values are masked at extraction; 1.0 cache entries must never match.
+    generator_version: str = Field(default="1.1", env="GENERATOR_VERSION")
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     environment: str = Field(default="local", env="ENVIRONMENT")
     app_port: int = Field(default=8201, env="APP_PORT")

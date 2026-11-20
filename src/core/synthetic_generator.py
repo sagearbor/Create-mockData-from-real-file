@@ -477,7 +477,7 @@ class SyntheticDataGenerator:
         10. CRITICAL: For categorical columns where 'preserve_values' is True and 'most_common_values' contains actual values (not 'value_0', 'value_1'), you MUST use those exact values with their distributions
         11. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
         12. For any column with 'date' or 'time' in the name, generate dates not random strings
-        13. When you see actual categorical values like 'M', 'F' or 'Male', 'Female' in most_common_values, use those exact values
+        13. When you see actual categorical values like 'M', 'F' or 'Male', 'Female' in most_common_values, use those exact values. Keys named 'value_0', 'value_1', ... are masked placeholders that only carry counts: never output them literally, invent realistic values instead
         14. Return ONLY the Python code, no explanations or markdown formatting
         15. The code must end with: result = generate_synthetic_data()
         """

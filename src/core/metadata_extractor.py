@@ -11,6 +11,69 @@ from src.utils.pandas_compat import is_categorical, is_text_dtype, text_columns
 from src.core.clinical_reference import ClinicalReferenceLibrary
 
 
+# Privacy rules for what may leave the extractor. Everything extract() returns
+# is sent to the model and written to the cache, so masking happens here.
+MIN_ROWS_FOR_REAL_VALUES = 20   # below this, no cell value or fragment is emitted
+MIN_VALUE_COUNT = 5             # a category must occur at least this often to be shown
+MAX_UNIQUE_RATIO = 0.2          # distinct values / non-null rows
+MAX_CATEGORY_LENGTH = 30
+MAX_FRAGMENT_LENGTH = 6         # longest shared prefix that may be emitted
+CATEGORY_LIMITS = {"balanced": 10, "permissive": 50}
+
+# Column-name words that mark a column as identifying. Long words match at the
+# start or end of a name token ("firstname", "birthdate", "notes"). Short words
+# match a whole token, its end, or its start plus a few letters ("zipcode" but
+# not "dobutamine"). "id" must be a whole token so "valid" and "paid" pass.
+_ID_NAME_WORDS = ("name", "birth", "address", "email", "phone", "note", "comment", "postal")
+_ID_NAME_SHORT_WORDS = ("mrn", "ssn", "dob", "zip")
+_ID_SUFFIX_OWNERS = ("patient", "subject", "participant", "person", "user", "member",
+                     "customer", "client", "employee", "provider", "account", "record",
+                     "encounter", "visit", "case", "study", "site", "sample", "specimen",
+                     "order", "device",
+                     "subj", "usubj", "pat", "pt", "emp", "cust", "acct", "mbr", "enc", "rec")
+
+# Value shapes that are never treated as a category label (unanchored).
+_SENSITIVE_VALUE_PATTERNS = [
+    re.compile(r'[^@\s]+@[^@\s]+'),                               # email
+    re.compile(r'\d{3}-\d{2}-\d{4}'),                             # SSN
+    re.compile(r'\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]\d{4}'),          # phone
+    re.compile(r'\d{3}[\s.\-]\d{4}'),                            # short phone
+    re.compile(r'\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}'),               # numeric date
+    re.compile(r'\d{1,2}[-\s]?[A-Za-z]{3,9}[-\s,]*\d{2,4}'),      # 15-Jan-2024
+    re.compile(r'[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{2,4}'),       # Jan 15, 2024
+    re.compile(r'\d{5,}'),                                        # long digit run
+]
+
+
+def is_identifier_like_name(column_name: Any) -> bool:
+    """True if a column name suggests identifying content (name, MRN, id, DOB, ...)."""
+    if column_name is None:
+        return False
+    # Split camelCase, then on anything that is not a letter.
+    spaced = re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', str(column_name))
+    for token in re.split(r'[^a-z]+', spaced.lower()):
+        if not token:
+            continue
+        if token in ("id", "ids"):
+            return True
+        if any(token.startswith(w) or token.endswith(w) or token.endswith(w + "s")
+               for w in _ID_NAME_WORDS):
+            return True
+        if any(token.endswith(w) or token.endswith(w + "s")
+               or (token.startswith(w) and len(token) <= len(w) + 4)
+               for w in _ID_NAME_SHORT_WORDS):
+            return True
+        # Joined lower-case forms such as "patientid".
+        if token.endswith("id") and token[:-2] in _ID_SUFFIX_OWNERS:
+            return True
+    return False
+
+
+def _looks_sensitive_value(value: str) -> bool:
+    """True if a value looks like an email, phone, SSN, date or long number."""
+    return any(p.search(value) for p in _SENSITIVE_VALUE_PATTERNS)
+
+
 class MetadataExtractor:
     """Extract statistical and structural metadata from pandas DataFrames."""
     
@@ -21,9 +84,10 @@ class MetadataExtractor:
         Args:
             use_clinical_reference: Whether to use clinical reference library for medical data
             safety_mode: Level of data preservation ('strict', 'balanced', 'permissive')
-                - 'strict': Only preserve data types, no actual values
-                - 'balanced': Preserve non-sensitive categorical values (<=10 unique, short strings)
-                - 'permissive': Preserve most categorical values, trust LLM to handle sensitivity
+                - 'strict': No cell value and no fragment of one is emitted
+                - 'balanced': Repeated, non-sensitive category labels are kept (<=10 unique)
+                - 'permissive': Same rule as balanced, up to 50 unique values
+                See _is_safe_to_preserve for the full rule.
         """
         self.logger = logger
         self.clinical_reference = ClinicalReferenceLibrary() if use_clinical_reference else None
@@ -189,7 +253,13 @@ class MetadataExtractor:
                 stats["might_be_percentage"] = "decimal"
             elif stats["max"] <= 100:
                 stats["might_be_percentage"] = "whole"
-        
+
+        # min and max are single real cells. For an identifier-like column
+        # (patient_id, mrn, zip) they are a real identifier, so drop them.
+        if is_identifier_like_name(column_name):
+            del stats["min"], stats["max"]
+            stats["min_max_omitted"] = True
+
         return stats
     
     def _extract_datetime_stats(self, series: pd.Series) -> Dict[str, Any]:
@@ -239,29 +309,26 @@ class MetadataExtractor:
                 elif '-' in sample_val and len(sample_val) == 10:
                     datetime_format = '%Y-%m-%d'
 
-        # Determine if values are safe to preserve based on safety mode
-        if self.safety_mode == 'strict':
-            # Never preserve actual values in strict mode
-            is_safe_categorical = False
-        elif self.safety_mode == 'permissive':
-            # In permissive mode, preserve most categorical values (up to 50 unique)
-            if len(value_counts) <= 50:
-                is_safe_categorical = True
-            else:
-                is_safe_categorical = False
-        else:  # balanced mode (default)
-            # For categorical data with <= 10 unique values, check if safe
-            if len(value_counts) <= 10:
-                is_safe_categorical = self._is_safe_to_preserve(str_series, value_counts)
-            else:
-                is_safe_categorical = False
+        # Real values are emitted only for columns that pass _is_safe_to_preserve.
+        # Strict mode never emits one.
+        is_safe_categorical = self._is_safe_to_preserve(
+            str_series, value_counts, column_name=column_name
+        )
+
+        # Masked values keep their count under a value_N key so the shape of
+        # the distribution survives. In a preserved column, values seen fewer
+        # than MIN_VALUE_COUNT times are still masked.
+        most_common = {}
+        for i, (value, count) in enumerate(value_counts.head(10).items()):
+            keep = is_safe_categorical and count >= MIN_VALUE_COUNT
+            most_common[value if keep else f"value_{i}"] = int(count)
 
         stats = {
             "type": "string",
             "unique_values": int(len(value_counts)),
             "unique_ratio": float(unique_ratio),
-            "most_common_values": value_counts.head(10).to_dict(),
-            "preserve_values": is_safe_categorical,  # Flag indicating if actual values are preserved
+            "most_common_values": most_common,
+            "preserve_values": is_safe_categorical,  # True only if real values are present
             "avg_length": float(str_series.str.len().mean()),
             "min_length": int(str_series.str.len().min()),
             "max_length": int(str_series.str.len().max()),
@@ -343,6 +410,14 @@ class MetadataExtractor:
         if len(clean_series) == 0:
             return {}
 
+        # Fragments of real cells (prefix, suffix) are emitted only outside
+        # strict mode and only for columns with enough rows.
+        allow_fragments = (
+            self.safety_mode != 'strict'
+            and len(clean_series) >= MIN_ROWS_FOR_REAL_VALUES
+        )
+        identifier_name = is_identifier_like_name(series.name)
+
         # Sample if too large
         if len(clean_series) > 100:
             clean_series = clean_series.sample(n=100, random_state=42)
@@ -385,33 +460,64 @@ class MetadataExtractor:
             if prefix_match:
                 prefix = prefix_match.group(1)
                 # Check if all values follow this pattern
-                pattern_matches = clean_series.str.match(f'^{re.escape(prefix)}[0-9]+$', na=False).sum()
+                matching = clean_series[clean_series.str.match(f'^{re.escape(prefix)}[0-9]+$', na=False)]
+                pattern_matches = len(matching)
                 if pattern_matches > len(clean_series) * 0.9:  # 90% threshold
-                    patterns["id_pattern"] = {
+                    # Describe the shape instead of quoting a real cell.
+                    digit_count = int((matching.str.len() - len(prefix)).mode().iloc[0])
+                    show_prefix = allow_fragments and self._is_safe_fragment(prefix, matching)
+                    id_pattern = {
                         "type": "prefix_sequential",
-                        "prefix": prefix,
-                        "example": first_val,
+                        "prefix_length": len(prefix),
+                        "digit_count": digit_count,
+                        "shape": f"{prefix if show_prefix else f'<{len(prefix)} characters>'}<{digit_count} digits>",
                         "confidence": float(pattern_matches / len(clean_series))
                     }
+                    if show_prefix:
+                        id_pattern["prefix"] = prefix
+                    patterns["id_pattern"] = id_pattern
 
-            # Detect common prefixes (more general)
-            # Get the common prefix length by checking first few characters
-            min_len = clean_series.str.len().min()
-            if min_len >= 2:
-                for prefix_len in range(min(min_len, 10), 0, -1):
-                    potential_prefix = clean_series.iloc[0][:prefix_len]
-                    if clean_series.str.startswith(potential_prefix).sum() > len(clean_series) * 0.9:
-                        patterns["common_prefix"] = potential_prefix
-                        break
+            if allow_fragments and not identifier_name:
+                # Longest prefix shared by 90% of rows, cut at the first digit.
+                min_len = clean_series.str.len().min()
+                if min_len >= 2:
+                    for prefix_len in range(min(min_len, 10), 0, -1):
+                        potential_prefix = clean_series.iloc[0][:prefix_len]
+                        sharing = clean_series[clean_series.str.startswith(potential_prefix)]
+                        if len(sharing) > len(clean_series) * 0.9:
+                            fragment = re.match(r'^\D*', potential_prefix).group(0)
+                            if self._is_safe_fragment(fragment, sharing):
+                                patterns["common_prefix"] = fragment
+                            break
 
-            # Common suffixes
-            suffixes = [s[-3:] for s in clean_series if len(s) >= 3]
-            if suffixes:
-                suffix_counts = pd.Series(suffixes).value_counts()
-                if suffix_counts.iloc[0] > len(suffixes) * 0.3:
-                    patterns["common_suffix"] = suffix_counts.index[0]
+                # Common suffixes (values longer than the suffix only)
+                long_values = clean_series[clean_series.str.len() > 3]
+                if len(long_values) > 0:
+                    suffix_counts = long_values.str[-3:].value_counts()
+                    suffix = suffix_counts.index[0]
+                    if suffix_counts.iloc[0] > len(long_values) * 0.3:
+                        sharing = long_values[long_values.str.endswith(suffix)]
+                        if self._is_safe_fragment(suffix, sharing):
+                            patterns["common_suffix"] = suffix
 
         return patterns
+
+    def _is_safe_fragment(self, fragment: str, sharing: pd.Series) -> bool:
+        """
+        Decide whether a shared prefix/suffix may be emitted.
+
+        It must be short, contain no digit or whitespace-only text, be shared
+        by at least MIN_VALUE_COUNT distinct values, and not be a whole cell.
+        """
+        if not fragment.strip() or len(fragment) > MAX_FRAGMENT_LENGTH:
+            return False
+        if re.search(r'\d', fragment):
+            return False
+        if sharing.nunique() < MIN_VALUE_COUNT:
+            return False
+        if (sharing.str.strip() == fragment.strip()).any():
+            return False
+        return True
     
     def _extract_correlations(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Extract correlation information between columns."""
@@ -502,53 +608,51 @@ class MetadataExtractor:
         ]
         return any(re.match(pattern, value) for pattern in datetime_patterns)
 
-    def _is_safe_to_preserve(self, str_series: pd.Series, value_counts: pd.Series) -> bool:
+    def _is_safe_to_preserve(self, str_series: pd.Series, value_counts: pd.Series,
+                             column_name: Any = None) -> bool:
         """
-        Determine if categorical values are safe to preserve (non-sensitive).
+        Decide whether a string column's real values may be emitted.
+
+        True only if ALL of these hold; anything else is masked:
+          - the mode is 'balanced' (<=10 distinct values) or 'permissive' (<=50);
+            'strict' never preserves
+          - the column has at least MIN_ROWS_FOR_REAL_VALUES (20) non-null rows
+          - distinct values / non-null rows <= MAX_UNIQUE_RATIO (0.2)
+          - at least one value occurs MIN_VALUE_COUNT (5) or more times; rarer
+            values in the same column are masked individually by the caller
+          - no value is longer than MAX_CATEGORY_LENGTH (30) characters
+          - no value (checked over every distinct value) looks like an email,
+            phone number, SSN or date, or contains 5 or more digits in a row
+          - the column name is not identifier-like (is_identifier_like_name)
+
+        So small files and unique columns never qualify. A name that repeats
+        five times in a column with a neutral name still looks like a category.
 
         Args:
-            str_series: String series to analyze
+            str_series: Non-null values as strings
             value_counts: Value counts of the series
+            column_name: Column name, if known
 
         Returns:
-            True if values appear non-sensitive and safe to preserve
+            True if the repeated values may be emitted
         """
-        # Check if all values are short (<=5 chars) - likely codes/abbreviations
-        max_length = str_series.str.len().max()
-        if max_length <= 5:
-            # Special check for ZIP codes (5 digits)
-            if str_series.str.match(r'^\d{5}$').all():
-                return False  # ZIP codes might be sensitive
-            # Special check for SSN fragments
-            if str_series.str.match(r'^\d{3}-\d{2}$|^\d{4}$').any():
-                return False  # Potential SSN fragments
-            return True  # Other short strings are likely safe (M/F, Y/N, state codes)
-
-        # Check if low cardinality (<=6 unique values)
-        if len(value_counts) <= 6:
-            # Additional check: if any value looks like an account number or ID
-            if str_series.str.match(r'^[A-Z0-9]{8,}$').any():
-                return False  # Potential account numbers
-            return True  # Low cardinality likely means non-sensitive categories
-
-        # Check for known safe patterns (common categorical values)
-        safe_patterns = [
-            # Gender variations
-            {'M', 'F'}, {'Male', 'Female'}, {'MALE', 'FEMALE'},
-            # Boolean variations
-            {'Yes', 'No'}, {'Y', 'N'}, {'True', 'False'}, {'T', 'F'},
-            {'0', '1'}, {'Active', 'Inactive'}, {'Enabled', 'Disabled'},
-            # Status variations
-            {'Completed', 'Pending', 'Failed'}, {'Open', 'Closed'},
-            {'Approved', 'Rejected', 'Pending'}
-        ]
-
-        unique_values = set(value_counts.index[:10])  # Check top 10 values
-        for pattern in safe_patterns:
-            if unique_values.issubset(pattern) or pattern.issubset(unique_values):
-                return True
-
-        return False  # Default to not preserving if uncertain
+        limit = CATEGORY_LIMITS.get(self.safety_mode)
+        if limit is None:  # strict, or an unknown mode
+            return False
+        if len(value_counts) > limit:
+            return False
+        if len(str_series) < MIN_ROWS_FOR_REAL_VALUES:
+            return False
+        if len(value_counts) / len(str_series) > MAX_UNIQUE_RATIO:
+            return False
+        if value_counts.iloc[0] < MIN_VALUE_COUNT:
+            return False
+        if is_identifier_like_name(column_name):
+            return False
+        for value in value_counts.index:
+            if len(value) > MAX_CATEGORY_LENGTH or _looks_sensitive_value(value):
+                return False
+        return True
 
     def _get_python_type(self, series: pd.Series) -> str:
         """Get the Python type of a pandas Series."""
@@ -570,7 +674,9 @@ class MetadataExtractor:
     def to_secure_json(self, metadata: Dict[str, Any]) -> str:
         """
         Convert metadata to secure JSON format.
-        This ensures no actual data values are included, only statistical properties.
+
+        extract() already masks values, so on its output this changes nothing.
+        It stays as a safety net for metadata built elsewhere or by older code.
 
         Args:
             metadata: Metadata dictionary
@@ -593,5 +699,10 @@ class MetadataExtractor:
                             for i, count in enumerate(col_stats["most_common_values"].values())
                         }
                     # If preserve_values is True, keep the actual values
+
+        # Older metadata quoted a real cell here.
+        for col_patterns in (secure_metadata.get("patterns") or {}).values():
+            if isinstance(col_patterns, dict) and isinstance(col_patterns.get("id_pattern"), dict):
+                col_patterns["id_pattern"].pop("example", None)
 
         return json.dumps(secure_metadata, indent=2, default=str)

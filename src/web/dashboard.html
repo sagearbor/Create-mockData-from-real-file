@@ -500,13 +500,14 @@
             document.getElementById('cacheSize').textContent = `${data.statistics.cache_size_mb || 0} MB`;
 
             // Update entries list
+            // Column names and log fields come from uploaded files: escape before inserting as HTML.
             const entriesList = document.getElementById('cacheEntriesList');
             if (data.entries && data.entries.length > 0) {
                 entriesList.innerHTML = data.entries.slice(0, 10).map(entry => `
                     <div class="cache-entry-item">
                         <div>${new Date(entry.timestamp).toLocaleString()}</div>
                         <div class="cache-entry-columns">
-                            ${entry.columns.join(', ') || 'No columns info'}
+                            ${escapeHtml((entry.columns || []).join(', ') || 'No columns info')}
                         </div>
                     </div>
                 `).join('');
@@ -852,9 +853,9 @@
             tbody.innerHTML = recentLogs.map(log => `
                 <tr>
                     <td>${new Date(log.timestamp).toLocaleString()}</td>
-                    <td>${log.method}</td>
-                    <td>${log.num_rows}</td>
-                    <td>${log.num_columns}</td>
+                    <td>${escapeHtml(log.method)}</td>
+                    <td>${escapeHtml(log.num_rows)}</td>
+                    <td>${escapeHtml(log.num_columns)}</td>
                     <td>${log.total_time.toFixed(2)}s</td>
                     <td>
                         <span class="${log.cache_hit ? 'cache-hit' : 'cache-miss'}">
@@ -863,6 +864,11 @@
                     </td>
                 </tr>
             `).join('');
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, c => (
+                {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
         }
 
         function showError(message) {

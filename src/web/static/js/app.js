@@ -597,6 +597,13 @@ async function extractMetadata() {
 }
 
 // Display functions
+// Text that came from an uploaded file or a server response is never inserted as HTML
+// without this: column names, cell values and messages can hold markup.
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, c => (
+        {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
 function displayResults(data) {
     resultsSection.style.display = 'block';
     
@@ -605,14 +612,14 @@ function displayResults(data) {
         html += '<h3>✅ Synthetic Data Generated Successfully!</h3>';
         
         if (data.shape) {
-            html += `<p>Generated ${data.shape[0]} rows × ${data.shape[1]} columns</p>`;
+            html += `<p>Generated ${escapeHtml(data.shape[0])} rows × ${escapeHtml(data.shape[1])} columns</p>`;
         }
         
         if (data.columns) {
             html += '<h4>Columns:</h4>';
             html += '<ul>';
             data.columns.forEach(col => {
-                html += `<li>${col}</li>`;
+                html += `<li>${escapeHtml(col)}</li>`;
             });
             html += '</ul>';
         }
@@ -636,7 +643,7 @@ function displayResults(data) {
             };
         }
     } else {
-        resultsContent.innerHTML = `<p>${data.message || 'Generation completed'}</p>`;
+        resultsContent.innerHTML = `<p>${escapeHtml(data.message || 'Generation completed')}</p>`;
     }
 }
 
@@ -649,13 +656,13 @@ function displayMetadata(metadata) {
     
     let html = '<div class="metadata-summary">';
     html += '<h3>📊 Metadata Extracted</h3>';
-    html += `<p><strong>Rows:</strong> ${metadata.structure.shape.rows}</p>`;
-    html += `<p><strong>Columns:</strong> ${metadata.structure.shape.columns}</p>`;
+    html += `<p><strong>Rows:</strong> ${escapeHtml(metadata.structure.shape.rows)}</p>`;
+    html += `<p><strong>Columns:</strong> ${escapeHtml(metadata.structure.shape.columns)}</p>`;
     html += '<h4>Column Details:</h4>';
     html += '<ul>';
     
     metadata.structure.columns.forEach(col => {
-        html += `<li><strong>${col.name}</strong>: ${col.python_type} (${col.unique_count} unique values)</li>`;
+        html += `<li><strong>${escapeHtml(col.name)}</strong>: ${escapeHtml(col.python_type)} (${escapeHtml(col.unique_count)} unique values)</li>`;
     });
     
     html += '</ul>';
@@ -749,7 +756,7 @@ function createTableFromJSON(data) {
     // Header
     html += '<thead><tr>';
     Object.keys(data[0]).forEach(key => {
-        html += `<th style="border: 1px solid #ddd; padding: 8px; background: #f5f5f5;">${key}</th>`;
+        html += `<th style="border: 1px solid #ddd; padding: 8px; background: #f5f5f5;">${escapeHtml(key)}</th>`;
     });
     html += '</tr></thead>';
     
@@ -758,7 +765,7 @@ function createTableFromJSON(data) {
     data.forEach(row => {
         html += '<tr>';
         Object.values(row).forEach(value => {
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${value}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${escapeHtml(value)}</td>`;
         });
         html += '</tr>';
     });
@@ -1052,7 +1059,7 @@ function displayPreview(data) {
     const shownText = shown >= data.total_rows
         ? `all ${data.total_rows} rows are shown below.`
         : `the first ${shown} are shown below. Download gives all ${data.total_rows}.`;
-    info.innerHTML = `<strong>${fileCountText}</strong> - ${data.total_rows} rows × ${data.total_columns} columns generated; ${shownText}`;
+    info.innerHTML = `<strong>${escapeHtml(fileCountText)}</strong> - ${escapeHtml(data.total_rows)} rows × ${escapeHtml(data.total_columns)} columns generated; ${escapeHtml(shownText)}`;
 
     // Build table
     const thead = document.getElementById('previewHead');
@@ -1260,7 +1267,7 @@ function showTimingBreakdown(target, timings, generationMethod) {
             const timeStr = value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(2)}s`;
             const cssClass = key === 'total' ? 'timing-total' : '';
             html += `<div class="timing-item ${cssClass}">
-                <span class="timing-label">${label}</span>
+                <span class="timing-label">${escapeHtml(label)}</span>
                 <span class="timing-value">${timeStr}</span>
             </div>`;
         }
@@ -1674,8 +1681,7 @@ function showLoadedDictionary(data, fileName) {
             const columnsDiv = document.getElementById('dictionaryColumns');
             if (columnsDiv) {
                 // Names and values come from the uploaded file: escape before inserting as HTML.
-                const esc = (s) => String(s).replace(/[&<>"']/g, c => (
-                    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+                const esc = escapeHtml;
                 columnsDiv.innerHTML = '<h4>Defined Columns:</h4><ul>' +
                     Object.keys(data.dictionary.columns || {}).map(col => {
                         const colDef = data.dictionary.columns[col];

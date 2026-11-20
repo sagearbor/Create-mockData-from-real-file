@@ -6,3 +6,7 @@
 {"ts": "2026-11-20T14:22:12-0500", "event": "start", "slug": "model-choice", "what": "Probe Foundry models with real calls"}
 {"ts":"2026-11-20T14:24:03-0500","event":"start","slug":"sdlc-docs","what":"Copy SDLC templates into Confluence"}
 {"ts":"2026-11-20T14:25:17-0500","event":"stop","slug":"sdlc-docs","what":"Seven template copies created in Confluence (not yet filled)"}
+{"ts":"2026-11-20T14:25:53-0500","event":"start","slug":"sec-xss","what":"Fix HTML injection sinks"}
+{"ts":"2026-11-20T14:27:37-0500","event":"stop","slug":"security-review","what":"Own review complete and saved"}
+{"ts":"2026-11-20T14:29:00-0500","event":"start","slug":"security-tickets","what":"File merged findings in Jira"}
+{"ts":"2026-11-20T14:29:24-0500","event":"stop","slug":"security-tickets","what":"13 security tickets filed"}

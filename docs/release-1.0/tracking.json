@@ -43,6 +43,84 @@
    "id": "219583",
    "type": "Story",
    "summary": "Generation reliability fixes already merged (pull request 12)"
+  },
+  "sec-01": {
+   "key": "ADP-56",
+   "id": "219592",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-02": {
+   "key": "ADP-57",
+   "id": "219594",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-03": {
+   "key": "ADP-58",
+   "id": "219595",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-04": {
+   "key": "ADP-59",
+   "id": "219596",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-05": {
+   "key": "ADP-60",
+   "id": "219597",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-06": {
+   "key": "ADP-61",
+   "id": "219598",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-07": {
+   "key": "ADP-62",
+   "id": "219599",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-08": {
+   "key": "ADP-63",
+   "id": "219600",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-09": {
+   "key": "ADP-64",
+   "id": "219601",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-10": {
+   "key": "ADP-65",
+   "id": "219602",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-11": {
+   "key": "ADP-66",
+   "id": "219603",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-12": {
+   "key": "ADP-67",
+   "id": "219604",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
+  },
+  "sec-13": {
+   "key": "ADP-68",
+   "id": "219605",
+   "type": "Task",
+   "summary": "(security ticket: see Jira)"
   }
  },
  "pages": {

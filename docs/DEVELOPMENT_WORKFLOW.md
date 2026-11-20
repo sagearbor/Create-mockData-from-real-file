@@ -1,20 +1,20 @@
-# Development Workflow Guide for Azure DevOps
+# Development Workflow Guide
 
 ## Quick Start for Developers
 
-This guide explains our git workflow, branching strategy, and how to safely develop and deploy code using Azure DevOps.
+This guide explains the git workflow and branching strategy. The repository is on GitHub and changes reach `main` through pull requests. No pipeline deploys this service automatically, and there is no production environment yet.
 
 ## 🌳 Branch Strategy
 
 ```
 main
-  └── dev
-       └── feature/your-feature-name
+  └── feature/your-feature-name
 ```
 
-- **`main`**: Production branch (protected, PR only)
-- **`dev`**: Development branch (active development)
-- **`feature/*`**: Feature branches (individual work)
+- **`main`**: Changes arrive by pull request
+- **`feature/*`**, **`fix/*`**, **`release/*`**: Working branches
+
+The command examples below use a `dev` branch between `main` and the feature branches. Where the repository has no `dev` branch, read `dev` as `main`.
 
 ## 📋 Development Workflow
 
@@ -59,14 +59,14 @@ git push origin feature/add-user-authentication
 
 ### 3. Creating a Pull Request
 
-1. Go to Azure DevOps > Repos > Pull Requests
+1. Go to the repository on GitHub > Pull requests
 2. Click "New Pull Request"
 3. Select: `feature/add-user-authentication` → `dev`
 4. Fill in:
    - Title: Clear description of changes
    - Description: What, why, and how
    - Reviewers: Add team members
-   - Work Items: Link related tasks
+   - The Jira key of the related task
 5. Click "Create"
 
 ### 4. After PR Approval
@@ -80,22 +80,9 @@ git branch -d feature/add-user-authentication
 
 ## 🚀 Deployment Process
 
-### To Development Environment
+Merging to `main` does not deploy anything. The service is deployed by hand as a container on Azure Container Apps, through the organisation's guarded procedure (`Dockerfile.aca`, `deploy/aca/containerapp.yaml`). See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).
 
-1. Merge PR to `dev` branch
-2. Pipeline automatically:
-   - Builds Docker image
-   - Runs tests
-   - Deploys to dev environment
-3. Verify at: `https://your-app-dev.azurewebsites.net`
-
-### To Production Environment
-
-1. Create PR: `dev` → `main`
-2. Get approval from senior developer
-3. Merge PR
-4. Pipeline automatically deploys to production
-5. Verify at: `https://your-app.azurewebsites.net`
+As deployed, the service is reachable only on the organisation network (VPN). There is no production environment yet.
 
 ## 📝 Commit Message Standards
 
@@ -178,21 +165,9 @@ docker run -p 8201:8201 myapp:test
 git diff --staged
 ```
 
-## 📊 Pipeline Status Monitoring
+## 📊 Checks on a Pull Request
 
-### Check Pipeline Status
-1. Go to Azure DevOps > Pipelines
-2. Click on your pipeline
-3. View recent runs
-
-### If Pipeline Fails
-1. Click on failed run
-2. Check error messages
-3. Common fixes:
-   - Missing environment variables
-   - Failed tests
-   - Docker build issues
-   - Azure connection problems
+Run the tests before you push (`pytest`). The only GitHub Actions workflow in this repository is `.github/workflows/deploy-cloudrun.yml`, which is started by hand and kept for reference only.
 
 ## 🔄 Daily Workflow Summary
 
@@ -209,45 +184,16 @@ git add .
 git commit -m "feat: Description"
 git push origin feature/new-feature
 
-# Create PR in Azure DevOps
+# Create a pull request on GitHub
 
 # After PR merged
 git checkout dev
 git pull origin dev
 ```
 
-## 🚨 Emergency Procedures
+## 🚨 If a Deployment Goes Wrong
 
-### Rollback Production
-
-```bash
-# If production deployment causes issues
-git checkout main
-git pull origin main
-git log --oneline -5  # Find last good commit
-git revert HEAD      # Create revert commit
-git push origin main  # Triggers rollback deployment
-```
-
-### Hotfix Process
-
-```bash
-# For urgent production fixes
-git checkout main
-git pull origin main
-git checkout -b hotfix/critical-bug-fix
-
-# Make minimal fix
-git add .
-git commit -m "hotfix: Fix critical production bug"
-git push origin hotfix/critical-bug-fix
-
-# Create PR directly to main (with approval)
-# After merge, sync back to dev
-git checkout dev
-git pull origin main
-git push origin dev
-```
+Follow the organisation's Container Apps procedure. Then fix the code on a branch and open a pull request as usual.
 
 ## 📚 Git Command Reference
 
@@ -279,11 +225,8 @@ git push origin dev
 ## 🤝 Getting Help
 
 - **Git issues**: Ask team lead or check this guide
-- **Pipeline failures**: Check Azure DevOps logs
 - **Merge conflicts**: Ask for help, don't force push
-- **Azure issues**: Contact DevOps team
-
-Remember: It's better to ask questions than to break production!
+- **Azure issues**: Ask the platform team
 
 ---
 

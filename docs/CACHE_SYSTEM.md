@@ -2,7 +2,9 @@
 
 ## Overview
 
-The BYOD Synthetic Data Generator implements an intelligent caching system that significantly improves performance by reusing previously generated code for similar data structures.
+The generator saves each script the AI model writes, together with the description of the data it was written for, in a folder on the server's disk. A later request with a similar description reuses the script instead of calling the AI model.
+
+The description holds column names, data types, counts and summary statistics, and under the rules of the chosen safety mode some real values (repeated short category labels; the smallest and largest values of ordinary number columns). It does not hold rows. The uploaded file is not written to the cache.
 
 ## How It Works
 
@@ -22,16 +24,18 @@ The cache system uses a two-level hashing approach:
 
 Users can configure caching behavior via the `cache_mode` parameter:
 
-- **`off`**: No caching, always generate new code via LLM
+- **`off`**: No cached script is looked up by the route. Send `use_cache=false` as well to make sure nothing is read or written
 - **`structure`**: Match based on column names and types only
 - **`structure_stats`**: Match based on structure AND statistical properties
 
-### Vector Similarity Search
+### Similarity
 
-For intelligent matching, the system:
-1. Generates 128-dimensional embeddings for each cached pattern
-2. Uses cosine similarity to find similar patterns
-3. Applies a configurable match threshold (default: 0.8)
+When the structure matches, the system:
+1. Builds a list of 128 numbers from the description (row and column counts, and per column mean, spread, range or text length). No embedding model is called
+2. Compares it with the list stored for each cached script
+3. Reuses the closest one at or above the request's match threshold (default: 0.8)
+
+A script is reused only for the number of rows, the AI model and the safety mode it was written for. A cached script that fails to run is removed.
 
 ## Cache Storage
 
@@ -51,31 +55,29 @@ data/cache/
   "format_hash": "format_xxx",
   "full_hash": "full_yyy",
   "timestamp": "2025-09-23T16:28:19.651851",
-  "columns": ["col1", "col2", "..."],
-  "version": "1.0"
+  "num_rows": 100,
+  "version": "1.1"
 }
 ```
 
+The metadata file holds the description, including the column names. `GET /api/cache-info` returns those column names, and the usage dashboard shows them.
+
 ## Performance Benefits
 
-- **Speed**: Cache hits are typically 5-10x faster than LLM generation
-- **Cost**: Reduces Azure OpenAI API calls and costs
-- **Consistency**: Ensures similar data structures get consistent treatment
+- **Speed**: A cache hit skips the call to the AI model
+- **Cost**: Fewer Azure OpenAI calls
 
 ## Cache Management
 
 ### API Endpoints
 
 - **GET `/api/cache-info`**: Returns cache statistics and entries
-- **DELETE `/api/cache/clear`**: Clear cache with optional age filter
+- **DELETE `/api/cache/clear`** and **DELETE `/cache`**: Clear cache with optional age filter
   - Query param: `older_than_days` (optional)
 
-### Automatic Cleanup
+### Cleanup
 
-The system includes:
-- Configurable cache size limits
-- Age-based expiration (default: 30 days)
-- Automatic index rebuilding if corrupted
+Nothing is removed automatically, and there is no size limit. Entries stay until one of the clear routes is called, or until `GENERATOR_VERSION` is raised (older entries are then no longer matched). The service has no sign-in (tracked as ADP-60).
 
 ## Seed Injection for Variety
 
@@ -95,25 +97,20 @@ This ensures that cached code produces different results each time while maintai
 
 ### Environment Variables
 ```bash
-CACHE_ENABLED=true           # Enable/disable caching
-CACHE_MAX_SIZE_MB=500        # Maximum cache size
-CACHE_MATCH_THRESHOLD=0.8    # Similarity threshold for matches
-CACHE_TTL_DAYS=30           # Cache time-to-live in days
+LOCAL_CACHE_PATH=./data/cache   # Folder for cached descriptions and scripts
+GENERATOR_VERSION=1.1           # Part of every cache key; raising it retires every cached script
 ```
 
-### Programmatic Configuration
-```python
-generator = SyntheticDataGenerator(
-    cache_enabled=True,
-    cache_match_threshold=0.8
-)
-```
+### Per request
+- `use_cache` (true/false): false neither reads nor writes the cache
+- `cache_mode` (`off`, `structure`, `structure_stats`) on the form routes: which cached scripts may be reused
+- `match_threshold` (0 to 1): how close a cached description must be
 
 ## Best Practices
 
-1. **Use `structure_stats` mode** for production to ensure statistical consistency
+1. **Use `structure_stats` mode** when the statistics should match closely
 2. **Use `structure` mode** when statistical properties can vary
-3. **Use `off` mode** only for debugging or when you need completely fresh generation
+3. **Use `use_cache=false`** when the description must not be stored, or when you need newly written code
 4. **Monitor cache size** and clear old entries periodically
 5. **Review cache hits** in logs to ensure quality matches
 
@@ -138,7 +135,7 @@ INFO - Cached generation with key: format_xxx_full_yyy_timestamp
 
 ### Cache Not Working
 1. Check if `data/cache/` directory exists and is writable
-2. Verify cache is enabled in configuration
+2. Check the request did not send `use_cache=false`
 3. Check logs for cache-related errors
 4. Ensure cache_index.json is valid JSON
 
@@ -149,6 +146,6 @@ INFO - Cached generation with key: format_xxx_full_yyy_timestamp
 4. Monitor cache size - very large caches can slow searches
 
 ### Data Not Varying
-1. Ensure seed injection is enabled (default: true)
+1. Seed injection only changes scripts that set a random seed
 2. Check if generated code uses random functions
 3. Verify the LLM is generating randomized code, not static values

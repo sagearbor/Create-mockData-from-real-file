@@ -43,25 +43,27 @@ When working on this project, follow these rules:
 
 ## Project Overview
 
-This is the BYOD (Bring Your Own Data) Synthetic Data Generation Service - a tool designed to generate synthetic/mock data that preserves the structure and statistical properties of real data while ensuring privacy. The service allows developers to work with realistic test data without PHI or sensitive information exposure.
+This is the BYOD (Bring Your Own Data) Synthetic Data Generation Service - a tool that generates made-up data with the same structure and similar statistics as an uploaded file. Rows are not sent to the LLM; a description of the data is. This release is not approved for real study data or patient identifiers.
 
 ## Key Architecture Components
 
 - **Local-First Development**: Designed to run entirely on local machines during development
-- **Secure by Design**: Uses metadata extraction approach - LLMs never see sensitive data directly
+- **Description, not rows**: The server builds a description of the uploaded data (column names, data types, counts, summary statistics) and sends only that to the LLM. Rows are never sent. Text values are replaced with placeholders, except repeated short category labels in Balanced and Permissive modes; outside Strict mode the real smallest and largest values of ordinary number columns with 20 or more values are sent. The rules live in `src/core/metadata_extractor.py`.
 - **Intelligent Caching**: Leverages hashing and vector similarity search to reuse previously generated scripts
 - **Multi-Interface**: Supports web UI, RESTful API, and MCP tool calls
 
 ## Azure Services Used
 
-When deployed to cloud:
-- **Azure App Service**: Hosts web UI
-- **Azure Function App**: Main orchestration engine
-- **Azure OpenAI**: Provides LLM and embedding models
-- **Azure Blob Storage**: Temporary file staging
-- **Azure Cosmos DB**: Stores Program Catalog
-- **Azure AI Search**: Vector database capabilities
-- **Azure Key Vault**: Secrets management
+The application code calls these Azure services:
+- **Azure OpenAI**: the chat model that writes the generation script
+- **Azure Blob Storage**: only when `TELEMETRY_BLOB_ACCOUNT_URL` is set, and only for
+  the `llm_call` telemetry lines written by `src/dcri_llm.py` (counts, no prompt text)
+
+It is deployed as a container on **Azure Container Apps** (`Dockerfile.aca`,
+`deploy/aca/containerapp.yaml`). The cache is a folder on the container's disk.
+The code does not use App Service, Function App, Cosmos DB, AI Search or Key Vault,
+and does not put uploaded files in Blob Storage; `src/utils/config.py` and `infrastructure/` still carry settings and
+templates for them from an earlier plan.
 
 ## Development Setup
 
@@ -70,7 +72,9 @@ When deployed to cloud:
    - For local development, minimally configure:
      - `AZURE_OPENAI_ENDPOINT` (required: unset = `/ready` 503 and every generation
        request fails with a clear error; there is NO template fallback)
-     - `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` (default `gpt-5-nano`)
+     - `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` (default `gpt-5-nano`; this is the server default model)
+     - `LLM_ALLOWED_MODELS` (optional, comma-separated deployment names a request may
+       choose with `model`; unset = the built-in list in `src/core/models.py`)
      - `SOLUTION_NAME=mock-data-generator`
    - Auth: every LLM call goes through the vendored `src/dcri_llm.py` (do not edit it;
      re-copy from mvp_landing_page `packages/dcri_llm`). `LLM_AUTH=identity` (default)
@@ -131,10 +135,9 @@ The project follows a modular architecture designed for both local development a
 
 ## Key Implementation Notes
 
-- The service never exposes raw sensitive data to LLMs - it works with statistical metadata
+- Rows are never sent to the LLM; it receives the masked description built by `MetadataExtractor`. Column names are always sent. This release is not approved for real study data or patient identifiers.
 - Supports both file uploads and programmatic API access
 - Implements caching to reduce costs and improve performance
-- Designed for enterprise use with compliance and security in mind
 
 ## Development Workflow
 

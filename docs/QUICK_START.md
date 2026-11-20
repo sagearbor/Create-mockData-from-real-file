@@ -1,18 +1,17 @@
 sta# Quick Start Commands
 
+Generation needs an Azure OpenAI model. Copy `.env.example` to `.env` and set
+`AZURE_OPENAI_ENDPOINT` first; without it the server starts but every generation
+request fails with an error. Do not upload real study data or patient identifiers:
+this release has not been approved for them.
+
 ## Option 1: Direct Python Run (Simplest)
 ```bash
 # Run this command to start the server immediately
 python3 main.py
 ```
 
-## Option 2: Test Run Script (With Import Checks)
-```bash
-# This will test all imports first, then start the server
-python3 test_run.py
-```
-
-## Option 3: Full Setup Script (Recommended for First Time)
+## Option 2: Full Setup Script (Recommended for First Time)
 ```bash
 # This will set up virtual environment and install dependencies
 ./run_app.sh
@@ -33,7 +32,7 @@ kill -9 $(lsof -t -i:8201)
 mkdir -p data/local_storage data/cache data/samples logs
 
 # 4. Install dependencies (if not already installed)
-pip3 install fastapi uvicorn pandas numpy python-dotenv
+pip3 install -r requirements.txt
 
 # 5. Run the application
 python3 main.py
@@ -46,8 +45,9 @@ Once running, you can test with:
 ```bash
 # In a new terminal:
 
-# 1. Check health
+# 1. Check health, then whether the AI model is configured (200 = yes, 503 = no)
 curl http://localhost:8201/health
+curl -i http://localhost:8201/ready
 
 # 2. Open in browser
 open http://localhost:8201
@@ -64,10 +64,7 @@ curl -X POST "http://localhost:8201/generate" \
 
 If you get import errors:
 ```bash
-# Install missing packages
-pip3 install pydantic pydantic-settings python-multipart aiofiles
-
-# Or install all requirements
+# Install all requirements
 pip3 install -r requirements.txt
 ```
 

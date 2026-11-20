@@ -1,14 +1,14 @@
-# 🎉 Data Editor Features - COMPLETE!
+# Data Editor Features
 
-## ✅ All Requested Features Implemented
+You can view and edit data in the browser before generating synthetic data.
 
-You can now **view and edit data directly in the browser** before generating synthetic data!
+When you generate, the edited table is sent to the server and analysed there, the same as an uploaded file. Do not load real study data or patient identifiers: this release has not been approved for them. The demo datasets are examples built into the page.
 
 ## 📝 How to Use the New Data Editor
 
 ### 1. Start the Application
 ```bash
-cd /dcri/sasusers/home/scb2/gitRepos/Create-mockData-from-real-file
+cd Create-mockData-from-real-file
 python3 main.py
 ```
 
@@ -16,7 +16,7 @@ python3 main.py
 Navigate to: **http://localhost:8201**
 
 ### 3. Load Data
-- Click any demo button (e.g., "🏥 Medical Records (PHI)")
+- Choose a demo dataset (e.g., "🏥 Medical")
 - Or upload your own CSV/JSON file
 - **The data will appear in an editable table!**
 
@@ -46,7 +46,7 @@ Navigate to: **http://localhost:8201**
 ## 🎯 Workflow Example
 
 1. **Load Medical Data**
-   - Click "🏥 Medical Records (PHI)"
+   - Choose the "🏥 Medical" demo dataset
    - Data appears in editable table
 
 2. **Edit in Weird Ways**
@@ -67,7 +67,7 @@ Navigate to: **http://localhost:8201**
 
 ## 🔥 Cool Experiments to Try
 
-### Privacy Test
+### Placeholder Test
 - Edit all patient names to "XXXXX"
 - Generate synthetic data
 - Check if it still creates diverse names
@@ -97,9 +97,9 @@ Navigate to: **http://localhost:8201**
 
 When you edit data and generate synthetic:
 1. Your edited data is sent to the server as CSV
-2. Metadata is extracted from YOUR VERSION (not the original)
-3. Statistical properties are calculated from the edited data
-4. Synthetic data is generated matching your weird patterns
+2. The server builds a description from YOUR VERSION (not the original)
+3. The description (not the rows) is sent to the AI model, which writes a script
+4. The server runs the script to make synthetic data
 5. The result shows how the generator handles data quality issues
 
 ## 🎨 Visual Indicators
@@ -116,6 +116,3 @@ The editor is fully functional. Try breaking the data in creative ways and see h
 
 **Remember**: The whole point is to edit data in weird ways and see how the mock file turns out. Have fun experimenting!
 
----
-
-*All features requested have been implemented. The application is ready for testing and experimentation.*

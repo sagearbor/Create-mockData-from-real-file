@@ -2,7 +2,9 @@
 
 ## Overview
 
-The Usage Dashboard provides real-time insights into the BYOD Synthetic Data Generator's performance, usage patterns, and cache efficiency. Access it at `http://localhost:8201/dashboard`.
+The Usage Dashboard shows how often the generator was used, how long requests took and what is in the cache. Access it at `http://localhost:8201/dashboard`.
+
+The dashboard has no sign-in: anyone who can reach the site can open it. It lists the column names of cached descriptions.
 
 ## Dashboard Components
 
@@ -29,7 +31,6 @@ Tracks the number of generation requests over time with:
 Visualizes the breakdown of generation methods:
 - **Cache hits**: Requests served from cache
 - **LLM calls**: New generations via Azure OpenAI
-- **Fallback**: Local generation when LLM fails
 
 ### 4. Cache Statistics Section
 
@@ -101,12 +102,7 @@ The dashboard fetches data from:
 
 ### Dashboard Settings
 
-Configure via environment variables:
-```bash
-DASHBOARD_REFRESH_INTERVAL=30000  # Milliseconds
-DASHBOARD_DEFAULT_RANGE_DAYS=7    # Default time range
-DASHBOARD_MAX_CACHE_ENTRIES=100   # Max entries in cache table
-```
+There are no environment variables for the dashboard. The refresh interval (30 seconds) and the default range (7 days) are set in the code.
 
 ### Chart Customization
 
@@ -159,19 +155,5 @@ const chartOptions = {
 
 ## Security Considerations
 
-The dashboard is designed for local/development use. For production:
-1. Add authentication/authorization
-2. Use HTTPS for secure connections
-3. Implement rate limiting
-4. Sanitize all user inputs
-5. Restrict API access to authorized users
+The dashboard and the routes it calls have no sign-in. Sign-in and an admin role are tracked in Jira as ADP-60.
 
-## Future Enhancements
-
-Planned improvements include:
-- Export data to CSV/Excel
-- Custom alert thresholds
-- Comparative analysis tools
-- Performance predictions
-- Cost tracking and projections
-- User session analytics

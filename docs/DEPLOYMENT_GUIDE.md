@@ -1,15 +1,24 @@
 # Deployment Guide - BYOD Synthetic Data Generator
 
+## Status of this release
+
+- The service runs as one container on **Azure Container Apps**. That is the only approved route.
+- As deployed, it is reachable only on the organisation network (VPN). **There is no production environment yet.**
+- The service has **no sign-in**. Anyone who can reach it can use it.
+- This release has **not been approved for real study data or patient identifiers**. No compliance assessment has been done.
+- Generated scripts are screened before they run, but they run in the same container as the application. This is not full isolation.
+
 ## Table of Contents
 1. [Local Development](#local-development)
-2. [Azure Deployment](#azure-deployment)
-3. [Docker Deployment](#docker-deployment)
-4. [Production Configuration](#production-configuration)
-5. [Monitoring & Maintenance](#monitoring--maintenance)
+2. [Settings](#settings)
+3. [Azure Container Apps](#azure-container-apps)
+4. [Health and readiness](#health-and-readiness)
+5. [What the container stores](#what-the-container-stores)
+6. [Files kept for reference only](#files-kept-for-reference-only)
+7. [Troubleshooting](#troubleshooting)
 
 ## Local Development
 
-### Quick Start
 ```bash
 # Clone repository
 git clone https://github.com/your-org/Create-mockData-from-real-file.git
@@ -24,537 +33,93 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env: AZURE_OPENAI_ENDPOINT is required
+
+# Sign in so the app can reach Azure OpenAI (LLM_AUTH=identity, the default)
+az login
 
 # Run application
 python main.py
 ```
 
-### Development Tools
 ```bash
 # Run tests
-pytest tests/
-
-# Format code
-black src/ tests/
-isort src/ tests/
-
-# Lint code
-flake8 src/
-mypy src/
+pytest
 
 # Run with auto-reload
 uvicorn main:app --reload --host 0.0.0.0 --port 8201
 ```
 
-## Azure Deployment
+## Settings
 
-### Prerequisites
-- Azure subscription
-- Azure CLI installed
-- Terraform or Bicep CLI
-- Azure OpenAI resource (optional)
+| Setting | Needed | What it does |
+|---------|--------|--------------|
+| `AZURE_OPENAI_ENDPOINT` | yes | Address of the Azure OpenAI resource. Without it `/ready` answers 503 and every generation request fails |
+| `LLM_AUTH` | no | `identity` (default: `az login` locally, managed identity when deployed) or `key` |
+| `AZURE_OPENAI_API_KEY` | only with `LLM_AUTH=key` | Key for people without an Azure identity |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | no | The server default model (default `gpt-5-nano`) |
+| `LLM_ALLOWED_MODELS` | no | Comma-separated models a request may choose. Unset = the built-in list in `src/core/models.py` |
+| `LLM_REASONING_EFFORT` | no | Default `low`; `off` = do not send |
+| `SOLUTION_NAME` | no | Name written into the AI call telemetry lines |
+| `ALLOWED_ORIGINS` | no | CORS: comma-separated origins allowed to call the site from a browser |
+| `MOCKDATA_MAX_UPLOAD_BYTES` | no | Largest request body on the upload routes (default 50 MB) |
+| `MOCKDATA_API_KEY` | no | If set, `/api/v1` requests must send it in `X-API-Key`. Other routes never check a key |
+| `MOCKDATA_API_MAX_BYTES` | no | Largest request body on `/api/v1` (default 10 MB) |
+| `GENERATOR_VERSION` | no | Part of every cache key (default `1.1`). Raising it retires every cached script |
+| `LOCAL_CACHE_PATH` | no | Folder for cached descriptions and scripts (default `./data/cache`) |
+| `APP_PORT` | no | Port (default 8201) |
 
-### Using Terraform
+Secrets are never written into a manifest or committed. `.env` is ignored by git.
 
-1. **Initialize Terraform:**
+On Azure Container Apps, `AZURE_CLIENT_ID` names the user-assigned managed identity the container signs in with.
+
+`src/utils/config.py` also accepts settings for Blob Storage, Cosmos DB, AI Search, a tenant id and a client secret. The application code does not use them.
+
+## Azure Container Apps
+
+- Image: built from `Dockerfile.aca` for `linux/amd64`. The base image is pinned by digest and the libraries are pinned in `requirements-aca.txt` and `constraints-aca.txt`. The process runs as a non-root user that can write only to `data/` and `logs/`.
+- Manifest: `deploy/aca/containerapp.yaml`. It holds placeholders, not real resource names. It sets `LLM_AUTH=identity`, so the container signs in to Azure OpenAI with a managed identity and no key.
+- Deploying: follow the organisation's guarded Container Apps procedure. It is not described in this public repository.
+- Replicas: the manifest runs exactly one. The cache, the uploaded dictionaries and the previews live on that one container's disk and memory, so more than one replica would not share them.
+
+## Health and readiness
+
 ```bash
-cd infrastructure/terraform
-terraform init
+# Liveness: the process is up. Always 200.
+curl https://<your-site>/health
+
+# Readiness: 200 only when the AI model is configured, otherwise 503 with the reason.
+curl -i https://<your-site>/ready
 ```
 
-2. **Create terraform.tfvars:**
-```hcl
-resource_group_name = "rg-byod-synthetic-prod"
-location           = "East US"
-environment        = "prod"
-app_name          = "byod-synthetic"
+Generation work runs outside the event loop so that `/health` keeps answering during a long AI call.
 
-# Sensitive variables
-azure_openai_endpoint = "https://your-openai.openai.azure.com/"
-azure_openai_api_key  = "your-api-key"
-```
+## What the container stores
 
-3. **Plan deployment:**
+- `data/cache/`: for each cached script, the description of the data it was written for (column names, summary statistics, and the values the safety mode allows) and the script. Kept until the cache is cleared (`DELETE /cache` or `DELETE /api/cache/clear`, optional `older_than_days`).
+- `logs/usage/`: one line per generation with the time, method, row and column counts and timings.
+- Standard output: application log lines, and one `llm_call` telemetry line per AI call (counts and timings, no prompt text). When `TELEMETRY_BLOB_ACCOUNT_URL` is set, the telemetry lines are also written to that storage account.
+- Uploaded files are not written to the cache. They are held in memory while a request is processed, and the web framework may keep a temporary file for that time.
+
+A container's disk is lost when the container is replaced, so the cache starts empty after each deployment.
+
+## Files kept for reference only
+
+These are in the repository but are **not** the approved route, and this guide does not vouch for them:
+
+- `infrastructure/terraform/`, `infrastructure/bicep/`: templates from an earlier plan (App Service, Function App, Blob Storage, Cosmos DB, AI Search, Key Vault). The application code does not use those services.
+- `deploy/cloudrun.sh`, `cloudbuild.yaml`, `Dockerfile.api`, `.github/workflows/deploy-cloudrun.yml`: Google Cloud Run. They deploy with authentication required.
+- `Dockerfile`, `docker-compose.yml`: local container runs. See [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md).
+
+## Troubleshooting
+
+1. **Every generation request fails with status 503:** the AI model is not configured. `GET /ready` gives the reason. Check `AZURE_OPENAI_ENDPOINT`, `LLM_AUTH` and the identity's access to the Azure OpenAI resource.
+
+2. **Status 502 on generation:** the AI call or the generated script failed. No data is returned; there is no other generator.
+
+3. **Status 413:** the request body is over `MOCKDATA_MAX_UPLOAD_BYTES` (or `MOCKDATA_API_MAX_BYTES` on `/api/v1`).
+
+4. **Port already in use (local):**
 ```bash
-terraform plan
-```
-
-4. **Deploy infrastructure:**
-```bash
-terraform apply
-```
-
-5. **Deploy application code:**
-```bash
-# Using Azure CLI
-az webapp deployment source config-zip \
-  --resource-group rg-byod-synthetic-prod \
-  --name byod-synthetic-prod-app \
-  --src app.zip
-```
-
-### Using Bicep
-
-1. **Deploy with Bicep:**
-```bash
-cd infrastructure/bicep
-
-# Create resource group
-az group create \
-  --name rg-byod-synthetic-prod \
-  --location "East US"
-
-# Deploy infrastructure
-az deployment group create \
-  --resource-group rg-byod-synthetic-prod \
-  --template-file main.bicep \
-  --parameters environment=prod \
-    azureOpenAIEndpoint="https://your-openai.openai.azure.com/" \
-    azureOpenAIApiKey="your-api-key"
-```
-
-### CI/CD Pipeline (Azure DevOps)
-
-Create `azure-pipelines.yml`:
-```yaml
-trigger:
-  branches:
-    include:
-      - main
-      - develop
-
-pool:
-  vmImage: 'ubuntu-latest'
-
-variables:
-  pythonVersion: '3.11'
-  
-stages:
-- stage: Build
-  jobs:
-  - job: BuildJob
-    steps:
-    - task: UsePythonVersion@0
-      inputs:
-        versionSpec: '$(pythonVersion)'
-      
-    - script: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-      displayName: 'Install dependencies'
-      
-    - script: |
-        pytest tests/ --junitxml=test-results.xml
-      displayName: 'Run tests'
-      
-    - task: PublishTestResults@2
-      inputs:
-        testResultsFiles: 'test-results.xml'
-        testRunTitle: 'Python Tests'
-      
-    - task: ArchiveFiles@2
-      inputs:
-        rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
-        includeRootFolder: false
-        archiveType: 'zip'
-        archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
-        
-    - publish: $(Build.ArtifactStagingDirectory)/app.zip
-      artifact: drop
-
-- stage: Deploy
-  dependsOn: Build
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  jobs:
-  - deployment: DeployWeb
-    environment: 'production'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: AzureWebApp@1
-            inputs:
-              azureSubscription: 'Azure Connection'
-              appType: 'webAppLinux'
-              appName: 'byod-synthetic-prod-app'
-              package: '$(Pipeline.Workspace)/drop/app.zip'
-```
-
-## Docker Deployment
-
-### Create Dockerfile
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Create necessary directories
-RUN mkdir -p data/local_storage data/cache data/samples logs
-
-# Expose port
-EXPOSE 8201
-
-# Run application
-CMD ["python", "main.py"]
-```
-
-### Build and Run with Docker
-```bash
-# Build image
-docker build -t byod-synthetic:latest .
-
-# Run container
-docker run -d \
-  --name byod-synthetic \
-  -p 8201:8201 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/logs:/app/logs \
-  --env-file .env \
-  byod-synthetic:latest
-
-# View logs
-docker logs -f byod-synthetic
-```
-
-### Docker Compose
-Create `docker-compose.yml`:
-```yaml
-version: '3.8'
-
-services:
-  web:
-    build: .
-    ports:
-      - "8201:8201"
-    environment:
-      - ENVIRONMENT=production
-      - LOG_LEVEL=INFO
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    restart: unless-stopped
-    
-  redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
-    
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./certs:/etc/nginx/certs
-    depends_on:
-      - web
-    restart: unless-stopped
-```
-
-Run with Docker Compose:
-```bash
-docker-compose up -d
-docker-compose logs -f
-docker-compose down
-```
-
-## Production Configuration
-
-### Environment Variables
-```env
-# Production settings
-ENVIRONMENT=production
-LOG_LEVEL=INFO
-APP_HOST=0.0.0.0
-APP_PORT=8201
-
-# Azure OpenAI (Required)
-AZURE_OPENAI_ENDPOINT=https://prod-openai.openai.azure.com/
-AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
-AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=gpt-4
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-ada-002
-
-# Azure Storage
-AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
-BLOB_STORAGE_CONTAINER_NAME=synthetic-data-uploads
-
-# Azure Cosmos DB
-COSMOS_DB_ENDPOINT=https://prod-cosmos.documents.azure.com:443/
-COSMOS_DB_KEY=${COSMOS_DB_KEY}
-COSMOS_DB_DATABASE_NAME=SyntheticData
-COSMOS_DB_CONTAINER_NAME=ProgramCatalog
-
-# Azure Search
-AZURE_SEARCH_ENDPOINT=https://prod-search.search.windows.net
-AZURE_SEARCH_API_KEY=${AZURE_SEARCH_API_KEY}
-AZURE_SEARCH_INDEX_NAME=program-vectors
-
-# Security
-USE_HTTPS=true
-ALLOWED_ORIGINS=https://yourdomain.com
-API_KEY_REQUIRED=true
-```
-
-### NGINX Configuration
-Create `nginx.conf`:
-```nginx
-events {
-    worker_connections 1024;
-}
-
-http {
-    upstream app {
-        server web:8201;
-    }
-    
-    server {
-        listen 80;
-        server_name yourdomain.com;
-        return 301 https://$server_name$request_uri;
-    }
-    
-    server {
-        listen 443 ssl http2;
-        server_name yourdomain.com;
-        
-        ssl_certificate /etc/nginx/certs/cert.pem;
-        ssl_certificate_key /etc/nginx/certs/key.pem;
-        
-        client_max_body_size 100M;
-        
-        location / {
-            proxy_pass http://app;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_read_timeout 300s;
-            proxy_connect_timeout 75s;
-        }
-        
-        location /static {
-            alias /app/src/web/static;
-            expires 30d;
-        }
-    }
-}
-```
-
-### Security Hardening
-
-1. **API Authentication:**
-```python
-# Add to main.py
-from fastapi.security import APIKeyHeader
-
-api_key_header = APIKeyHeader(name="X-API-Key")
-
-async def verify_api_key(api_key: str = Depends(api_key_header)):
-    if settings.API_KEY_REQUIRED and api_key != settings.API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid API key")
-    return api_key
-```
-
-2. **Rate Limiting:**
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-
-@app.post("/generate")
-@limiter.limit("10/minute")
-async def generate_synthetic_data(...):
-    ...
-```
-
-3. **CORS Configuration:**
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS.split(","),
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
-```
-
-## Monitoring & Maintenance
-
-### Health Checks
-```bash
-# Basic health check
-curl https://yourdomain.com/health
-
-# Detailed status
-curl https://yourdomain.com/api/status
-```
-
-### Logging
-```python
-# Configure production logging
-import logging
-from logging.handlers import RotatingFileHandler
-
-handler = RotatingFileHandler(
-    'logs/app.log',
-    maxBytes=10485760,  # 10MB
-    backupCount=10
-)
-handler.setFormatter(logging.Formatter(
-    '%(asctime)s %(levelname)s: %(message)s'
-))
-logger.addHandler(handler)
-```
-
-### Monitoring with Azure Application Insights
-```python
-from applicationinsights import TelemetryClient
-
-tc = TelemetryClient(settings.APP_INSIGHTS_KEY)
-
-# Track custom events
-tc.track_event('synthetic_generation', {
-    'rows': num_rows,
-    'threshold': match_threshold,
-    'format': output_format
-})
-
-# Track metrics
-tc.track_metric('generation_time', elapsed_time)
-tc.flush()
-```
-
-### Backup Strategy
-```bash
-# Backup Cosmos DB
-az cosmosdb sql database backup list \
-  --resource-group rg-byod-synthetic-prod \
-  --account-name byod-synthetic-prod-cosmos \
-  --database-name SyntheticData
-
-# Backup Storage Account
-azcopy copy \
-  'https://prodstorage.blob.core.windows.net/synthetic-data-uploads/*' \
-  'https://backupstorage.blob.core.windows.net/backup/' \
-  --recursive
-```
-
-### Maintenance Tasks
-```bash
-# Clear old cache (weekly)
-curl -X DELETE "https://yourdomain.com/cache?older_than_days=7"
-
-# Update dependencies (monthly)
-pip list --outdated
-pip install --upgrade -r requirements.txt
-
-# Database optimization (monthly)
-az cosmosdb sql container throughput update \
-  --resource-group rg-byod-synthetic-prod \
-  --account-name byod-synthetic-prod-cosmos \
-  --database-name SyntheticData \
-  --name ProgramCatalog \
-  --throughput 400
-```
-
-## Scaling Considerations
-
-### Horizontal Scaling
-```yaml
-# Azure App Service scaling
-az webapp scale \
-  --resource-group rg-byod-synthetic-prod \
-  --name byod-synthetic-prod-app \
-  --instance-count 3
-
-# Kubernetes deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: byod-synthetic
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: byod-synthetic
-  template:
-    metadata:
-      labels:
-        app: byod-synthetic
-    spec:
-      containers:
-      - name: app
-        image: byod-synthetic:latest
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "2000m"
-```
-
-### Performance Optimization
-1. **Enable caching** for repeated datasets
-2. **Use CDN** for static assets
-3. **Implement database indexes** for faster lookups
-4. **Use async operations** for I/O-bound tasks
-5. **Optimize container size** with multi-stage builds
-
-## Troubleshooting Deployment
-
-### Common Issues
-
-1. **Port binding errors:**
-```bash
-# Check if port is in use
 lsof -i :8201
-# Kill process using port
-kill -9 $(lsof -t -i:8201)
 ```
-
-2. **Memory issues:**
-```bash
-# Increase container memory
-docker run -m 4g byod-synthetic:latest
-```
-
-3. **SSL certificate issues:**
-```bash
-# Generate self-signed cert for testing
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
-```
-
-4. **Database connection issues:**
-```bash
-# Test Cosmos DB connection
-az cosmosdb show \
-  --resource-group rg-byod-synthetic-prod \
-  --name byod-synthetic-prod-cosmos
-```
-
-## Support
-
-For deployment assistance:
-- Review [Azure documentation](https://docs.microsoft.com/azure)
-- Check [Docker documentation](https://docs.docker.com)
-- Submit issues on GitHub

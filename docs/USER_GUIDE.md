@@ -12,20 +12,25 @@
 
 ## Overview
 
-The BYOD (Bring Your Own Data) Synthetic Data Generator is a privacy-preserving tool that creates realistic synthetic datasets based on the statistical properties of your original data. It ensures that sensitive information (like PHI) never leaves your environment while generating high-quality test data for development and testing.
+The BYOD (Bring Your Own Data) Synthetic Data Generator makes made-up datasets with the same columns and similar statistics as a file you upload. The server builds a description of the file, an Azure OpenAI model hosted by the organisation writes a Python script from that description, and the server runs the script.
+
+Your file is sent to the server and analysed there. Rows are not sent to the AI model. The model receives column names, data types, counts and summary statistics. For text columns it receives lengths and formats, plus the labels of repeated categories (such as M / F) in Balanced and Permissive modes; in Strict mode it receives no text values. Other text values, such as IDs, emails, phone numbers and free text, are replaced with placeholders.
+
+**Do not upload real study data or patient identifiers.** This release has not been approved for them. No compliance assessment has been done.
 
 ### Key Features
-- **Privacy-First**: Original data never touches the LLM - only statistical metadata
-- **Format Agnostic**: Supports CSV, JSON, Excel, Parquet, and more
-- **Statistical Fidelity**: Preserves distributions, correlations, and patterns
-- **Intelligent Caching**: Reuses generation scripts for similar datasets
-- **Multiple Interfaces**: Web UI, REST API, and programmatic access
+- **Description, not rows**: The AI model receives a description of the data, never the rows (see [What the AI model receives](#what-the-ai-model-receives))
+- **Input formats**: CSV, JSON, Excel, Parquet, TSV
+- **Statistics**: The description carries distributions, correlations and patterns for the model to follow
+- **Script cache**: Reuses a generated script for a similar description
+- **Interfaces**: Web UI, REST API, MCP and A2A (see [INTEGRATION.md](INTEGRATION.md))
+- **Choice of AI model**: From the server's allow-list
 
 ## Installation
 
 ### Prerequisites
 - Python 3.11 or higher
-- Azure OpenAI API access (optional, for enhanced generation)
+- Azure OpenAI access (required: generation does not work without the AI model)
 - 4GB RAM minimum
 - 1GB free disk space
 
@@ -51,7 +56,7 @@ pip install -r requirements.txt
 4. **Configure environment:**
 ```bash
 cp .env.example .env
-# Edit .env with your Azure OpenAI credentials (if available)
+# Edit .env: AZURE_OPENAI_ENDPOINT is required
 ```
 
 5. **Run the application:**
@@ -98,13 +103,14 @@ curl -X POST "http://localhost:8201/generate" \
 #### Generation Settings
 - **Number of Rows**: Specify how many rows to generate (leave empty to match original)
 - **Match Strictness**: Control how closely the synthetic data matches statistical properties
-  - 0% = Loose match (faster, less accurate)
-  - 100% = Exact match (slower, highly accurate)
+  - 0% = Loose match
+  - 100% = Closest match the AI model is asked for
   - Recommended: 70-85% for most use cases
-- **Safety Mode**: Control privacy level for categorical data preservation
-  - **Strict**: Maximum privacy - all categorical values anonymized
-  - **Balanced**: Preserves common non-sensitive categories (default)
-  - **Permissive**: Preserves more categorical values for maximum realism
+- **Safety Mode**: Controls which text values the AI model may see
+  - **Strict**: No text value is sent. Numbers are rounded and ranges are widened
+  - **Balanced** (default): Repeated short category labels (for example M / F) are sent for columns with up to 10 distinct values
+  - **Permissive**: The same rule, for columns with up to 50 distinct values
+- **AI model**: Leave the server default, or choose another model from the list. The list comes from the server (`GET /api/models`)
 
 #### Output Options
 - **CSV**: Standard comma-separated values
@@ -115,7 +121,7 @@ curl -X POST "http://localhost:8201/generate" \
 Try the generator with pre-loaded examples:
 - Sales Data
 - Customer Records
-- Medical Records (with PHI)
+- Medical (built-in example data)
 - Financial Transactions
 
 ### Advanced Features
@@ -126,11 +132,10 @@ Extract and view statistical metadata without generating synthetic data:
 2. Click "Extract Metadata Only"
 3. Review the JSON metadata structure
 
-#### Batch Processing
-Process multiple files at once:
-1. Select multiple files in the upload dialog
-2. Configure common settings
-3. Download results as a ZIP archive
+#### Several files at once
+Set "Number of files" (1 to 20) to get that many generated files in one ZIP archive. All are made from the one uploaded file.
+
+Batch generation from several uploaded files is switched off in this release (`POST /generate/batch` answers 501).
 
 ## Using the API
 
@@ -161,6 +166,14 @@ match_threshold: 0.8
 output_format: csv
 use_cache: true
 safety_mode: balanced
+model: <optional; a name from GET /api/models>
+```
+
+A `model` name that is not on the server's list is refused with status 400. There is also a JSON API under `/api/v1`; see [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+
+#### List the AI models
+```http
+GET /api/models
 ```
 
 #### Extract Metadata Only
@@ -200,14 +213,20 @@ with open('synthetic_data.csv', 'wb') as f:
 Create a `.env` file based on `.env.example`:
 
 ```env
-# Azure OpenAI Configuration (Required for LLM generation)
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_API_KEY=your-api-key
-AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=gpt-4
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-ada-002
+# Azure OpenAI (required; without the endpoint every generation request fails)
+AZURE_OPENAI_ENDPOINT=https://<your-foundry>.openai.azure.com/
+# identity (default): `az login` locally, managed identity when deployed. No key needed.
+LLM_AUTH=identity
+# Only with LLM_AUTH=key:
+# AZURE_OPENAI_API_KEY=<your-key>
+# The server default model
+AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=gpt-5-nano
+# Optional: models a request may choose (comma-separated). Unset = built-in list.
+# LLM_ALLOWED_MODELS=<deployment-name-1>,<deployment-name-2>
 
 # Application Settings
-GENERATOR_VERSION=1.0
+# Raising this number retires every cached script.
+GENERATOR_VERSION=1.1
 LOG_LEVEL=INFO
 ENVIRONMENT=local
 APP_PORT=8201
@@ -220,10 +239,12 @@ LOCAL_CACHE_PATH=./data/cache
 
 ### Cache Configuration
 
-The system automatically caches generation scripts for performance:
-- **Format Hash**: Matches datasets with identical structure
-- **Full Hash**: Matches datasets with identical statistics
-- **Similarity Search**: Finds similar datasets using vector embeddings
+The generated script and the description it was written for are saved on the server's disk (`LOCAL_CACHE_PATH`):
+- **Format Hash**: Matches datasets with the same columns and data types
+- **Full Hash**: Matches datasets with an identical description
+- **Similarity**: Compares a short list of numbers taken from the description
+
+A script is reused only for the number of rows it was written for.
 
 Clear cache when needed:
 ```bash
@@ -236,62 +257,62 @@ curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 
 ## Advanced Features
 
-### Statistical Matching
+### What the description carries
 
-The generator preserves various statistical properties:
-- **Distributions**: Mean, standard deviation, min/max values
+The AI model is asked to follow these properties. It does not see the rows.
+- **Distributions**: Mean, standard deviation, range
 - **Correlations**: Relationships between numeric columns
-- **Categorical**: Frequency distributions of categories
-- **Temporal**: Date ranges and time patterns including timestamps
-- **Advanced Pattern Detection**:
-  - **ID Patterns**: Detects and preserves prefixes (e.g., C001, INV-2024)
-  - **Email Addresses**: Generates realistic email formats with proper domains
-  - **Phone Numbers**: Maintains original formatting (e.g., 555-0101, (555) 123-4567)
-  - **Currency Values**: Preserves decimal places for monetary amounts
-  - **Datetime Formats**: Detects and preserves timestamp components
-  - **Cities/Locations**: Uses real city names for location columns
-  - **Names**: Generates realistic first and last name combinations
+- **Categorical**: How often each category occurs
+- **Temporal**: Date ranges (widened to whole months or years) and time patterns
+- **Patterns**:
+  - **ID shapes**: for example `INV-<4 digits>`, never a real ID
+  - **Email and phone formats**
+  - **Currency values**: decimal places
+  - **Datetime formats**
 
-### Security Features
+### What the AI model receives
 
-- **Metadata-Only Processing**: LLM never sees actual data values
-- **Secure Sandboxing**: Generated code runs in isolated environment
-- **No Data Persistence**: Original data is never stored
-- **Anonymized Caching**: Only statistical properties are cached
+- **Column names**: always, exactly as they are in the file.
+- **Number columns**: in Balanced and Permissive modes, for a column with 20 or more values, the real smallest, largest, middle and quartile values are sent. In Strict mode, and for a column with fewer than 20 values, numbers are rounded and the range is widened. Columns whose name looks like an identifier (`patient_id`, `mrn`, `zip`, ...) send no smallest, largest, middle or quartile value.
+- **Date columns**: the range is widened to whole months, or to whole years for columns named like a date of birth, in Strict mode, and for columns with fewer than 20 values. Exact earliest and latest dates are not sent.
+- **Text columns**: values are replaced with placeholders unless they are repeated short category labels in a column with 20 or more values and a name that does not look like an identifier. Balanced allows up to 10 distinct labels, Permissive up to 50, Strict none.
+- **A limit of this rule**: a person's name that occurs 5 or more times in a column with an ordinary name is treated as a category label and is sent in Balanced and Permissive modes.
+- **Shared beginnings and endings**: outside Strict mode, a beginning or ending of up to 6 characters with no digits that many values share can be sent.
+- **A data dictionary, if uploaded**: its column definitions, cut to a size limit.
 
-### Performance Optimization
+### What is stored and how scripts run
 
-- **Intelligent Caching**: Reuses scripts for similar datasets
-- **Batch Processing**: Handle multiple files efficiently
-- **Async Operations**: Non-blocking file processing
-- **Vector Similarity**: Fast cache lookups using embeddings
+- **Cache**: The description sent to the model and the generated script are saved on the server's disk until the cache is cleared. A request with `use_cache=false` does not read or write the cache.
+- **Uploaded files**: Not written to the cache. Held in memory while a request is processed; the web framework may also keep a temporary file.
+- **Running the script**: The script is screened first (only data libraries; no file, network or process access) and then runs as a separate process with a time limit, on the same server as the application. This is not full isolation.
+- **Sign-in**: There is none. Anyone who can reach the site on the organisation network (VPN) can use it.
+- **Approval**: This release has not been approved for real study data or patient identifiers.
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### "No OpenAI credentials configured"
-- Solution: Add your Azure OpenAI credentials to `.env`
-- Fallback: System will use template-based generation
+#### "AI is not configured" (status 503)
+- Solution: Set `AZURE_OPENAI_ENDPOINT` in `.env` and sign in with `az login`, or use `LLM_AUTH=key` with `AZURE_OPENAI_API_KEY`
+- There is no other generator: without the AI model, generation fails with this error
 
 #### "Unsupported file format"
 - Solution: Ensure file extension matches content
 - Supported: .csv, .json, .xlsx, .xls, .parquet, .tsv
 
 #### "Generation timeout"
-- Solution: Reduce number of rows or lower match threshold
-- Alternative: Disable caching for fresh generation
+- A generated script may run for at most 30 seconds. Reduce the number of rows and try again
 
-#### "Memory error with large files"
-- Solution: Process in batches or reduce sample size
-- Use API parameter: `sample_size=10000`
+#### "Request body is larger than the limit" (status 413)
+- Uploads are limited to 50 MB by default (`MOCKDATA_MAX_UPLOAD_BYTES`). Upload a smaller sample of the file
+
+#### "Model ... is not available on this server" (status 400)
+- Use a name from `GET /api/models`, or leave `model` out
 
 ### Performance Tips
 
 1. **Use Caching**: Keep `use_cache=true` for repeated similar datasets
-2. **Adjust Threshold**: Lower match_threshold for faster generation
-3. **Batch Similar Files**: Process related files together
-4. **Local Storage**: Use local storage for better performance in development
+2. **Start small**: Check the result on a few rows before asking for many
 
 ### Getting Help
 
@@ -301,62 +322,35 @@ The generator preserves various statistical properties:
 
 ## Examples
 
-### Example 1: Generate Test Data for E-commerce
-```python
-# Original sales data with customer PII
-original_data = "orders_with_pii.csv"
+Use data you are allowed to send to this server. This release is not approved for real study data or patient identifiers.
 
-# Generate safe test data
-synthetic_data = generate_synthetic(
-    file=original_data,
-    num_rows=10000,
-    match_threshold=0.85
-)
-# Result: Realistic sales data without actual customer information
+### Example 1: A larger test set from a small sample
+```bash
+curl -X POST "http://localhost:8201/generate" \
+  -F "file=@sample_100_rows.csv" \
+  -F "num_rows=10000" \
+  -F "match_threshold=0.85" \
+  -F "output_format=csv" \
+  --output test_data.csv
 ```
 
-### Example 2: Create Training Dataset
-```python
-# Small production sample
-sample_data = "production_sample_100.json"
-
-# Generate larger training set
-training_data = generate_synthetic(
-    file=sample_data,
-    num_rows=50000,
-    match_threshold=0.90
-)
-# Result: Large dataset maintaining statistical properties
+### Example 2: Strict mode
+```bash
+# No text value is sent to the AI model; numbers are rounded and ranges widened.
+curl -X POST "http://localhost:8201/generate" \
+  -F "file=@your_data.csv" \
+  -F "safety_mode=strict" \
+  -F "output_format=csv" \
+  --output test_data.csv
 ```
 
-### Example 3: Compliance Testing
-```python
-# Medical records with PHI
-medical_data = "patient_records.csv"
-
-# Generate HIPAA-compliant test data
-test_data = generate_synthetic(
-    file=medical_data,
-    match_threshold=0.95,
-    safety_mode='strict',  # Maximum privacy for medical data
-    preserve_patterns=True
-)
-# Result: Realistic medical data without PHI exposure
-```
-
-### Example 4: Financial Data Generation
-```python
-# Financial transactions with sensitive account info
-financial_data = "transactions.csv"
-
-# Generate test data with proper currency formatting
-test_data = generate_synthetic(
-    file=financial_data,
-    match_threshold=0.85,
-    safety_mode='balanced',  # Preserve transaction types but anonymize accounts
-    preserve_patterns=True
-)
-# Result: Transactions with proper currency decimals and preserved categories
+### Example 3: From a data dictionary only
+```bash
+curl -X POST "http://localhost:8201/generate-with-dictionary" \
+  -F "dictionary_file=@dictionary.json" \
+  -F "num_rows=1000" \
+  -F "output_format=csv" \
+  --output test_data.csv
 ```
 
 ## Best Practices
@@ -371,6 +365,6 @@ test_data = generate_synthetic(
 
 For additional help:
 - Review the [README](../README.md)
-- Check [TASK_LIST.md](../TASK_LIST.md) for development status
+- Check [developer_tasklist.md](developer_tasklist.md) for open work
 - Submit issues on GitHub
 - Contact the development team

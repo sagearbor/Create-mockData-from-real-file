@@ -2,6 +2,8 @@
 
 This file contains all completed development tasks for the BYOD Synthetic Data Generator project.
 
+> Entries dated before 2026-11-20 are kept as they were written. Some statements in them are no longer true (for example "LLM never sees actual data", "privacy-preserving", "production-ready" and the fallback generator, which has been removed). For what the service does now, see `README.md`.
+
 ---
 
 ## Phase 0: Local Development & Infrastructure as Code ✅ COMPLETED
@@ -218,6 +220,22 @@ This file contains all completed development tasks for the BYOD Synthetic Data G
   - ST-365: `tests/test_api_v1.py` (offline; fake generator, no LLM)
   - Code: `src/api/v1.py`; wired in `main.py`
   - Not done: `MOCKDATA_API_KEY` is not set on any server, so the key check is off
+
+## 2026-11-20: Release 1.0 work — tracked in Jira epic ADP-40
+
+Completed on this date (branch `release/1.0-sdlc`). Open items are in `docs/developer_tasklist.md`.
+
+- **ADP-41**: Security review by two reviewers.
+- **ADP-64**: Page escaping. Values shown on the pages are escaped.
+- **ADP-58**: Description masking. Text values, number ranges and date ranges are masked where the description is built.
+- **ADP-61, ADP-62**: Each uploaded dictionary has its own handle; limits on every route. (Per-user limits remain open under ADP-62.)
+- **ADP-66**: Batch generation switched off (the routes answer 501).
+- **ADP-56 (part), ADP-57, ADP-68 (part)**: Generated scripts are screened before running; the result comes back as JSON; errors are summarised. (Isolation remains open under ADP-56; error names and request ids on every route remain open under ADP-68.)
+- **ADP-63**: Libraries raised to current versions and pinned.
+- **ADP-65**: The other deploy scripts no longer deploy publicly.
+- **ADP-42**: About page blocks for calling the tool from code.
+- **ADP-58 (documentation)**: README, About page and docs corrected to say what is sent to the AI model, what is stored, and that this release is not approved for real study data.
+- **ADP-43**: Model choice from a server allow-list. In progress at the time of writing; not complete.
 
 ## Statistics
 

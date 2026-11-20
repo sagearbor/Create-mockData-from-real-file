@@ -5,6 +5,13 @@ independent interfaces** that share a single core pipeline
 (`src/core/generation_service.py`).  Choose the interface that best fits your
 integration context.
 
+All three send the source data to the server. Rows are not sent to the AI model;
+a description of the data is (column names, data types, counts, summary
+statistics; see the README section "What the AI model receives"). This release
+has not been approved for real study data or patient identifiers. If the AI
+model is not configured or not reachable, generation fails with an error. There
+is no other generator.
+
 ---
 
 ## 1. REST API
@@ -16,8 +23,11 @@ The REST interface is the FastAPI application served at port 8201 by default.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/generate` | Upload a file and download synthetic data |
+| `POST` | `/api/v1/generate` | The same from a JSON request (see `docs/API_DOCUMENTATION.md`) |
 | `POST` | `/metadata` | Extract structural/statistical metadata |
+| `GET`  | `/api/models` | The AI models a request may choose |
 | `GET`  | `/health` | Service health + A2A backend identifier |
+| `GET`  | `/ready` | 200 when the AI model is configured, otherwise 503 |
 | `GET`  | `/docs` | Interactive Swagger UI |
 
 ### A2A-specific REST endpoints (new)
@@ -31,18 +41,18 @@ The REST interface is the FastAPI application served at port 8201 by default.
 
 ```bash
 curl -X POST "http://localhost:8201/generate" \
-  -F "file=@patients.csv" \
+  -F "file=@your_data.csv" \
   -F "num_rows=500" \
   -F "output_format=csv" \
   -F "safety_mode=balanced" \
-  --output synthetic_patients.csv
+  --output synthetic_data.csv
 ```
 
 ### Example — extract metadata via REST
 
 ```bash
 curl -X POST "http://localhost:8201/metadata" \
-  -F "file=@patients.csv" \
+  -F "file=@your_data.csv" \
   -o metadata.json
 ```
 
@@ -71,12 +81,13 @@ Generate synthetic rows from a base64-encoded source file.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `data_content` | string | yes | Base64-encoded file bytes |
-| `file_name` | string | no | Original file name, e.g. `"patients.csv"` |
+| `file_name` | string | no | Original file name, e.g. `"your_data.csv"` |
 | `num_rows` | integer | no | Rows to generate; omit to match source |
 | `match_threshold` | number | no | Statistical match threshold 0–1 (default 0.8) |
 | `output_format` | `"csv"` \| `"json"` | no | Output format (default `"csv"`) |
-| `safety_mode` | `"balanced"` \| `"strict"` \| `"permissive"` | no | Privacy level (default `"balanced"`) |
+| `safety_mode` | `"balanced"` \| `"strict"` \| `"permissive"` | no | Which text values the AI model may see (default `"balanced"`; `"strict"` sends none) |
 | `use_cache` | boolean | no | Reuse cached generation code (default `true`) |
+| `model` | string | no | AI model (deployment name) from the server's allow-list; any other name is refused. Omit for the server default |
 
 Returns: JSON string with `status`, `format`, `shape`, `data`, and `generation_info`.
 
@@ -88,7 +99,7 @@ Extract statistical and structural metadata without generating synthetic data.
 |-----------|------|----------|-------------|
 | `data_content` | string | yes | Base64-encoded file bytes |
 | `file_name` | string | no | Original file name |
-| `safety_mode` | `"balanced"` \| `"strict"` \| `"permissive"` | no | Privacy level |
+| `safety_mode` | `"balanced"` \| `"strict"` \| `"permissive"` | no | Which text values appear in the description |
 
 Returns: JSON string with `status` and `metadata`.
 
@@ -129,7 +140,7 @@ Example response:
   "capabilities": {"pushNotifications": false, "streaming": false},
   "defaultInputModes": ["application/json"],
   "defaultOutputModes": ["application/json"],
-  "description": "Generates privacy-safe synthetic data ...",
+  "description": "...",
   "methods": ["message/send", "tasks/get"],
   "name": "BYOD Mock Data Generator",
   "url": "/a2a/mock-data-generator",
@@ -149,7 +160,7 @@ by `a2a_runtime.encode_message`.
 import asyncio, base64, pathlib
 from a2a_runtime import A2AClient, encode_message
 
-csv_bytes = pathlib.Path("patients.csv").read_bytes()
+csv_bytes = pathlib.Path("your_data.csv").read_bytes()
 data_content = base64.b64encode(csv_bytes).decode()
 
 client = A2AClient()  # uses default_registry for in-process dispatch
@@ -159,7 +170,7 @@ result = asyncio.run(client.call(
     {
         "operation": "generate",
         "data_content": data_content,
-        "file_name": "patients.csv",
+        "file_name": "your_data.csv",
         "num_rows": 100,
         "output_format": "csv",
     },
@@ -247,118 +258,39 @@ package automatically.
 
 ## Authentication
 
-Production authentication (bearer tokens, mTLS, Azure Managed Identity) is a
-**deployment-level concern** and is not enforced by this service's A2A or MCP
-layers directly.  Configure your API gateway or NGINX reverse proxy to require
-authentication before traffic reaches these endpoints.
+This service has no sign-in. The `/api/v1` routes check an `X-API-Key` header
+only when the server was started with `MOCKDATA_API_KEY`; the form routes, the
+A2A route and the MCP server do not check anything. As deployed, the site is
+reachable only on the organisation network (VPN), and anyone on that network
+can use it. Sign-in is tracked as ADP-60.
 
 ---
 
-## Deploying to Google Cloud Run (public, unauthenticated)
+## Deployment
 
-The repo ships everything needed to deploy `main:app` (agent_id
-`"mock-data-generator"`) as a real, publicly-reachable Cloud Run service.
+The approved route is the organisation's guarded Azure Container Apps
+procedure (`Dockerfile.aca`, `deploy/aca/containerapp.yaml`). There is no
+production environment yet.
 
-> **WARNING:** `--allow-unauthenticated` makes the synthetic-data generation
-> endpoint reachable by anyone on the internet.  This is acceptable for a
-> **temporary demo or development smoke-test** but must not be used for
-> long-running production workloads.  Add Cloud Run IAM bindings, a managed
-> API gateway, or a Cloud Armor policy before promoting to production.
-
-### One-command deploy
-
-```bash
-# Authenticate first:
-gcloud auth login
-gcloud config set project <YOUR_GCP_PROJECT_ID>
-
-# Deploy:
-PROJECT_ID=<YOUR_GCP_PROJECT_ID> ./deploy/cloudrun.sh
-
-# Optionally pass Azure OpenAI credentials so real (non-fallback) generation
-# is used in the deployed service:
-PROJECT_ID=<project> \
-  AZURE_OPENAI_API_KEY=<key> \
-  AZURE_OPENAI_ENDPOINT=<endpoint> \
-  AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=<deployment> \
-  AZURE_OPENAI_API_VERSION=2024-02-01 \
-  ./deploy/cloudrun.sh
-```
-
-The script:
-1. Creates an Artifact Registry repo `apps` in the target region (idempotent).
-2. Builds `Dockerfile.api` via Cloud Build (`cloudbuild.yaml`).
-3. Deploys the image to Cloud Run (public, unauthenticated, port 8080).
-4. Prints the live service URL.
-
-Optional environment variables for `cloudrun.sh`:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PROJECT_ID` | *(required)* | GCP project ID |
-| `REGION` | `us-central1` | GCP region |
-| `SERVICE` | `mock-data-generator-api` | Cloud Run service name |
-
-### GitHub Actions alternative
-
-The workflow `.github/workflows/deploy-cloudrun.yml` performs the same steps
-from CI via `workflow_dispatch`.
-
-**Required secret** (Settings > Secrets and variables > Actions):
-
-| Secret | Description |
-|--------|-------------|
-| `GCP_SA_KEY` | JSON key for a GCP Service Account with roles: `run.admin`, `cloudbuild.builds.editor`, `artifactregistry.admin`, `iam.serviceAccountUser`, `storage.admin` |
-
-> **More secure alternative:** Workload Identity Federation avoids storing a
-> long-lived JSON key in GitHub.  See the inline comments in
-> `.github/workflows/deploy-cloudrun.yml` for the WIF migration path.
-
-**Optional secrets** (enable real Azure OpenAI generation; without them the
-service uses the deterministic fallback path):
-
-| Secret | Description |
-|--------|-------------|
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL |
-| `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Chat model deployment name |
-| `AZURE_OPENAI_API_VERSION` | API version (e.g. `2024-02-01`) |
-
-### Getting the service URL
-
-After deployment the URL is printed by the deploy script.  You can also
-retrieve it any time:
-
-```bash
-gcloud run services describe mock-data-generator-api \
-  --region us-central1 \
-  --format="value(status.url)"
-```
+`deploy/cloudrun.sh`, `cloudbuild.yaml` and
+`.github/workflows/deploy-cloudrun.yml` (Google Cloud Run) are kept for
+reference only. They are not the approved route. They deploy with
+authentication required (`--no-allow-unauthenticated`). Their comments still
+mention a "fallback generator"; the application has none, so a service deployed
+without working Azure OpenAI settings answers every generation request with an
+error.
 
 ### End-to-end check
 
-Run the stdlib-only proof script against the live URL to verify all three
-layers (health, agent card, A2A generation):
+`scripts/e2e_a2a_check.py` checks a running service: `/health`,
+`/.well-known/agent.json`, and one A2A generation request with a tiny made-up
+CSV.
 
 ```bash
 python3 scripts/e2e_a2a_check.py --url https://<service-url>
-# or
-E2E_URL=https://<service-url> python3 scripts/e2e_a2a_check.py
 ```
 
-The script:
-- Checks `/health` and asserts `a2a_backend` is present in the response.
-- Checks `/.well-known/agent.json` and asserts `url == "/a2a/mock-data-generator"`.
-- Posts a tiny base64-encoded CSV to `/a2a/mock-data-generator` via the
-  canonical DCRI JSON envelope and asserts a non-error result.
-- Prints a ready-to-paste `curl` example.
-- Exits `0` on full pass, `1` on any failure.
-
-**Fallback-path note:** Without Azure OpenAI credentials the service uses the
-built-in deterministic fallback generator (lower statistical fidelity but
-fully functional).  The e2e script treats a non-empty `"data"` or
-`"generation_info"` key as success even when `method == "fallback"`, so the
-check passes in either mode.
+The generation step needs a working AI model on the service.
 
 ### A2A wire contract note
 

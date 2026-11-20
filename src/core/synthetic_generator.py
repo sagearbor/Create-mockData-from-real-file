@@ -33,6 +33,15 @@ _REASONING_MODEL_RE = re.compile(r"^(gpt-5|o\d)", re.I)
 _REASONING_EFFORT_OFF = {"off", "default", ""}
 
 
+def llm_timeout_seconds() -> float:
+    """Seconds one model call may take (env LLM_TIMEOUT_SECONDS, default 180)."""
+    try:
+        value = float(os.environ.get("LLM_TIMEOUT_SECONDS", "180"))
+    except ValueError:
+        return 180.0
+    return value if value > 0 else 180.0
+
+
 def reasoning_effort_setting() -> Optional[str]:
     """Return the reasoning_effort to send, or None to omit the parameter."""
     value = (os.environ.get("LLM_REASONING_EFFORT", "low") or "").strip().lower()
@@ -183,9 +192,17 @@ def _summarise_failure(stderr_text: str, script: str, script_path: str) -> str:
         script_lines = script.splitlines()
         if 1 <= line_no <= len(script_lines):
             source = script_lines[line_no - 1].strip()[:300]
+    # The error's own message is passed on only when it quotes nothing: Python and pandas put
+    # offending values in quotes, while plain messages ("All arrays must be of the same
+    # length") say what is wrong without carrying a value.
+    message = ""
+    if lines and ":" in lines[-1]:
+        candidate = lines[-1].split(":", 1)[1].strip()
+        if candidate and len(candidate) <= 200 and not re.search(r"[\'\"`]", candidate):
+            message = f" ({candidate})"
     if line_no and source:
-        return f"{error_type} at line {line_no} of the script: {source}"
-    return f"{error_type} while running the script (no line inside the script was reported)."
+        return f"{error_type} at line {line_no} of the script{message}: {source}"
+    return f"{error_type} while running the script{message} (no line inside the script was reported)."
 
 
 def _load_result(path: Path) -> pd.DataFrame:
@@ -517,6 +534,8 @@ class SyntheticDataGenerator:
                 {"role": "user", "content": prompt},
             ],
             "max_completion_tokens": LLM_MAX_COMPLETION_TOKENS,
+            # One model call may not hold a request open for longer than this.
+            "timeout": llm_timeout_seconds(),
         }
         is_reasoning = bool(_REASONING_MODEL_RE.match(model or ""))
         if not is_reasoning:

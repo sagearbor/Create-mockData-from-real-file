@@ -154,7 +154,7 @@ def test_failure_summary_names_the_error_and_the_line_but_not_the_runtime_text()
     with pytest.raises(CodeExecutionError) as exc:
         SyntheticDataGenerator()._execute_generation_code(code, randomize_seed=False)
     summary = exc.value.sandbox_stderr
-    assert summary.startswith("ValueError at line 2 of the script: x = int(values[0])")
+    assert summary.startswith("ValueError at line 2 of the script: x = int(values[0])")  # quoted message dropped
     assert "SECRET-CELL-777" not in summary  # the message text of the error is not passed on
 
 
@@ -168,3 +168,24 @@ def test_script_that_runs_too_long_is_stopped(monkeypatch):
         SyntheticDataGenerator()._execute_generation_code(
             "while True:\n    pass\n", randomize_seed=False)
     assert "timed out" in str(exc.value)
+
+
+def test_failure_summary_keeps_a_message_that_quotes_nothing():
+    import pytest
+    from src.core.synthetic_generator import CodeExecutionError
+
+    code = "import pandas as pd\nresult = pd.DataFrame({'a': [1, 2, 3], 'b': [1, 2]})\n"
+    with pytest.raises(CodeExecutionError) as exc:
+        SyntheticDataGenerator()._execute_generation_code(code, randomize_seed=False)
+    summary = exc.value.sandbox_stderr
+    assert summary.startswith("ValueError at line 2 of the script (All arrays must be of the same length)")
+
+
+def test_model_calls_carry_a_time_limit(monkeypatch):
+    from src.core.synthetic_generator import llm_timeout_seconds
+
+    assert llm_timeout_seconds() == 180.0
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "45")
+    assert llm_timeout_seconds() == 45.0
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "nonsense")
+    assert llm_timeout_seconds() == 180.0

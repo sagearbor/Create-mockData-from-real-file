@@ -657,19 +657,20 @@ def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch,
     """Download with the preview id returns the preview's rows without a second generation."""
     import pandas as pd
 
+    total = main.PREVIEW_ROWS + 1  # one more than the preview shows
     calls = []
 
     def generate(**k):
         calls.append(k)
         n = len(calls)
-        return pd.DataFrame({"id": [n] * 11, "birthDate": pd.to_datetime(["1980-01-02"] * 11)}), {}
+        return pd.DataFrame({"id": [n] * total, "birthDate": pd.to_datetime(["1980-01-02"] * total)}), {}
 
     monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(generate=generate))
     monkeypatch.setattr(main, "_dictionary_previews", {})
-    common = {"num_rows": "11", "table": "Widget", "output_format": fmt}
+    common = {"num_rows": str(total), "table": "Widget", "output_format": fmt}
     prev = _post("/generate-with-dictionary", data={**common, "preview_only": "true"}, files=_dict_file(BUNDLE))
     assert prev.status_code == 200, prev.text
-    assert prev.json()["total_rows"] == 11 and len(prev.json()["preview"]) == 10
+    assert prev.json()["total_rows"] == total and len(prev.json()["preview"]) == main.PREVIEW_ROWS
     down = _post("/generate-with-dictionary",
                  data={**common, "preview_only": "false", "preview_id": prev.json()["preview_id"]})
     assert down.status_code == 200, down.text
@@ -680,10 +681,10 @@ def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch,
     if fmt == "csv":
         assert other.text.strip().splitlines()[1].startswith("2,")
     if fmt == "csv":
-        assert len(down.text.strip().splitlines()) == 12 and "1980-01-02" in down.text
+        assert len(down.text.strip().splitlines()) == total + 1 and "1980-01-02" in down.text
     elif fmt == "json":
         rows = down.json()
-        assert isinstance(rows, list) and len(rows) == 11 and rows[0]["birthDate"].startswith("1980-01-02")
+        assert isinstance(rows, list) and len(rows) == total and rows[0]["birthDate"].startswith("1980-01-02")
     else:
         assert down.content[:2] == b"PK"
 
@@ -734,7 +735,7 @@ def test_generator_dictionary_only_matching_columns_is_one_model_call():
     assert list(df.columns) == ["a", "b"] and len(seq.calls) == 1 and "regenerated" not in info
 
 
-def test_generator_code_that_fails_to_run_is_retried_once():
+def test_generator_code_that_fails_to_run_is_corrected():
     seq = _Sequence("raise SystemExit(1)\n", _df_code(["a", "b"]))
     df, info = _generator(seq).generate(metadata=_dict_only_metadata(["a", "b"]), num_rows=3)
     assert list(df.columns) == ["a", "b"] and len(seq.calls) == 2 and info["retried_after_failure"]
@@ -744,3 +745,117 @@ def test_generator_keeps_first_result_when_regeneration_cannot_run():
     seq = _Sequence(_df_code(["a", "extra"]), "raise SystemExit(1)\n")
     df, info = _generator(seq).generate(metadata=_dict_only_metadata(["a", "b"]), num_rows=3)
     assert list(df.columns) == ["a", "extra"] and info["structure_mismatch"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Code that fails to run: never cached, dropped if cached, corrected with its error
+# --------------------------------------------------------------------------- #
+def _real_cache_generator(completions, tmp_path):
+    from src.core.cache_manager import CacheManager
+    gen = SyntheticDataGenerator(openai_client=SimpleNamespace(
+        chat=SimpleNamespace(completions=completions)))
+    gen.cache_manager = CacheManager(cache_dir=tmp_path / "cache")
+    return gen
+
+
+def _cached_codes(gen):
+    return [open(e["cache_file"]).read() for entries in gen.cache_manager.cache_index.values() for e in entries]
+
+
+def test_code_that_fails_to_run_is_never_cached(tmp_path):
+    seq = _Sequence("raise SystemExit(1)\n", _df_code(["a", "b"]))
+    gen = _real_cache_generator(seq, tmp_path)
+    meta = _dict_only_metadata(["a", "b"])
+    gen.generate(metadata=meta, num_rows=3)
+    codes = _cached_codes(gen)
+    assert len(codes) == 1 and "SystemExit" not in codes[0]
+    # the next request for the same shape reuses the working code: no model call
+    df, info = gen.generate(metadata=meta, num_rows=3)
+    assert info["method"] == "cached" and len(seq.calls) == 2 and list(df.columns) == ["a", "b"]
+
+
+def test_cached_code_that_fails_is_dropped_and_replaced(tmp_path):
+    seq = _Sequence(_df_code(["a", "b"]))
+    gen = _real_cache_generator(seq, tmp_path)
+    meta = _dict_only_metadata(["a", "b"])
+    gen.cache_manager.cache_generation(meta, "raise SystemExit(1)\n")  # a poisoned entry
+    df, info = gen.generate(metadata=meta, num_rows=3)
+    assert list(df.columns) == ["a", "b"] and info["method"] == "llm" and len(seq.calls) == 1
+    codes = _cached_codes(gen)
+    assert len(codes) == 1 and "SystemExit" not in codes[0]
+
+
+def test_retry_tells_the_model_what_went_wrong_and_stops_after_two_corrections():
+    seq = _Sequence("raise ValueError('boom-marker')\n")
+    gen = _generator(seq)
+    with pytest.raises(Exception) as exc:
+        gen.generate(metadata=_dict_only_metadata(["a"]), num_rows=3)
+    assert len(seq.calls) == 3  # first try + two corrections
+    assert "boom-marker" not in seq.calls[0]["messages"][1]["content"]
+    assert "boom-marker" in seq.calls[1]["messages"][1]["content"]
+    assert "boom-marker" not in str(exc.value)  # the error text never reaches the user
+
+
+def test_seeding_keeps_module_level_code_runnable():
+    gen = _generator(_Sequence(""))
+    for code in ("fake = Faker()\nx = 1\n",
+                 "from __future__ import annotations\nx = 1\n",
+                 "def generate_synthetic_data(\n    n=3,\n):\n    return n\n"):
+        compile(gen._inject_random_seed(code, 7), "<t>", "exec")
+    seeded = gen._inject_random_seed("def f():\n    fake = Faker()\n    return fake\n", 7)
+    assert "    fake.seed_instance(7)" in seeded
+
+
+def test_generate_route_falls_back_when_cached_script_fails(monkeypatch):
+    import pandas as pd
+    from src.core.synthetic_generator import CodeExecutionError
+
+    forgotten = []
+
+    def boom(code):
+        raise CodeExecutionError("generated code failed in the sandbox (exit 1)")
+
+    stub = SimpleNamespace(
+        _execute_generation_code=boom, forget_cached=lambda entry: forgotten.append(entry),
+        generate=lambda **k: (pd.DataFrame({"a": [1, 2]}), {"method": "llm"}),
+        _log_usage=lambda *a, **k: None, openai_client=object())
+    monkeypatch.setattr(main, "synthetic_generator", stub)
+    monkeypatch.setattr(main.cache_manager, "find_similar_cached",
+                        lambda *a, **k: {"generation_code": "x", "cache_file": "nope"})
+    resp = _post("/generate", data={"output_format": "csv", "preview_only": "false"},
+                 files={"file": ("d.csv", b"a\n1\n2\n", "text/csv")})
+    assert resp.status_code == 200, resp.text
+    assert len(forgotten) == 1 and resp.text.strip().splitlines() == ["a", "1", "2"]
+
+
+def test_cached_code_for_another_row_count_is_not_reused(tmp_path):
+    def rows(n):
+        return f"import pandas as pd\nresult = pd.DataFrame({{'a': [1] * {n}, 'b': [1] * {n}}})\n"
+
+    seq = _Sequence(rows(3), rows(5))
+    gen = _real_cache_generator(seq, tmp_path)
+    meta = _dict_only_metadata(["a", "b"])
+    assert len(gen.generate(metadata=meta, num_rows=3)[0]) == 3
+    df, info = gen.generate(metadata=meta, num_rows=5)  # same file shape, different count
+    assert len(df) == 5 and info["method"] == "llm" and len(seq.calls) == 2
+    # both scripts stay cached, each served for its own count without a model call
+    assert len(gen.generate(metadata=meta, num_rows=3)[0]) == 3
+    assert len(gen.generate(metadata=meta, num_rows=5)[0]) == 5
+    assert len(seq.calls) == 2
+
+    # an old entry with no recorded count is caught by the length check
+    legacy = _real_cache_generator(_Sequence(rows(5)), tmp_path / "legacy")
+    legacy.cache_manager.cache_generation(meta, rows(3))
+    assert len(legacy.generate(metadata=meta, num_rows=5)[0]) == 5
+
+
+def test_sandbox_error_text_reaches_neither_the_response_nor_the_log(monkeypatch, caplog):
+    seq = _Sequence("raise ValueError('boom-marker-xyz')\n")
+    monkeypatch.setattr(main, "synthetic_generator", _generator(seq))
+    monkeypatch.setattr(main.cache_manager, "find_similar_cached", lambda *a, **k: None)
+    with caplog.at_level("DEBUG"):
+        resp = _post("/generate", data={"output_format": "csv", "preview_only": "false"},
+                     files={"file": ("d.csv", b"a\n1\n2\n", "text/csv")})
+    assert resp.status_code == 502 and len(seq.calls) == 3
+    assert "boom-marker-xyz" in seq.calls[1]["messages"][1]["content"]  # the model is told
+    assert "boom-marker-xyz" not in resp.text and "boom-marker-xyz" not in caplog.text

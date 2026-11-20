@@ -15,6 +15,10 @@ What is refused:
 * a script that does not parse, or is too deep or too large to check (fail closed);
 * importing any module that is not listed, by full dotted path, in
   ``ALLOWED_MODULES``;
+* for the standard-library modules, any name not listed for that module in
+  ``MODULE_NAMES`` (an allowed module can re-export a dangerous one, so only
+  named functions and classes may be taken from it);
+* ``match`` statements (their class patterns read attributes by name);
 * the names in ``FORBIDDEN_NAMES`` (``open``, ``eval``, ``exec``, ``getattr``, ...);
 * any attribute whose name starts with an underscore;
 * any ``read_*`` attribute, and any ``to_*`` attribute not in ``ALLOWED_TO_METHODS``;
@@ -35,10 +39,36 @@ from typing import List
 # Modules a generation script may import, by full dotted path.
 ALLOWED_MODULES = frozenset({
     "pandas", "numpy", "numpy.random", "random", "datetime", "math", "string", "re",
-    "uuid", "itertools", "collections", "decimal", "fractions", "statistics", "typing",
-    "time", "calendar", "json", "secrets", "dateutil", "dateutil.relativedelta",
-    "faker", "__future__",
+    "uuid", "itertools", "collections", "decimal", "typing", "__future__",
 })
+
+# pandas and numpy are too large to list name by name; they are covered by the
+# read_* / to_* rules and FORBIDDEN_ATTRIBUTES. Every other module may only be
+# used through the names listed here ("*" = any public name; the module has no
+# re-exported modules or file access).
+MODULE_NAMES = {
+    "random": frozenset({
+        "seed", "random", "randint", "randrange", "choice", "choices", "sample", "shuffle",
+        "uniform", "gauss", "normalvariate", "lognormvariate", "expovariate", "betavariate",
+        "gammavariate", "triangular", "weibullvariate", "paretovariate", "vonmisesvariate",
+        "getrandbits"}),
+    "datetime": frozenset({"datetime", "date", "time", "timedelta", "timezone"}),
+    "math": frozenset({"*"}),
+    "itertools": frozenset({"*"}),
+    "string": frozenset({
+        "ascii_letters", "ascii_lowercase", "ascii_uppercase", "digits", "hexdigits",
+        "octdigits", "punctuation", "whitespace", "capwords"}),
+    "re": frozenset({
+        "compile", "match", "fullmatch", "search", "sub", "subn", "split", "findall",
+        "finditer", "escape", "IGNORECASE", "I", "MULTILINE", "M"}),
+    "uuid": frozenset({"uuid4", "UUID"}),
+    "collections": frozenset({"Counter", "defaultdict", "OrderedDict", "deque", "namedtuple"}),
+    "decimal": frozenset({"Decimal", "ROUND_HALF_UP", "ROUND_HALF_EVEN", "ROUND_DOWN", "ROUND_UP"}),
+    "typing": frozenset({
+        "List", "Dict", "Optional", "Tuple", "Any", "Union", "Set", "Sequence", "Iterable",
+        "Callable"}),
+    "__future__": frozenset({"annotations"}),
+}
 
 # Builtins that open files, run text as code, or look things up by name.
 FORBIDDEN_NAMES = frozenset({
@@ -60,8 +90,9 @@ ALLOWED_TO_METHODS = frozenset({
 FORBIDDEN_ATTRIBUTES = frozenset({
     # readers and writers not caught by the read_* / to_* rules
     "load", "save", "savez", "savez_compressed", "savetxt", "loadtxt", "genfromtxt",
-    "fromfile", "tofile", "memmap", "DataSource", "fromregex", "dump",
-    "ExcelFile", "ExcelWriter", "HDFStore", "api",
+    "fromfile", "tofile", "memmap", "DataSource", "fromregex", "dump", "open",
+    "ExcelFile", "ExcelWriter", "HDFStore", "api", "TarFile", "ZipFile",
+    "lookfor", "source", "info", "show_config", "show_versions", "get_include",
     # text evaluated as code
     "eval", "query",
     # lookups by name, and formatters that can walk attributes
@@ -71,8 +102,10 @@ FORBIDDEN_ATTRIBUTES = frozenset({
     "os", "sys", "subprocess", "builtins", "importlib", "io", "pathlib", "shutil",
     "socket", "ctypes", "ctypeslib", "pickle", "marshal", "shelve", "tempfile", "glob",
     "urllib", "requests", "http", "compat", "testing", "distutils", "f2py", "lib",
-    "core", "environ", "getenv", "system", "popen",
+    "core", "util", "environ", "getenv", "system", "popen", "Popen", "run", "codecs",
+    "tarfile", "zipfile", "zoneinfo", "factory", "import_module",
 })
+_FORBIDDEN_PREFIXES = ("exec", "spawn", "fork")
 
 _FORMAT_METHODS = frozenset({"format", "format_map"})
 _DUNDER_IN_TEXT = re.compile(r"__[A-Za-z]\w*__")
@@ -97,9 +130,17 @@ def _attribute_problem(name: str) -> str:
         return f"'{name}' (names starting with an underscore) is not allowed"
     if name.startswith("read_") or (name.startswith("to_") and name not in ALLOWED_TO_METHODS):
         return f"'.{name}' (reading or writing files) is not allowed"
-    if name in FORBIDDEN_ATTRIBUTES:
+    if name in FORBIDDEN_ATTRIBUTES or name.startswith(_FORBIDDEN_PREFIXES):
         return f"'.{name}' is not allowed"
     return ""
+
+
+def _module_name_problem(module: str, name: str) -> str:
+    """Why `name` may not be taken from `module`, or '' (pandas/numpy use the general rules)."""
+    allowed = MODULE_NAMES.get(module)
+    if allowed is None or name in allowed or ("*" in allowed and not name.startswith("_")):
+        return ""
+    return f"'{name}' may not be used from '{module}'"
 
 
 def find_problems(code: str, max_problems: int = 10) -> List[str]:
@@ -122,8 +163,18 @@ def find_problems(code: str, max_problems: int = 10) -> List[str]:
         if len(problems) < max_problems and message not in problems:
             problems.append(message)
 
+    # Names the script binds to a listed standard-library module (`import random as r`).
+    module_aliases = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in MODULE_NAMES:
+                    module_aliases[alias.asname or alias.name] = alias.name
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Match):
+            add(f"{_line(node)}: 'match' statements are not allowed")
+        elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name not in ALLOWED_MODULES:
                     add(f"{_line(node)}: import of '{alias.name}' is not allowed")
@@ -137,7 +188,8 @@ def find_problems(code: str, max_problems: int = 10) -> List[str]:
                 elif full in ALLOWED_MODULES:
                     continue  # e.g. `from numpy import random`
                 else:
-                    why = _attribute_problem(alias.name)
+                    why = _attribute_problem(alias.name) or \
+                        _module_name_problem(node.module or "", alias.name)
                     if why:
                         add(f"{_line(node)}: importing {why}")
         elif isinstance(node, ast.Name):
@@ -147,6 +199,8 @@ def find_problems(code: str, max_problems: int = 10) -> List[str]:
                 add(f"{_line(node)}: use of '{node.id}' is not allowed")
         elif isinstance(node, ast.Attribute):
             why = _attribute_problem(node.attr)
+            if not why and isinstance(node.value, ast.Name) and node.value.id in module_aliases:
+                why = _module_name_problem(module_aliases[node.value.id], node.attr)
             if why:
                 add(f"{_line(node)}: {why}")
             elif node.attr in _FORMAT_METHODS and not (

@@ -111,11 +111,38 @@ def test_review_follow_up_cases_are_refused(snippet, word):
     assert problems and any(word in p for p in problems), (snippet, problems)
 
 
+@pytest.mark.parametrize("snippet, word", [
+    ("import json", "json"),
+    ("import faker", "faker"),
+    ("import time", "time"),
+    ("import random\nrandom.SystemRandom", "SystemRandom"),
+    ("import random as r\nr.os", "os"),
+    ("import datetime\ndatetime.sys", "sys"),
+    ("import re\nre.sre_parse", "sre_parse"),
+    ("import string as s\ns.Template", "Template"),
+    ("from collections import abc", "abc"),
+    ("from decimal import localcontext", "localcontext"),
+    ("import uuid\nuuid.getnode()", "getnode"),
+    ("import numpy as np\nnp.lookfor('x')", "lookfor"),
+    ("import pandas as pd\npd.show_versions()", "show_versions"),
+    ("x = 1\nx.open('f')", "open"),
+    ("x = 1\nx.import_module('os')", "import_module"),
+    ("x = 1\nx.execve", "execve"),
+    ("match x:\n    case object(real=r):\n        pass", "match"),
+])
+def test_module_re_exports_and_match_are_refused(snippet, word):
+    problems = code_gate.find_problems(snippet)
+    assert problems and any(word in p for p in problems), (snippet, problems)
+
+
 def test_in_memory_conversions_and_literal_format_are_allowed():
     ok = (
         "import pandas as pd\nimport numpy as np\nfrom numpy import random as npr\n"
         "import numpy.random\nfrom datetime import datetime, timedelta\nfrom typing import List, Dict\n"
         "d = pd.to_datetime(['2024-01-01'])\nn = pd.to_numeric(['1'])\n"
+        "import random\nimport math\nimport string\nimport uuid\nimport re\n"
+        "v = random.choice([1, 2]) + math.floor(2.5)\nw = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))\n"
+        "u = str(uuid.uuid4())\nm = re.sub(r'\\d', 'x', 'a1')\nt = datetime.now() + timedelta(days=1)\n"
         "df = pd.DataFrame({'a': [1]})\nx = df.to_dict('records')\ny = df['a'].to_numpy().tolist()\n"
         "label = 'ID-{:04d}'.format(7)\nlabel2 = f'ID-{7:04d}'\nresult = df\n"
     )

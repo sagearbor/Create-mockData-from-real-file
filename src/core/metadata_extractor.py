@@ -45,6 +45,17 @@ _SENSITIVE_VALUE_PATTERNS = [
 ]
 
 
+def _round_significant(value: float, digits: int, direction: str = "nearest") -> float:
+    """Round to `digits` significant figures; "down"/"up" widen a range instead of clipping it."""
+    import math
+    if value is None or value == 0 or not math.isfinite(value):
+        return value
+    scale = 10 ** (math.floor(math.log10(abs(value))) - digits + 1)
+    scaled = value / scale
+    rounded = math.floor(scaled) if direction == "down" else math.ceil(scaled) if direction == "up" else round(scaled)
+    return float(rounded * scale)
+
+
 def is_identifier_like_name(column_name: Any) -> bool:
     """True if a column name suggests identifying content (name, MRN, id, DOB, ...)."""
     if column_name is None:
@@ -162,7 +173,7 @@ class MetadataExtractor:
             
             # DateTime columns
             elif pd.api.types.is_datetime64_any_dtype(df[col]):
-                col_stats.update(self._extract_datetime_stats(df[col]))
+                col_stats.update(self._extract_datetime_stats(df[col], column_name=col))
             
             # String/Object columns
             else:
@@ -254,31 +265,66 @@ class MetadataExtractor:
             elif stats["max"] <= 100:
                 stats["might_be_percentage"] = "whole"
 
-        # min and max are single real cells. For an identifier-like column
-        # (patient_id, mrn, zip) they are a real identifier, so drop them.
+        # min, max, median and quartiles are (or can equal) single real cells.
         if is_identifier_like_name(column_name):
-            del stats["min"], stats["max"]
+            # patient_id, mrn, zip: every one of these would be a real identifier.
+            for key in ("min", "max", "median", "q25", "q75"):
+                stats.pop(key, None)
+            if len(clean_series) < MIN_ROWS_FOR_REAL_VALUES:
+                stats.pop("mean", None)  # with few rows the mean is close to a real cell
             stats["min_max_omitted"] = True
+            stats["order_statistics_omitted"] = True
+        elif self.safety_mode == "strict" or len(clean_series) < MIN_ROWS_FOR_REAL_VALUES:
+            # Strict mode, or too few rows to hide a cell in: send rounded values only.
+            # The range is widened (min down, max up) so generated data still covers it.
+            stats["min"] = _round_significant(stats["min"], 1, "down")
+            stats["max"] = _round_significant(stats["max"], 1, "up")
+            for key in ("median", "q25", "q75", "mean"):
+                stats[key] = _round_significant(stats[key], 2)
+            stats["values_rounded"] = True
 
         return stats
     
-    def _extract_datetime_stats(self, series: pd.Series) -> Dict[str, Any]:
-        """Extract statistics for datetime columns."""
+    def _extract_datetime_stats(self, series: pd.Series, column_name: str = None) -> Dict[str, Any]:
+        """Extract statistics for datetime columns.
+
+        The earliest and latest value are real cells (an earliest date of birth, a
+        first visit), so they are never sent exactly: the range is widened to whole
+        months, or to whole years for identifier-like columns (dob, birth), strict
+        mode and files with too few rows to hide a cell in.
+        """
         clean_series = series.dropna()
-        
+
         if len(clean_series) == 0:
             return {"type": "datetime", "all_null": True}
-        
+
+        as_dt = pd.to_datetime(clean_series)
+        earliest, latest = as_dt.min(), as_dt.max()
+        to_year = (is_identifier_like_name(column_name) or self.safety_mode == "strict"
+                   or len(clean_series) < MIN_ROWS_FOR_REAL_VALUES)
+        if pd.notna(earliest) and pd.notna(latest):
+            if to_year:
+                shown_min = earliest.replace(month=1, day=1).normalize()
+                shown_max = latest.replace(month=12, day=31).normalize()
+            else:
+                shown_min = earliest.replace(day=1).normalize()
+                shown_max = (latest + pd.offsets.MonthEnd(0)).normalize()
+            range_days = int((shown_max - shown_min).days)
+        else:
+            shown_min = shown_max = None
+            range_days = 0
+
         return {
             "type": "datetime",
-            "min": clean_series.min().isoformat() if pd.notna(clean_series.min()) else None,
-            "max": clean_series.max().isoformat() if pd.notna(clean_series.max()) else None,
-            "range_days": (clean_series.max() - clean_series.min()).days if len(clean_series) > 0 else 0,
-            "most_common_hour": int(pd.to_datetime(clean_series).dt.hour.mode()[0]) if len(clean_series) > 0 else None,
-            "most_common_dayofweek": int(pd.to_datetime(clean_series).dt.dayofweek.mode()[0]) if len(clean_series) > 0 else None,
-            "has_time_component": bool(not (pd.to_datetime(clean_series).dt.time == pd.Timestamp("00:00:00").time()).all())
+            "min": shown_min.isoformat() if shown_min is not None else None,
+            "max": shown_max.isoformat() if shown_max is not None else None,
+            "range_rounded_to": "year" if to_year else "month",
+            "range_days": range_days,
+            "most_common_hour": int(as_dt.dt.hour.mode()[0]),
+            "most_common_dayofweek": int(as_dt.dt.dayofweek.mode()[0]),
+            "has_time_component": bool(not (as_dt.dt.time == pd.Timestamp("00:00:00").time()).all())
         }
-    
+
     def _extract_string_stats(self, series: pd.Series, column_name: str = None) -> Dict[str, Any]:
         """Extract statistics for string/object columns."""
         clean_series = series.dropna()

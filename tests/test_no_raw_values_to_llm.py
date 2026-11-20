@@ -259,3 +259,60 @@ def test_ordinary_names_are_not_identifier_like(name):
 def test_prompt_tells_the_model_how_to_read_placeholders():
     system_prompt = _generator()._get_system_prompt()
     assert "value_0" in system_prompt and "placeholder" in system_prompt
+
+
+# --------------------------------------------------------------------------- #
+# Numbers and dates: no exact smallest, largest or middle value of a real cell
+# --------------------------------------------------------------------------- #
+def _stats(df, mode="balanced"):
+    from src.core.metadata_extractor import MetadataExtractor
+    return MetadataExtractor(safety_mode=mode).extract(df)["statistics"]
+
+
+def test_identifier_like_number_column_sends_no_order_statistics():
+    import pandas as pd
+    df = pd.DataFrame({"patient_id": [9917354 + i * 7 for i in range(60)]})
+    s = _stats(df)["patient_id"]
+    for key in ("min", "max", "median", "q25", "q75"):
+        assert key not in s
+    assert s["order_statistics_omitted"] is True and "mean" in s
+    few = _stats(pd.DataFrame({"patient_id": [9917354, 9917361, 9917368]}))["patient_id"]
+    assert "mean" not in few
+
+
+def test_small_file_numbers_are_rounded_and_the_range_is_widened():
+    import pandas as pd
+    df = pd.DataFrame({"weight": [61.37, 72.91, 88.43, 54.19, 93.77]})
+    s = _stats(df)["weight"]
+    assert s["values_rounded"] is True
+    assert s["min"] == 50.0 and s["max"] == 100.0            # widened, never a real cell
+    assert s["median"] == 73.0
+    text = str(s)
+    for cell in ("61.37", "72.91", "88.43", "54.19", "93.77"):
+        assert cell not in text
+
+
+def test_strict_mode_rounds_numbers_even_in_a_large_file():
+    import pandas as pd
+    df = pd.DataFrame({"weight": [61.37 + i * 0.113 for i in range(200)]})
+    strict, balanced = _stats(df, "strict")["weight"], _stats(df, "balanced")["weight"]
+    assert strict["values_rounded"] is True and strict["min"] == 60.0
+    assert "values_rounded" not in balanced and balanced["min"] == 61.37
+
+
+def test_date_ranges_are_widened_never_exact():
+    import pandas as pd
+    visits = pd.to_datetime(["2023-03-17"] * 10 + ["2023-08-09"] * 10 + ["2024-02-21"] * 10)
+    df = pd.DataFrame({"visit_date": visits, "date_of_birth": visits})
+    s = _stats(df)
+    assert s["visit_date"]["min"].startswith("2023-03-01") and s["visit_date"]["max"].startswith("2024-02-29")
+    assert s["visit_date"]["range_rounded_to"] == "month"
+    assert s["date_of_birth"]["min"].startswith("2023-01-01") and s["date_of_birth"]["max"].startswith("2024-12-31")
+    assert s["date_of_birth"]["range_rounded_to"] == "year"
+    assert _stats(df, "strict")["visit_date"]["range_rounded_to"] == "year"
+    small = pd.DataFrame({"visit_date": pd.to_datetime(["2023-03-17", "2023-08-09"])})
+    assert _stats(small)["visit_date"]["min"].startswith("2023-01-01")
+    for mode in ("strict", "balanced", "permissive"):
+        text = str(_stats(df, mode))
+        for cell in ("2023-03-17", "2024-02-21"):
+            assert cell not in text

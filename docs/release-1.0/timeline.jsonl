@@ -1,0 +1,8 @@
+{"ts": "2026-11-20T14:12:00-0500", "event": "start", "slug": "reliability", "what": "Merge pending fixes (PR 12), create worktree (time approximate)"}
+{"ts": "2026-11-20T14:15:29-0500", "event": "stop", "slug": "reliability", "what": "PR 12 merged"}
+{"ts": "2026-11-20T14:15:29-0500", "event": "start", "slug": "security-review", "what": "Independent security review started (time approximate)"}
+{"ts": "2026-11-20T14:19:36-0500", "event": "start", "slug": "deploy", "what": "Baseline deploy of main 4c0930c (time approximate)"}
+{"ts": "2026-11-20T14:21:30-0500", "event": "stop", "slug": "deploy", "what": "Baseline live, healthy, revision 0000010 (time approximate)"}
+{"ts": "2026-11-20T14:22:12-0500", "event": "start", "slug": "model-choice", "what": "Probe Foundry models with real calls"}
+{"ts":"2026-11-20T14:24:03-0500","event":"start","slug":"sdlc-docs","what":"Copy SDLC templates into Confluence"}
+{"ts":"2026-11-20T14:25:17-0500","event":"stop","slug":"sdlc-docs","what":"Seven template copies created in Confluence (not yet filled)"}

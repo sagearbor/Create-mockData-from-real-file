@@ -1,0 +1,85 @@
+{
+ "epic": "ADP-40",
+ "epic_id": "219576",
+ "issues": {
+  "security-review": {
+   "key": "ADP-41",
+   "id": "219577",
+   "type": "Story",
+   "summary": "Security review before release (two independent reviews)"
+  },
+  "about-api": {
+   "key": "ADP-42",
+   "id": "219578",
+   "type": "Story",
+   "summary": "About page: copy-and-paste blocks for calling the tool from code"
+  },
+  "model-choice": {
+   "key": "ADP-43",
+   "id": "219579",
+   "type": "Story",
+   "summary": "Let the user choose a stronger AI model"
+  },
+  "site-test": {
+   "key": "ADP-44",
+   "id": "219580",
+   "type": "Story",
+   "summary": "Full test of the site, recorded in Zephyr"
+  },
+  "sdlc-docs": {
+   "key": "ADP-45",
+   "id": "219581",
+   "type": "Documentation",
+   "summary": "SDLC release documents for Mock Data Generator 1.0"
+  },
+  "deploy": {
+   "key": "ADP-46",
+   "id": "219582",
+   "type": "Task",
+   "summary": "Deploy release 1.0 to the development environment and verify"
+  },
+  "reliability": {
+   "key": "ADP-47",
+   "id": "219583",
+   "type": "Story",
+   "summary": "Generation reliability fixes already merged (pull request 12)"
+  }
+ },
+ "pages": {
+  "parent": {
+   "id": "6259540055",
+   "title": "DRAFT Mock Data Generator 1.0 - SDLC Documentation Parent Page",
+   "template": "4693032966"
+  },
+  "vp": {
+   "id": "6258524277",
+   "title": "DRAFT Mock Data Generator 1.0_VP",
+   "template": "4439736460"
+  },
+  "rs": {
+   "id": "6260064372",
+   "title": "DRAFT Mock Data Generator 1.0_RS",
+   "template": "4600299521"
+  },
+  "crut": {
+   "id": "6259146872",
+   "title": "DRAFT Mock Data Generator 1.0_CRUT",
+   "template": "4439736955"
+  },
+  "iqc": {
+   "id": "6258589767",
+   "title": "DRAFT Mock Data Generator 1.0_IQC",
+   "template": "4439736564"
+  },
+  "pq": {
+   "id": "6258393290",
+   "title": "DRAFT Mock Data Generator 1.0_PQ",
+   "template": "4439736820"
+  },
+  "vrraf": {
+   "id": "6260031544",
+   "title": "DRAFT Mock Data Generator 1.0_VRRAF",
+   "template": "4439736480"
+  }
+ }
+}

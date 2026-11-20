@@ -1,0 +1,627 @@
+{
+ "project": "ADP",
+ "folder": "Mock Data Generator 1.0/Browser tests on the deployed site",
+ "source_repo": "sagearbor/Create-mockData-from-real-file",
+ "commit": "146eb1f",
+ "run_command": "MDG_BASE_URL=<site address> pytest tests/e2e -m e2e --junitxml=results-e2e.xml",
+ "environment": "Deployed development site (VPN only), real AI model, Chromium driven by Playwright, made-up data created by the tests",
+ "issue_ids": {
+  "ADP-42": 219578,
+  "ADP-43": 219579,
+  "ADP-44": 219580,
+  "ADP-46": 219582,
+  "ADP-58": 219595,
+  "ADP-61": 219598,
+  "ADP-62": 219599,
+  "ADP-64": 219601,
+  "ADP-68": 219605
+ },
+ "cycle_issues": [
+  "ADP-44"
+ ],
+ "tests": [
+  {
+   "id": "tests.e2e.test_e2e_about.test_E2E_15_about_use_it_from_code",
+   "name": "Mock Data Generator (browser): The About page's copy-and-paste examples are complete, correct and work",
+   "objective": "the \"Use it from code\" section is shown without clicking anything, its examples use this site's own address, each Copy button copies the example exactly, the request fields are listed, and the first example really works when sent. Requirements: MDG-REQ-052, MDG-REQ-053, MDG-REQ-054, MDG-REQ-055.",
+   "precondition": "the site is running and its AI model is set up. The browser is allowed to read the clipboard. If the site needs an API key, MDG_API_KEY is set.",
+   "steps": [
+    {
+     "action": "Open the About page.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Without clicking anything, find the section \"Use it from code\" and its example blocks.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the first example (curl, POST /api/v1/generate) and the address in it.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "For every example block, click its Copy button and read the clipboard.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the table of request fields and the link to the interactive API reference.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Take the JSON text after -d in the first example and send it, unchanged, to POST /api/v1/generate.",
+     "data": "Made-up data created by the test",
+     "expected": "the section heading and every example are visible. There are curl, Python and JavaScript examples. Every block has a Copy button. No example still says \"YOUR-SITE\"; the first example's address is this site's own address followed by /api/v1/generate, and it sends the X-API-Key header from an environment variable (no real key in the page). After each Copy click the button says \"Copied\" and the clipboard holds exactly the block's text. The field table lists csv_text, data_content, format, num_rows, match_threshold, safety_mode, use_cache and model. There is a link to /docs. The request in step 6 answers 200 with the number of rows and the columns the example asked for."
+    }
+   ],
+   "issue": "ADP-42",
+   "source": "tests/e2e/test_e2e_about.py::test_E2E_15_about_use_it_from_code",
+   "key": "ADP-T677"
+  },
+  {
+   "id": "tests.e2e.test_e2e_api.test_E2E_13_limits_and_refusals",
+   "name": "Mock Data Generator (browser): Requests outside the limits are refused with a clear answer",
+   "objective": "the server refuses, before doing any work, a row count or file count outside the allowed range, an AI model that is not on its list, an unknown privacy mode, and batch generation; the JSON API refuses bad requests with its one error shape. Requirements: MDG-REQ-022, MDG-REQ-029, MDG-REQ-036, MDG-REQ-038.",
+   "precondition": "the site is running. No AI call is expected (every request is refused).",
+   "steps": [
+    {
+     "action": "POST /generate and POST /generate-sse with num_rows = 0, then with 100001.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /generate and POST /generate-sse with file_count = 21, then with 0.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /generate and POST /generate-sse with a model name that is not on the server's list.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /generate with safety_mode = \"open\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /generate/batch.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /api/v1/generate with both csv_text and data_content.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /api/v1/generate with a field the API does not know.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /api/v1/generate with a model name that is not on the server's list.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "POST /api/v1/generate with num_rows = 0.",
+     "data": "Made-up data created by the test",
+     "expected": "1. Status 400; the message says num_rows must be between 1 and 100000. 2. Status 400; the message says file_count must be between 1 and 20. 3. Status 400; the message says the model is not available and lists the allowed models (the same names GET /api/models returns). 4. Status 400; the message names the three allowed modes. 5. Status 501; the message says batch generation is not available. 6, 7, 9. Status 422 with exactly the keys status (\"error\"), error and error_class. 8. Status 400 with the same three keys; the message lists the allowed models."
+    }
+   ],
+   "issue": "ADP-62",
+   "source": "tests/e2e/test_e2e_api.py::test_E2E_13_limits_and_refusals",
+   "key": "ADP-T678"
+  },
+  {
+   "id": "tests.e2e.test_e2e_api.test_E2E_14_json_api_happy_path",
+   "name": "Mock Data Generator (browser): The JSON API generates rows and reports its version",
+   "objective": "a program can send a small table as JSON to POST /api/v1/generate and get made-up rows back in the documented shape; GET /api/v1/version answers with the service name and versions. Requirements: MDG-REQ-026, MDG-REQ-027, MDG-REQ-028.",
+   "precondition": "the site is running and its AI model is set up. If the site needs an API key, MDG_API_KEY is set.",
+   "steps": [
+    {
+     "action": "POST /api/v1/generate with csv_text (a made-up table with columns crate_id, crate_colour, weight_kg and six rows) and num_rows = 8.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "GET /api/v1/version.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "GET /api/models.",
+     "data": "Made-up data created by the test",
+     "expected": "1. Status 200. The answer has status \"success\"; shape is [8, 3]; columns are crate_id, crate_colour, weight_kg in that order; data is a list of 8 objects, each with exactly those columns; generation_info names the AI model, and that model is the server's default from step 3. 2. Status 200 with a non-empty service, version and api_version; api_version is \"v1\"."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_api.py::test_E2E_14_json_api_happy_path",
+   "key": "ADP-T679"
+  },
+  {
+   "id": "tests.e2e.test_e2e_api.test_E2E_16_health_and_readiness",
+   "name": "Mock Data Generator (browser): The health, readiness, model-list and API-reference pages answer",
+   "objective": "the site reports that it is up, that its AI model is set up, which AI models it offers, and it serves the interactive API reference. Requirements: MDG-REQ-042.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "GET /health.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "GET /ready.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "GET /api/models.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Open /docs in the browser.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "GET /openapi.json.",
+     "data": "Made-up data created by the test",
+     "expected": "1. Status 200 with status \"healthy\". 2. Status 200 with status \"ready\" and ai_ready true. 3. Status 200 with a default model that is in the list of models; every entry has a name. 4. The page loads with status 200 and shows the API reference with the routes. 5. Status 200; the description includes /api/v1/generate and /api/v1/version."
+    }
+   ],
+   "issue": "ADP-46",
+   "source": "tests/e2e/test_e2e_api.py::test_E2E_16_health_and_readiness",
+   "key": "ADP-T680"
+  },
+  {
+   "id": "tests.e2e.test_e2e_dictionary.test_E2E_10_dictionary_only_preview_and_download",
+   "name": "Mock Data Generator (browser): Generate from a data dictionary alone, then download the same rows",
+   "objective": "with only a dictionary uploaded (no data file), the page generates data with exactly the dictionary's columns, and the download that follows holds the same rows the preview showed. Requirements: MDG-REQ-008, MDG-REQ-014.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page. Do not upload a data file.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Upload the made-up dictionary (six columns: gadget_code, gadget_colour, length_mm, mass_g, checked_on, passed_check; gadget_colour allows teal, ochre, mauve; passed_check allows yes, no).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 12 in the Rows box and click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the preview: column headings, the sentence above the table, and every row.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Click \"Download File\" and open the saved file.",
+     "data": "Made-up data created by the test",
+     "expected": "the page says the dictionary was loaded with 6 columns. The preview has exactly the six dictionary columns in the dictionary's order and 12 rows, all shown, with a DICTIONARY badge. The gadget_colour and passed_check values are only the allowed ones. The saved file's name ends in \".csv\", has the same heading row, and its 12 rows equal the 12 preview rows, in the same order."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_dictionary.py::test_E2E_10_dictionary_only_preview_and_download",
+   "key": "ADP-T681"
+  },
+  {
+   "id": "tests.e2e.test_e2e_dictionary.test_E2E_11_dictionary_with_several_tables",
+   "name": "Mock Data Generator (browser): A dictionary that defines two tables: the page asks which one to use",
+   "objective": "when the dictionary file defines more than one table, the page asks the user to choose one before it generates, and then generates for that table. Requirements: MDG-REQ-009.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page. Upload the made-up dictionary that defines two tables, Orchard and Beehive.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Without choosing a table, click \"Generate Synthetic Data\". Read the message and close it.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "In \"This file defines several tables. Choose one:\" pick Beehive.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 10 in the Rows box and click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": "after the upload the page says 2 tables were found and none is chosen, and the list offers Orchard and Beehive. Clicking Generate before choosing gives a message asking to choose a table, and no data. After Beehive is picked the page names it as the loaded table, and the preview has exactly the Beehive columns (hive_code, frame_count, queen_marked, honey_kg, inspected_on) and 10 rows."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_dictionary.py::test_E2E_11_dictionary_with_several_tables",
+   "key": "ADP-T682"
+  },
+  {
+   "id": "tests.e2e.test_e2e_dictionary.test_E2E_12_dictionary_private_to_each_session",
+   "name": "Mock Data Generator (browser): Two people's dictionaries do not mix, and a dictionary cannot be used without its id",
+   "objective": "a dictionary uploaded in one browser session is used only by that session; a request that does not carry the id the server gave for an upload is told that no dictionary has been uploaded. Requirements: MDG-REQ-019.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page in two separate browser sessions, A and B (no shared cookies or storage).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "In A upload the \"gadgets\" dictionary. In B upload the \"kites\" dictionary (different column names).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "In A type 8 in the Rows box and click \"Generate Synthetic Data\". Then do the same in B.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Without a browser, send POST /dictionary/table with a table name and no dictionary id; send it again with an id that was never issued.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Without a browser, send POST /generate-with-dictionary with no dictionary id and no dictionary file.",
+     "data": "Made-up data created by the test",
+     "expected": "A and B received different ids. A's preview has only the gadget columns; B's preview has only the kite columns. Each request in steps 4 and 5 is refused with status 400 and a message that no data dictionary has been uploaded or provided; none of them returns data."
+    }
+   ],
+   "issue": "ADP-61",
+   "source": "tests/e2e/test_e2e_dictionary.py::test_E2E_12_dictionary_private_to_each_session",
+   "key": "ADP-T683"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_01_home_page_loads",
+   "name": "Mock Data Generator (browser): Home page loads with the AI model and Privacy choices filled in",
+   "objective": "the page opens without script errors, the \"AI model\" list comes from the server with the server's default selected, and \"Privacy\" offers three modes. Requirements: MDG-REQ-021.",
+   "precondition": "the site is running.",
+   "steps": [
+    {
+     "action": "Open the home page.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Ask the server for its list of AI models (GET /api/models).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the choices in the \"AI model\" box and which one is selected.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the choices in the \"Privacy\" box.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the browser console.",
+     "data": "Made-up data created by the test",
+     "expected": "the \"AI model\" box lists exactly the server's models, in the server's order, with the server's default selected and labelled \"(default)\". \"Privacy\" offers Balanced, Strict and Permissive, with Balanced selected. The upload boxes and the two action buttons are visible. The console has no errors."
+    }
+   ],
+   "issue": "ADP-43",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_01_home_page_loads",
+   "key": "ADP-T684"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_02_upload_generate_preview",
+   "name": "Mock Data Generator (browser): Upload a data file and generate with the default settings",
+   "objective": "with no setting changed, the page generates made-up data that has the uploaded file's column names in the same order and the same number of rows, shows its progress, and says plainly whether the preview shows all rows. Requirements: MDG-REQ-001, MDG-REQ-002, MDG-REQ-003, MDG-REQ-004, MDG-REQ-011.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Upload the made-up file (40 rows; columns patient_id, patient_name, sex, visit_date, weight_kg, site, notes).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Leave every setting as it is (Rows box empty) and click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Watch the progress steps.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "When the preview appears, read the column headings, the sentence above the table, and count the rows in the table.",
+     "data": "Made-up data created by the test",
+     "expected": "the six progress steps are shown (Extract Metadata, Check Cache, AI Response, Generate Code, Create Data, Validate Output) and the first is ticked. The preview's column headings equal the uploaded file's, in the same order. The sentence says 40 rows and 7 columns were generated and that all 40 rows are shown; the table has 40 rows. A badge says whether the AI model or a saved script was used."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_02_upload_generate_preview",
+   "key": "ADP-T685"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_03_download_csv",
+   "name": "Mock Data Generator (browser): Download the generated data as a CSV file",
+   "objective": "after a preview, \"Download File\" saves a CSV file holding the heading row and the number of rows that was asked for. Requirements: MDG-REQ-012.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 25 in the Rows box and click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "When the preview appears, click \"Download File\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Open the saved file.",
+     "data": "Made-up data created by the test",
+     "expected": "a file whose name ends in \".csv\" is saved. Its first line holds the uploaded file's column names in the same order. It has exactly 25 data rows."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_03_download_csv",
+   "key": "ADP-T686"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_04_rows_setting",
+   "name": "Mock Data Generator (browser): Ask for more rows than the preview can show",
+   "objective": "the Rows setting is honoured, and when there are more rows than the preview shows, the page says so plainly. Requirements: MDG-REQ-004, MDG-REQ-011.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file (40 rows).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 60 in the Rows box and click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the sentence above the preview table and count the rows in the table.",
+     "data": "Made-up data created by the test",
+     "expected": "the sentence says 60 rows were generated, that the first 50 are shown, and that the download gives all 60. The table has exactly 50 rows."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_04_rows_setting",
+   "key": "ADP-T687"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_05_several_files_zip",
+   "name": "Mock Data Generator (browser): Ask for three files and get them as one zip file",
+   "objective": "when more than one file is asked for, the download is a single zip file holding that many files, each with the rows asked for. Requirements: MDG-REQ-013.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 25 in the Rows box, choose 3 in the Files box, click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "When the preview appears, click \"Download ZIP\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Open the saved zip file and each file in it.",
+     "data": "Made-up data created by the test",
+     "expected": "the page says \"3 files generated\" and offers \"Download ZIP\". The saved file's name ends in \".zip\". It holds exactly 3 files with names ending in \".csv\". Each has the uploaded file's column names and exactly 25 data rows."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_05_several_files_zip",
+   "key": "ADP-T688"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_06_json_and_excel_download",
+   "name": "Mock Data Generator (browser): Download the generated data as JSON and as Excel",
+   "objective": "the JSON download is a list of rows, and the Excel download is a workbook that opens and has the right columns. Requirements: MDG-REQ-012.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 25 in the Rows box, choose JSON in the Format box, click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "When the preview appears, click \"Download File\" and open the saved file.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Open \"Generation Settings\" again, change Format to Excel (no new generation), click \"Download File\" and open the saved file.",
+     "data": "Made-up data created by the test",
+     "expected": "- JSON: the file name ends in \".json\"; the file is a list of 25 row objects, each with the uploaded file's column names (not a wrapper around the rows). - Excel: the file name ends in \".xlsx\"; the workbook opens; its first row holds the uploaded file's column names in order; it has 25 data rows."
+    }
+   ],
+   "issue": "ADP-44",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_06_json_and_excel_download",
+   "key": "ADP-T689"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_07_model_choice_and_strict_privacy",
+   "name": "Mock Data Generator (browser): Generate with another AI model and Strict privacy",
+   "objective": "the chosen AI model is the one used and the page says so; in Strict privacy no text from the uploaded file comes back in the generated rows. Requirements: MDG-REQ-015, MDG-REQ-021, MDG-REQ-023.",
+   "precondition": "the site is running, its AI model is set up, and the server offers at least two AI models.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file (every patient_name starts with \"Zzyzx Quillfeather\"; every site ends with \"Test Site\").",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "In the \"AI model\" box choose the first model that is not the default.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "In the \"Privacy\" box choose Strict.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 25 in the Rows box and click \"Generate Synthetic Data\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the badges above the preview, the server's answer for the preview, and the preview rows.",
+     "data": "Made-up data created by the test",
+     "expected": "the request the page sent names the chosen model and Strict. The server's answer names the chosen model as the one that wrote the generation script. A badge above the preview shows that model's name, and hovering it says it is the AI model that wrote the generation code. No made-up person name and no site label from the uploaded file appears in the previewed rows."
+    }
+   ],
+   "issue": "ADP-43",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_07_model_choice_and_strict_privacy",
+   "key": "ADP-T690"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_08_extract_metadata_only",
+   "name": "Mock Data Generator (browser): Extract Metadata Only shows the description of the file without generating data",
+   "objective": "the description lists the columns; in Balanced privacy, values of the name column are replaced by placeholders while the labels of the repeated category \"sex\" are kept; no person name from the file is in the description. Requirements: MDG-REQ-007, MDG-REQ-016.",
+   "precondition": "the site is running. No AI call is made.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file. Leave Privacy on Balanced.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Click \"Extract Metadata Only\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the summary (\"Metadata Extracted\") and the \"Extracted Metadata\" panel.",
+     "data": "Made-up data created by the test",
+     "expected": "the summary says 40 rows and 7 columns and lists the seven column names in order. In the panel, the most common values of patient_name are placeholders (value_0, value_1, ...), and those of sex are the real labels F and M. No \"Zzyzx Quillfeather\" name appears in the summary, in the panel, or in the server's answer. No preview of generated data is shown. Note: the page also shows the uploaded file's own rows in \"Data Preview & Editor\"; the browser reads those from the file itself, so that box is not part of this check."
+    }
+   ],
+   "issue": "ADP-58",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_08_extract_metadata_only",
+   "key": "ADP-T691"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_09_hostile_column_name_shown_as_text",
+   "name": "Mock Data Generator (browser): A column name that is a piece of HTML is shown as text and never runs",
+   "objective": "text from an uploaded file is shown as text. A column whose name is an HTML image tag with a script in it must appear literally and must not run. Requirements: MDG-REQ-049.",
+   "precondition": "the site is running and its AI model is set up.",
+   "steps": [
+    {
+     "action": "Open the home page and upload the made-up file whose middle column is named <img src=x onerror=\"window.__xss=1\"> (12 rows, values alpha / beta / gamma).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Click \"Extract Metadata Only\". Look at the summary.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Type 12 in the Rows box and click \"Generate Synthetic Data\". Look at the preview's column headings.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Open the Usage Dashboard page and look at the list of saved scripts.",
+     "data": "Made-up data created by the test",
+     "expected": "on every page the column name is visible exactly as typed, no image element was created from it, and the script in it did not run (the page's marker window.__xss stays unset). If the dashboard's list does not show an entry for this file, that is recorded and only the \"did not run\" checks apply there."
+    }
+   ],
+   "issue": "ADP-64",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_09_hostile_column_name_shown_as_text",
+   "key": "ADP-T692"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_17_upload_notice_is_truthful",
+   "name": "Mock Data Generator (browser): The note beside \"Upload Data File\" says truthfully what happens to the file",
+   "objective": "the page tells the user the file is sent to the server and that real study data must not be uploaded; it does not claim the file stays in the browser. Requirements: MDG-REQ-017, MDG-REQ-056.",
+   "precondition": "the site is running. No AI call is made.",
+   "steps": [
+    {
+     "action": "Open the home page.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Point at the small \"i\" beside \"Upload Data File\".",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Read the note that appears.",
+     "data": "Made-up data created by the test",
+     "expected": "the note is shown and contains \"Your file is sent to this server\" and \"Do not upload real study data\". Neither the note nor the rest of the page says \"never leaves your browser\" or \"Safe to upload\"."
+    }
+   ],
+   "issue": "ADP-58",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_17_upload_notice_is_truthful",
+   "key": "ADP-T693"
+  },
+  {
+   "id": "tests.e2e.test_e2e_page.test_E2E_18_unreadable_file_shows_plain_error",
+   "name": "Mock Data Generator (browser): A file that is not a table gives a readable error and no preview",
+   "objective": "when the uploaded file cannot be read as a table, the page says so in plain words, shows no preview, and does not show internal program error text. Requirements: MDG-REQ-035.",
+   "precondition": "the site is running. No AI call is expected.",
+   "steps": [
+    {
+     "action": "Open the home page.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Upload a made-up \".csv\" file that holds only meaningless bytes (not text).",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Click \"Generate Synthetic Data\" and read the error box. Close it.",
+     "data": "Made-up data created by the test",
+     "expected": ""
+    },
+    {
+     "action": "Upload an empty \".csv\" file, click \"Generate Synthetic Data\", read the error box.",
+     "data": "Made-up data created by the test",
+     "expected": "each time an error box appears with a sentence a person can read, and no preview of generated data is shown. The sentence does not contain internal program error text (for example the name of a text decoder or a byte code)."
+    }
+   ],
+   "issue": "ADP-68",
+   "source": "tests/e2e/test_e2e_page.py::test_E2E_18_unreadable_file_shows_plain_error",
+   "key": "ADP-T694"
+  }
+ ]
+}

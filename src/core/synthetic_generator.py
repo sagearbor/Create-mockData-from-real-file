@@ -616,7 +616,8 @@ class SyntheticDataGenerator:
         return """You are a Python code generator specialized in creating synthetic data.
         Generate complete, executable Python code that creates a pandas DataFrame with synthetic data.
         The code should:
-        1. Import necessary libraries (pandas, numpy, random, datetime, etc.)
+        1. Import ONLY from this list: pandas, numpy, random, datetime, math, string, re, uuid, itertools, collections, decimal, typing. Write `import random` and call `random.choice(...)`; do not assign a module to another name. Any other import (os, sys, json, time, faker, pathlib, ...) makes the code unusable
+        1a. Do not read or write files, do not print, do not use eval/exec/getattr, and do not call DataFrame.query, .eval, .to_csv, .to_json or any read_* function. Use '...'.format(...) only on a text literal, or use f-strings
         2. Define a function called generate_synthetic_data() that returns a pandas DataFrame
         3. IMPORTANT: After defining the function, call it and assign to 'result' variable: result = generate_synthetic_data()
         4. Match the statistical properties and patterns described in the metadata

@@ -129,6 +129,12 @@ def test_review_follow_up_cases_are_refused(snippet, word):
     ("x = 1\nx.import_module('os')", "import_module"),
     ("x = 1\nx.execve", "execve"),
     ("match x:\n    case object(real=r):\n        pass", "match"),
+    ("import random\nr = random\nr.seed(1)", "may only be used as"),
+    ("import re\nmods = [re]", "may only be used as"),
+    ("import datetime as d\nf = lambda m: m\nf(d)", "may only be used as"),
+    ("import re\nre.enum", "enum"),
+    ("import re\nre.functools", "functools"),
+    ("x = 1\nx.bltns", "bltns"),
 ])
 def test_module_re_exports_and_match_are_refused(snippet, word):
     problems = code_gate.find_problems(snippet)

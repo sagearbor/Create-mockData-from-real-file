@@ -18,7 +18,8 @@ What is refused:
 * for the standard-library modules, any name not listed for that module in
   ``MODULE_NAMES`` (an allowed module can re-export a dangerous one, so only
   named functions and classes may be taken from it);
-* ``match`` statements (their class patterns read attributes by name);
+* a listed module used in any way other than ``module.name`` (assigned, passed
+  on, stored), and ``match`` statements (class patterns read attributes by name);
 * the names in ``FORBIDDEN_NAMES`` (``open``, ``eval``, ``exec``, ``getattr``, ...);
 * any attribute whose name starts with an underscore;
 * any ``read_*`` attribute, and any ``to_*`` attribute not in ``ALLOWED_TO_METHODS``;
@@ -104,6 +105,7 @@ FORBIDDEN_ATTRIBUTES = frozenset({
     "urllib", "requests", "http", "compat", "testing", "distutils", "f2py", "lib",
     "core", "util", "environ", "getenv", "system", "popen", "Popen", "run", "codecs",
     "tarfile", "zipfile", "zoneinfo", "factory", "import_module",
+    "getattr", "setattr", "bltns", "enum", "functools", "types", "operator",
 })
 _FORBIDDEN_PREFIXES = ("exec", "spawn", "fork")
 
@@ -170,6 +172,14 @@ def find_problems(code: str, max_problems: int = 10) -> List[str]:
             for alias in node.names:
                 if alias.name in MODULE_NAMES:
                     module_aliases[alias.asname or alias.name] = alias.name
+
+    # A listed module may only appear as `module.name`: not assigned, passed on or stored,
+    # which would let a script reach its other attributes under another name.
+    receivers = {id(n.value) for n in ast.walk(tree)
+                 if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in module_aliases and id(node) not in receivers:
+            add(f"{_line(node)}: the module '{node.id}' may only be used as '{node.id}.<name>'")
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Match):

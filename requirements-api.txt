@@ -1,44 +1,42 @@
-# Cloud Run runtime dependencies — trimmed from requirements.txt.
+# API-only image runtime dependencies (Dockerfile.api) — trimmed from requirements.txt.
 # Dev/test tools (pytest, black, flake8, isort, mypy, httpx) and Azure-only
 # SDKs (azure-storage-blob, azure-cosmos, azure-search-documents,
 # azure-keyvault-secrets) are intentionally excluded. azure-identity is kept:
 # src/dcri_llm.py needs it for LLM auth.
-# Pins match requirements.txt so local and Cloud Run images use identical
-# package versions.
+# Pins match requirements.txt and requirements-aca.txt so every image uses
+# identical package versions (tests/test_dependency_pins.py checks this).
 
 # Web framework
-fastapi==0.109.0
-uvicorn[standard]==0.25.0
-python-multipart==0.0.6
-aiofiles==23.2.1
+fastapi==0.140.13
+starlette==1.3.1
+uvicorn[standard]==0.52.0
+python-multipart==0.0.32
+aiofiles==25.1.0
 
 # Data processing
-# Verified against both bounds: pandas 2.1.4/numpy 1.26.2 and
-# pandas 3.x/numpy 2.x. See tests/test_pandas_compat.py.
-pandas>=2.1.4,<4
-numpy>=1.26.2,<3
-jsonschema==4.20.0
+pandas==3.0.5
+# numpy 2.5.x has no Python 3.11 wheels; 2.4.x is the newest line for 3.11.
+numpy==2.4.6
 openpyxl==3.1.5
-PyYAML==6.0.1
-PyPDF2==3.0.1
+PyYAML==6.0.3
+pypdf==7.1.1
 
 # Config & validation
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
 
-# LLM — generation_service imports AzureOpenAI lazily; the package must be
-# present even when credentials are absent (the code falls back gracefully).
-openai==1.109.1
-azure-identity==1.19.0
+# LLM — every call goes through src/dcri_llm.py; the package must be present.
+openai==2.50.0
+azure-identity==1.27.0
 
 # Utilities
-typing-extensions==4.12.2
-aiohttp==3.9.1
-Jinja2==3.1.2
+typing-extensions==4.16.0
 
-# MCP server (used by src/mcp_server.py which is imported transitively)
-mcp>=0.4.0
+# MCP server (src/mcp_server.py, standalone stdio transport). Pinned exactly:
+# an unpinned mcp once pulled a new major version and crash-looped on import.
+# 1.30.0 is the last 1.x release.
+mcp==1.30.0
 
-# Security
-cryptography==41.0.7
+# Security (not imported directly; pulled in by azure-identity/msal)
+cryptography==50.0.2

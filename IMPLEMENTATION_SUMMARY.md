@@ -1,12 +1,14 @@
 # Implementation Summary - Cache System & Dashboard
 
+> Historical note from September 2025, kept for reference. For what the service does now, see `README.md`.
+
 ## Completed Features
 
 ### 1. ✅ Cache System Enhancements
 - **Cache Modes**: Implemented configurable cache modes (off, structure, structure_stats)
 - **Seed Injection**: Added automatic seed randomization for variety in cached code
 - **API Endpoints**: Created `/api/cache-info` and `/api/cache/clear` for cache management
-- **Performance**: Cache hits are 5-10x faster than LLM calls
+- **Performance**: A cache hit skips the call to the AI model
 
 ### 2. ✅ Usage Dashboard
 - **Location**: Available at `/dashboard` with dropdown navigation
@@ -24,9 +26,8 @@
 - **Auto-refresh**: Dashboard updates every 30 seconds
 
 ### 4. ✅ Testing Suite
-- **API Tests**: Comprehensive test suite in `tests/test_api.py`
+- **API Tests**: `tests/test_api.py` (needs a running server)
 - **Coverage**: Tests for all endpoints, cache modes, and formats
-- **Performance Tests**: Validates cache hit performance improvements
 
 ### 5. ✅ Documentation
 - **Cache System**: Complete guide in `docs/CACHE_SYSTEM.md`
@@ -35,33 +36,11 @@
 
 ## Key Technical Improvements
 
-### Performance Metrics
-- Cache hits: ~0.5-0.6 seconds
-- Cache misses (LLM calls): ~2-3 seconds
-- Speedup factor: 5-10x with cache
-
 ### Code Quality
-- Added comprehensive error handling
+- Added error handling
 - Implemented proper logging throughout
 - Fixed syntax errors in synthetic_generator.py
 - Cleaned up redundant code
-
-### Testing Results
-```
-==================================================
-BYOD Synthetic Data Generator - API Test Suite
-==================================================
-✓ Health check passed
-✓ Cache info: 4 entries, 0.07 MB
-✓ Cache clear: Cleared cache entries older than 365 days
-✓ Usage logs: 32 entries found
-✓ File-based generation tests passed
-✓ Cache hit performance verified
-✓ Format tests passed
-
-Results: 7 passed, 0 failed
-==================================================
-```
 
 ## File Changes Summary
 
@@ -96,15 +75,10 @@ Results: 7 passed, 0 failed
 
 ### Environment Variables
 ```bash
-# Cache settings
-CACHE_ENABLED=true
-CACHE_MATCH_THRESHOLD=0.8
-CACHE_MAX_SIZE_MB=500
-
-# Dashboard settings
-DASHBOARD_REFRESH_INTERVAL=30000
-DASHBOARD_DEFAULT_RANGE_DAYS=7
+LOCAL_CACHE_PATH=./data/cache   # Folder for cached descriptions and scripts
+GENERATOR_VERSION=1.1           # Raising it retires every cached script
 ```
+The dashboard has no environment variables.
 
 ### API Usage
 ```python
@@ -118,20 +92,15 @@ response = requests.post(
 
 ## Deployment Notes
 
-The system is ready for:
-1. **Local Development**: Fully functional on localhost
-2. **Testing**: Automated tests validate all features
-3. **Production Readiness**: Add authentication and HTTPS for production
-4. **Monitoring**: Dashboard provides operational insights
+1. **Local Development**: Runs on localhost; generation needs an Azure OpenAI model
+2. **Sign-in**: There is none, on the dashboard or the cache routes (tracked as ADP-60)
+3. **Production**: There is no production environment yet
 
 ## Summary
 
-All requested features have been successfully implemented and tested:
-- ✅ Cache system with configurable modes
-- ✅ Interactive usage dashboard with charts
-- ✅ Fixed timing displays and UI improvements
-- ✅ Variety in cached data generation
-- ✅ Comprehensive test coverage
-- ✅ Complete documentation
-
-The BYOD Synthetic Data Generator now has enterprise-ready caching and monitoring capabilities that significantly improve performance and user experience.
+Implemented in September 2025:
+- Cache system with configurable modes
+- Usage dashboard with charts
+- Timing displays and UI changes
+- Seed injection for variety in cached scripts
+- Tests and documentation for the above

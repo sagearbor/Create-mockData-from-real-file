@@ -61,6 +61,10 @@ def generate(payload: Dict[str, Any], *, raise_ai_errors: bool = False) -> Dict[
               ``"balanced"``.
             * ``use_cache`` (bool, optional) — whether to use the
               generation-code cache.  Defaults to ``True``.
+            * ``model`` (str | None, optional) — AI model (deployment name)
+              that writes the generation code.  Must be on the server's
+              allow-list (``src/core/models.py``, ``GET /api/models``);
+              empty or absent means the server default.
         raise_ai_errors: When ``True``, an ``AIGenerationError`` propagates
             to the caller instead of becoming an error dict, so the REST
             ``/api/v1`` route can report its HTTP status and ``error_class``.
@@ -94,6 +98,14 @@ def generate(payload: Dict[str, Any], *, raise_ai_errors: bool = False) -> Dict[
     safety_mode: str = payload.get("safety_mode", "balanced")
     use_cache: bool = bool(payload.get("use_cache", True))
 
+    # Refused before the file is decoded or any model is called.
+    from src.core.models import ModelNotAllowed, resolve_model  # lazy
+
+    try:
+        model = resolve_model(payload.get("model"))
+    except ModelNotAllowed as exc:
+        return {"status": "error", "error": str(exc), "error_class": "ModelNotAllowed"}
+
     try:
         # --- decode source bytes -------------------------------------------
         try:
@@ -119,6 +131,7 @@ def generate(payload: Dict[str, Any], *, raise_ai_errors: bool = False) -> Dict[
             num_rows=num_rows,
             match_threshold=match_threshold,
             use_cached=use_cache,
+            model=model,
         )
 
         # --- serialise output ---------------------------------------------

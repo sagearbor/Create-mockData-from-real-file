@@ -1,306 +1,96 @@
-# Docker Deployment Guide for BYOD Synthetic Data Generator
+# Docker Guide for BYOD Synthetic Data Generator
+
+This guide covers running the service in a container on your own machine. The deployed service runs on Azure Container Apps from `Dockerfile.aca`; see [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md). There is no production environment yet.
+
+Do not upload real study data or patient identifiers: this release has not been approved for them.
 
 ## Prerequisites
 
 - Docker Engine 20.10+
-- Docker Compose 2.0+ (for local development)
-- Azure CLI (for Azure deployment)
-- Azure Container Registry (ACR) access
+- Docker Compose 2.0+ (optional)
+- An Azure OpenAI endpoint. Generation does not work without the AI model.
 
-## Local Development with Docker
+## The Dockerfiles
 
-### 1. Build the Docker Image
+| File | Used for |
+|------|----------|
+| `Dockerfile.aca` | The deployed image (Azure Container Apps). Base image pinned by digest, pinned libraries, non-root user |
+| `Dockerfile` | Local runs, port 8201, non-root user |
+| `Dockerfile.api` | Google Cloud Run, port 8080. Reference only, not the approved route |
+
+## Run locally with Docker
 
 ```bash
 # Build the image
 docker build -t byod-synthetic-generator:latest .
 
-# Or use docker-compose
-docker-compose build
-```
-
-### 2. Run Locally with Docker
-
-```bash
-# Run with docker directly
+# Run it. The cache and logs are kept on your machine in ./data and ./logs.
 docker run -d \
   --name byod-synthetic-generator \
   -p 8201:8201 \
   --env-file .env \
   -v $(pwd)/data:/app/data \
-  -v $(pwd)/cache:/app/cache \
   -v $(pwd)/logs:/app/logs \
   byod-synthetic-generator:latest
-
-# Or use docker-compose (recommended)
-docker-compose up -d
 ```
 
-### 3. View Logs
+Signing in to Azure OpenAI from a local container: outside Azure, `LLM_AUTH=identity` uses the Azure CLI sign-in (`az login`) of the environment the app runs in. A sign-in on your own machine is not inside the container. The simplest setting for a local container is `LLM_AUTH=key` with `AZURE_OPENAI_API_KEY` in your `.env`. Never commit `.env`.
+
+`docker-compose.yml` builds and runs the same image (`docker-compose up -d`). It also passes settings for Blob Storage, Cosmos DB, AI Search and Key Vault from an earlier plan; the application does not read them.
+
+## Logs and stopping
 
 ```bash
-# Docker logs
 docker logs -f byod-synthetic-generator
 
-# Or with docker-compose
-docker-compose logs -f
-```
-
-### 4. Stop the Container
-
-```bash
-# Stop and remove container
 docker stop byod-synthetic-generator
 docker rm byod-synthetic-generator
-
-# Or with docker-compose
-docker-compose down
 ```
 
-## Azure Deployment
+## Settings
 
-### 1. Push to Azure Container Registry (ACR)
+| Setting | Needed | What it does |
+|---------|--------|--------------|
+| `AZURE_OPENAI_ENDPOINT` | yes | Address of the Azure OpenAI resource. Without it `/ready` answers 503 and every generation request fails |
+| `LLM_AUTH` | no | `identity` (default: `az login` locally, managed identity when deployed) or `key` |
+| `AZURE_OPENAI_API_KEY` | only with `LLM_AUTH=key` | Key for people without an Azure identity |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | no | The server default model (default `gpt-5-nano`) |
+| `LLM_ALLOWED_MODELS` | no | Comma-separated models a request may choose. Unset = the built-in list in `src/core/models.py` |
+| `LLM_REASONING_EFFORT` | no | Default `low`; `off` = do not send |
+| `SOLUTION_NAME` | no | Name written into the AI call telemetry lines |
+| `ALLOWED_ORIGINS` | no | CORS: comma-separated origins allowed to call the site from a browser |
+| `MOCKDATA_MAX_UPLOAD_BYTES` | no | Largest request body on the upload routes (default 50 MB) |
+| `MOCKDATA_API_KEY` | no | If set, `/api/v1` requests must send it in `X-API-Key`. Other routes never check a key |
+| `MOCKDATA_API_MAX_BYTES` | no | Largest request body on `/api/v1` (default 10 MB) |
+| `GENERATOR_VERSION` | no | Part of every cache key (default `1.1`). Raising it retires every cached script |
+| `LOCAL_CACHE_PATH` | no | Folder for cached descriptions and scripts (default `./data/cache`) |
+| `APP_PORT` | no | Port (default 8201) |
+
+## Health check
 
 ```bash
-# Login to Azure
-az login
+# Liveness: always 200 while the process is up
+curl http://localhost:8201/health
 
-# Login to ACR
-az acr login --name <your-acr-name>
-
-# Tag the image
-docker tag byod-synthetic-generator:latest <your-acr-name>.azurecr.io/byod-synthetic-generator:latest
-
-# Push to ACR
-docker push <your-acr-name>.azurecr.io/byod-synthetic-generator:latest
+# Readiness: 200 only when the AI model is configured, otherwise 503 with the reason
+curl -i http://localhost:8201/ready
 ```
 
-### 2. Deploy to Azure Container Instances (ACI)
+## What the container can and cannot do
 
-```bash
-# Create container instance
-az container create \
-  --resource-group <your-resource-group> \
-  --name byod-synthetic-generator \
-  --image <your-acr-name>.azurecr.io/byod-synthetic-generator:latest \
-  --cpu 2 \
-  --memory 4 \
-  --registry-login-server <your-acr-name>.azurecr.io \
-  --registry-username <acr-username> \
-  --registry-password <acr-password> \
-  --ports 8201 \
-  --environment-variables \
-    AZURE_OPENAI_ENDPOINT=<your-endpoint> \
-    AZURE_OPENAI_API_KEY=<your-api-key> \
-    AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=<your-deployment> \
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=<your-embedding-deployment> \
-  --dns-name-label byod-synthetic-gen \
-  --location <your-location>
-```
-
-### 3. Deploy to Azure App Service
-
-```bash
-# Create App Service Plan
-az appservice plan create \
-  --name byod-synthetic-plan \
-  --resource-group <your-resource-group> \
-  --sku B2 \
-  --is-linux
-
-# Create Web App
-az webapp create \
-  --resource-group <your-resource-group> \
-  --plan byod-synthetic-plan \
-  --name byod-synthetic-app \
-  --deployment-container-image-name <your-acr-name>.azurecr.io/byod-synthetic-generator:latest
-
-# Configure container settings
-az webapp config container set \
-  --name byod-synthetic-app \
-  --resource-group <your-resource-group> \
-  --docker-custom-image-name <your-acr-name>.azurecr.io/byod-synthetic-generator:latest \
-  --docker-registry-server-url https://<your-acr-name>.azurecr.io \
-  --docker-registry-server-user <acr-username> \
-  --docker-registry-server-password <acr-password>
-
-# Set environment variables
-az webapp config appsettings set \
-  --resource-group <your-resource-group> \
-  --name byod-synthetic-app \
-  --settings \
-    AZURE_OPENAI_ENDPOINT=<your-endpoint> \
-    AZURE_OPENAI_API_KEY=<your-api-key> \
-    AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=<your-deployment> \
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=<your-embedding-deployment> \
-    WEBSITES_PORT=8201
-```
-
-### 4. Deploy to Azure Kubernetes Service (AKS)
-
-Create a Kubernetes deployment file (`k8s-deployment.yaml`):
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: byod-synthetic-generator
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: byod-synthetic-generator
-  template:
-    metadata:
-      labels:
-        app: byod-synthetic-generator
-    spec:
-      containers:
-      - name: byod-synthetic-generator
-        image: <your-acr-name>.azurecr.io/byod-synthetic-generator:latest
-        ports:
-        - containerPort: 8201
-        env:
-        - name: AZURE_OPENAI_ENDPOINT
-          valueFrom:
-            secretKeyRef:
-              name: byod-secrets
-              key: azure-openai-endpoint
-        - name: AZURE_OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: byod-secrets
-              key: azure-openai-api-key
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "2000m"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: byod-synthetic-service
-spec:
-  selector:
-    app: byod-synthetic-generator
-  ports:
-  - port: 80
-    targetPort: 8201
-  type: LoadBalancer
-```
-
-Deploy to AKS:
-
-```bash
-# Get AKS credentials
-az aks get-credentials --resource-group <your-resource-group> --name <your-aks-cluster>
-
-# Create secrets
-kubectl create secret generic byod-secrets \
-  --from-literal=azure-openai-endpoint=<your-endpoint> \
-  --from-literal=azure-openai-api-key=<your-api-key>
-
-# Apply deployment
-kubectl apply -f k8s-deployment.yaml
-
-# Check deployment status
-kubectl get deployments
-kubectl get pods
-kubectl get services
-```
-
-## Environment Variables
-
-Required environment variables for all deployments:
-
-- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI endpoint
-- `AZURE_OPENAI_API_KEY`: Your Azure OpenAI API key
-- `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`: Name of your chat model deployment
-- `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME`: Name of your embedding model deployment
-
-Optional environment variables:
-
-- `AZURE_STORAGE_CONNECTION_STRING`: For blob storage
-- `COSMOS_ENDPOINT`: For Cosmos DB
-- `COSMOS_KEY`: Cosmos DB access key
-- `AZURE_SEARCH_ENDPOINT`: For Azure Cognitive Search
-- `AZURE_SEARCH_KEY`: Azure Search API key
-- `AZURE_KEY_VAULT_URL`: For Key Vault integration
-
-## Health Check
-
-The application exposes a health endpoint at `/health` which can be used for container health checks and monitoring.
-
-## Security Considerations
-
-1. **Never hardcode secrets** - Use environment variables or Azure Key Vault
-2. **Use managed identities** when possible for Azure resource access
-3. **Enable HTTPS** in production deployments
-4. **Scan images** for vulnerabilities using Azure Container Registry scanning
-5. **Run as non-root user** (already configured in Dockerfile)
+- The process runs as a non-root user.
+- Scripts written by the AI model are screened (only data libraries; no file, network or process access) and then run as a separate process inside the same container. This is not full isolation.
+- The service has no sign-in. Do not publish the port beyond your own machine or the organisation network.
 
 ## Troubleshooting
 
-### Container won't start
+### Container will not start
 - Check logs: `docker logs byod-synthetic-generator`
-- Verify environment variables are set correctly
-- Ensure required Azure services are accessible
+- Check that `.env` exists and holds `AZURE_OPENAI_ENDPOINT`
+
+### Generation fails with status 503
+- The AI model is not configured or the sign-in failed. `curl -i http://localhost:8201/ready` gives the reason
 
 ### Connection issues
-- Verify network configuration and firewall rules
-- Check if the container is running: `docker ps`
-- Test health endpoint: `curl http://localhost:8201/health`
-
-### Performance issues
-- Increase container resources (CPU/Memory)
-- Enable caching features
-- Consider scaling horizontally in AKS
-
-## CI/CD Pipeline Example
-
-For automated deployment, add this to your Azure DevOps pipeline:
-
-```yaml
-trigger:
-  branches:
-    include:
-      - main
-
-pool:
-  vmImage: 'ubuntu-latest'
-
-variables:
-  dockerRegistryServiceConnection: 'acr-connection'
-  imageRepository: 'byod-synthetic-generator'
-  containerRegistry: 'yourregistry.azurecr.io'
-  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
-  tag: '$(Build.BuildId)'
-
-stages:
-- stage: Build
-  jobs:
-  - job: Build
-    steps:
-    - task: Docker@2
-      inputs:
-        command: buildAndPush
-        repository: $(imageRepository)
-        dockerfile: $(dockerfilePath)
-        containerRegistry: $(dockerRegistryServiceConnection)
-        tags: |
-          $(tag)
-          latest
-
-- stage: Deploy
-  jobs:
-  - job: Deploy
-    steps:
-    - task: AzureWebAppContainer@1
-      inputs:
-        azureSubscription: 'azure-subscription'
-        appName: 'byod-synthetic-app'
-        containers: $(containerRegistry)/$(imageRepository):$(tag)
-```
+- Check the container is running: `docker ps`
+- Test the health endpoint: `curl http://localhost:8201/health`

@@ -1079,19 +1079,20 @@ class DataDictionary:
     def _parse_pdf(self, content: bytes) -> Dict[str, Any]:
         """Parse PDF format dictionary using text extraction."""
         try:
-            import PyPDF2
+            # pypdf is the maintained successor of the retired PyPDF2 (same API).
+            import pypdf
             import io
 
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            pdf_reader = pypdf.PdfReader(io.BytesIO(content))
             text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text()
+                text += page.extract_text() or ""
 
             # Parse extracted text
             return self._parse_text_with_llm(text)
         except ImportError:
-            # If PyPDF2 not available, try basic text extraction
-            self.logger.warning("PyPDF2 not available, using basic text extraction")
+            # If pypdf not available, try basic text extraction
+            self.logger.warning("pypdf not available, using basic text extraction")
             text = content.decode('utf-8', errors='ignore')
             return self._parse_text_with_llm(text)
         except Exception as e:

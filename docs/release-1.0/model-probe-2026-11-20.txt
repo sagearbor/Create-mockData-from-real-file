@@ -1,0 +1,13 @@
+gpt-5-nano                 OK    10.7   
+gpt-5.4-nano               OK     7.7   
+gpt-5.4-mini               OK     2.9   
+gpt-5.5                    OK    27.6   
+gpt-5.6-luna               OK     6.3   
+gpt-5.6-terra              OK    13.6   
+gpt-5.6-sol                OK    22.8   
+grok-4-1-fast-reasoning    OK    12.8   
+grok-4.3                   OK    10.6   
+Mistral-Large-3            FAIL    0.3  the Azure OpenAI call failed (UnprocessableEntityError, HTTP 422) 
+Kimi-K2.6                  OK    11.5   
+DeepSeek-V4-Pro            OK     2.6   
+DeepSeek-V4-Flash          OK     3.1   

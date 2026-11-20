@@ -220,3 +220,20 @@ tests/test_*.csv
 
 # Usage logs are local analytics; never commit them (they once held real column names).
 logs/usage/*.jsonl
+
+# Release notes that must stay out of this public repository
+docs/release-1.0/private.local/
+tmp/
+
+# Runtime output must never be committed (generated scripts, uploads, batches, logs).
+data/cache/
+data/local_storage/
+data/batch*/
+logs/
+
+# Machine-local infrastructure notes and deployment manifests
+*.local.md
+*.local.yaml
+
+# JUnit result files written by test runs
+results*.xml

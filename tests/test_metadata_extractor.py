@@ -210,42 +210,71 @@ class TestMetadataExtractor:
         assert patterns["detected_format"] == "phone_us"
         assert patterns["format_confidence"] > 0.8
     
-    def test_to_secure_json(self, metadata_extractor, sample_dataframe):
-        """Values are anonymized unless the extractor marked them safe to keep.
+    def test_extract_masks_values_not_marked_safe(self, metadata_extractor, sample_dataframe):
+        """extract() itself masks: real keys only where preserve_values is True.
 
-        `safety_mode` (default 'balanced') lets low-cardinality, non-sensitive
-        categoricals through so the generator can reproduce their distribution;
-        everything else is replaced by value_N placeholders.
+        `safety_mode` (default 'balanced') keeps repeated, non-sensitive
+        category labels so the generator can reproduce their distribution;
+        everything else is a value_N placeholder that keeps only the count.
         """
+        stats = metadata_extractor.extract(sample_dataframe)["statistics"]
+
+        # A repeated category in a 100-row column is kept...
+        assert stats["department"]["preserve_values"] is True
+        assert set(stats["department"]["most_common_values"]) == {
+            "Sales", "Engineering", "HR", "Marketing"}
+
+        # ...unique and identifier-named columns are not.
+        for col in ("name", "email", "phone"):
+            assert stats[col]["preserve_values"] is False
+            keys = list(stats[col]["most_common_values"])
+            assert keys and all(k.startswith("value_") for k in keys), keys
+            assert sum(stats[col]["most_common_values"].values()) == len(keys)
+
+    def test_to_secure_json_is_a_noop_on_extract_output(self, metadata_extractor, sample_dataframe):
+        """to_secure_json is only a safety net: extract() output is already masked."""
         metadata = metadata_extractor.extract(sample_dataframe)
-        secure_json = metadata_extractor.to_secure_json(metadata)
+        parsed = json.loads(metadata_extractor.to_secure_json(metadata))
 
-        # Parse JSON to verify it's valid
-        parsed = json.loads(secure_json)
-        assert parsed is not None
+        assert parsed == json.loads(json.dumps(metadata, default=str))
 
-        for col_stats in parsed["statistics"].values():
-            if "most_common_values" not in col_stats:
-                continue
-            if col_stats.get("preserve_values", False):
-                continue
-            # Not marked safe, so the real values must not be present
-            for key in col_stats["most_common_values"]:
-                assert key.startswith("value_")
+    def test_to_secure_json_masks_unmasked_legacy_metadata(self, metadata_extractor):
+        """Metadata built by older code is still masked by the safety net."""
+        legacy = {
+            "statistics": {"who": {"most_common_values": {"Zzyzx Quillfeather": 1},
+                                   "preserve_values": False}},
+            "patterns": {"mrn": {"id_pattern": {"prefix": "MRN-", "example": "MRN-9917354"}}},
+        }
+        secure_json = metadata_extractor.to_secure_json(legacy)
 
-    def test_to_secure_json_anonymizes_everything_in_strict_mode(self, sample_dataframe):
-        """Strict mode is the privacy guarantee: no real value may survive."""
+        assert "Zzyzx Quillfeather" not in secure_json
+        assert "MRN-9917354" not in secure_json
+        assert json.loads(secure_json)["statistics"]["who"]["most_common_values"] == {"value_0": 1}
+
+    def test_strict_mode_extract_emits_no_real_value(self, sample_dataframe):
+        """Strict mode is the privacy guarantee: extract() output holds no cell value."""
         strict_extractor = MetadataExtractor(safety_mode="strict")
         metadata = strict_extractor.extract(sample_dataframe)
 
-        parsed = json.loads(strict_extractor.to_secure_json(metadata))
-
-        for col_stats in parsed["statistics"].values():
-            for key in col_stats.get("most_common_values", {}):
+        for col, col_stats in metadata["statistics"].items():
+            if col_stats.get("type") != "string":
+                continue
+            assert col_stats["preserve_values"] is False
+            for key in col_stats["most_common_values"]:
                 assert key.startswith("value_"), (
-                    f"strict mode leaked a real value: {key!r}"
+                    f"strict mode leaked a real value in {col}: {key!r}"
                 )
-    
+
+        dumped = json.dumps(metadata, default=str)
+        for col in ("name", "email", "phone", "department"):
+            for value in sample_dataframe[col].unique():
+                assert json.dumps(value) not in dumped, f"strict mode leaked {value!r}"
+        for col_patterns in metadata["patterns"].values():
+            assert "common_prefix" not in col_patterns
+            assert "common_suffix" not in col_patterns
+            assert "prefix" not in col_patterns.get("id_pattern", {})
+            assert "example" not in col_patterns.get("id_pattern", {})
+
     def test_metadata_version(self, metadata_extractor, sample_dataframe):
         """Test that metadata includes version information."""
         metadata = metadata_extractor.extract(sample_dataframe)

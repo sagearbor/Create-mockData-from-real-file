@@ -17,7 +17,9 @@ from datetime import datetime
 
 from src.utils.logger import logger
 from src.utils.config import settings
-from src.core.cache_manager import CacheManager
+from src.core.cache_manager import CacheManager, cache_variant
+from src.core.models import default_model
+from src.core import code_gate
 
 # HARD RULE: reasoning models (gpt-5.x, o-series) spend thinking tokens out of the
 # completion budget; never cap them below 32000. 40000 is the DCRI default.
@@ -29,6 +31,15 @@ _REASONING_MODEL_RE = re.compile(r"^(gpt-5|o\d)", re.I)
 # API default ("medium") spent ~9.5k of 9.8k output tokens thinking (59 s) for
 # one generation. LLM_REASONING_EFFORT=off sends nothing (deployment default).
 _REASONING_EFFORT_OFF = {"off", "default", ""}
+
+
+def llm_timeout_seconds() -> float:
+    """Seconds one model call may take (env LLM_TIMEOUT_SECONDS, default 180)."""
+    try:
+        value = float(os.environ.get("LLM_TIMEOUT_SECONDS", "180"))
+    except ValueError:
+        return 180.0
+    return value if value > 0 else 180.0
 
 
 def reasoning_effort_setting() -> Optional[str]:
@@ -95,6 +106,143 @@ MAX_CODE_FIX_ATTEMPTS = 2
 _ERROR_DETAIL_CHARS = 1500
 
 
+SANDBOX_TIMEOUT_SECONDS = 30
+# Largest single file the child may write, and the largest result the parent will read.
+SANDBOX_MAX_FILE_BYTES = 200 * 1024 * 1024
+
+# Appended to every generation script, after the screen has passed the model's part.
+# Writes the table as plain JSON (column names, a dtype per column, rows).
+_RESULT_FOOTER = '''
+
+# --- added by the service: hand the table back as JSON ---
+import json as _json
+import datetime as _dt
+import pandas as _pd
+if not isinstance(result, _pd.DataFrame):
+    raise TypeError("result is not a pandas DataFrame")
+_out = result.copy()
+def _plain(v):
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, _dt.date) and not isinstance(v, _dt.datetime):
+        return v.isoformat()
+    return str(v)
+_dtypes = [str(t) for t in _out.dtypes]
+for _i, _t in enumerate(_dtypes):
+    if _t in ("object", "category", "str", "string"):
+        _out.isetitem(_i, _out.iloc[:, _i].astype("object").map(_plain))
+_payload = _json.loads(_out.to_json(orient="split", index=False, date_format="iso",
+                                    date_unit="ns", default_handler=str))
+_payload["dtypes"] = _dtypes
+with open({path!r}, "w") as _f:
+    _json.dump(_payload, _f)
+'''
+
+
+def _limit_child() -> None:
+    """Runs in the child before the script starts: no core dumps, bounded file size."""
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (SANDBOX_MAX_FILE_BYTES, SANDBOX_MAX_FILE_BYTES))
+    except Exception:  # noqa: BLE001 - not available on every platform
+        pass
+
+
+def _kill_process_group(proc: "subprocess.Popen") -> None:
+    """End the child and anything it started in its process group."""
+    import signal
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _read_tail(path: Path, max_chars: int) -> str:
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_chars))
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _summarise_failure(stderr_text: str, script: str, script_path: str) -> str:
+    """What the model is told about a failed run: the kind of error, the line number and
+    its own line of code. The raw error text is not passed on: it can quote generated
+    values."""
+    lines = [ln for ln in stderr_text.strip().splitlines() if ln.strip()]
+    error_type = "Error"
+    if lines:
+        m = re.match(r"^([A-Za-z_][\w.]*(?:Error|Exception|Exit|Warning|Interrupt))\b", lines[-1].strip())
+        if m:
+            error_type = m.group(1)
+    line_no = None
+    for m in re.finditer(r'File "([^"]+)", line (\d+)', stderr_text):
+        if m.group(1) == script_path:
+            line_no = int(m.group(2))  # last frame inside the script
+    source = ""
+    if line_no:
+        script_lines = script.splitlines()
+        if 1 <= line_no <= len(script_lines):
+            source = script_lines[line_no - 1].strip()[:300]
+    # The error's own message is passed on only when it quotes nothing: Python and pandas put
+    # offending values in quotes, while plain messages ("All arrays must be of the same
+    # length") say what is wrong without carrying a value.
+    message = ""
+    if lines and ":" in lines[-1]:
+        candidate = lines[-1].split(":", 1)[1].strip()
+        if candidate and len(candidate) <= 200 and not re.search(r"[\'\"`]", candidate):
+            message = f" ({candidate})"
+    if line_no and source:
+        return f"{error_type} at line {line_no} of the script{message}: {source}"
+    return f"{error_type} while running the script{message} (no line inside the script was reported)."
+
+
+def _load_result(path: Path) -> pd.DataFrame:
+    """Read the table the footer wrote. Plain JSON only; shape and types are checked."""
+    if path.stat().st_size > SANDBOX_MAX_FILE_BYTES:
+        raise CodeExecutionError("generated code produced a result that is too large")
+    try:
+        with open(path, "r") as f:
+            payload = json.load(f)
+        columns, rows, dtypes = payload["columns"], payload["data"], payload["dtypes"]
+        if not (isinstance(columns, list) and isinstance(rows, list) and isinstance(dtypes, list)
+                and len(dtypes) == len(columns)
+                and all(isinstance(c, (str, int, float)) for c in columns)
+                and all(isinstance(r, list) and len(r) == len(columns) for r in rows)):
+            raise ValueError("unexpected result shape")
+    except (ValueError, KeyError, TypeError, OSError) as e:
+        raise CodeExecutionError("generated code produced a result that could not be read",
+                                 detail="The script's `result` could not be read back as a table.") from e
+
+    df = pd.DataFrame(rows, columns=columns)
+    for position, dtype in enumerate(dtypes):
+        dtype = str(dtype)
+        column = df.iloc[:, position]
+        try:
+            if dtype.startswith("datetime64"):
+                column = pd.to_datetime(column, errors="coerce", utc="," in dtype)
+            elif dtype.startswith("timedelta"):
+                column = pd.to_timedelta(column, errors="coerce")
+            elif dtype.startswith(("int", "uint", "Int", "UInt", "bool")) and not column.isna().any():
+                column = column.astype(dtype)
+            elif dtype.startswith(("float", "Float")):
+                column = column.astype("float64")
+            else:
+                continue
+        except (ValueError, TypeError):
+            continue
+        df.isetitem(position, column)
+    return df
+
+
 class AIRequestTooLargeError(AIGenerationError):
     """The provider refused the request as too large (over the model's context)."""
 
@@ -152,7 +300,8 @@ class SyntheticDataGenerator:
         metadata: Dict[str, Any],
         num_rows: Optional[int] = None,
         match_threshold: float = 0.8,
-        use_cached: bool = True
+        use_cached: bool = True,
+        model: Optional[str] = None
     ) -> tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Generate synthetic data based on metadata.
@@ -162,10 +311,19 @@ class SyntheticDataGenerator:
             num_rows: Number of rows to generate (defaults to original)
             match_threshold: How closely to match statistical properties (0-1)
             use_cached: Whether to use cached generation scripts
+            model: Deployment to ask for the code (None = the server default). Not
+                checked against the allow-list here: callers that take the name from
+                a request resolve it first (src/core/models.py). Passed down as an
+                argument, never written to settings: requests run concurrently.
 
         Returns:
-            Tuple of (Generated synthetic DataFrame, generation_info dict)
+            Tuple of (Generated synthetic DataFrame, generation_info dict);
+            ``generation_info["model"]`` is the model that wrote the code that ran
+            (for a cache hit: the model recorded with the cached script)
         """
+        model = model or default_model()
+        # A cached script is reused only for the same model and privacy mode.
+        variant = cache_variant(metadata, model)
         self.logger.info(f"Starting synthetic data generation with match_threshold={match_threshold}")
 
         # Track timing for each step
@@ -183,7 +341,7 @@ class SyntheticDataGenerator:
             cache_start = time.time()
             try:
                 cached_entry = self.cache_manager.find_similar_cached(
-                    metadata, match_threshold=0.95, num_rows=num_rows)
+                    metadata, match_threshold=0.95, num_rows=num_rows, variant=variant)
                 cache_check_time = time.time() - cache_start
                 step_timings['cache_check'] = cache_check_time
 
@@ -207,7 +365,7 @@ class SyntheticDataGenerator:
             code_gen_start = time.time()
             # Raises AIGenerationError on any AI failure: there is no template fallback.
             generation_code, generation_method, llm_response_time = self._generate_code_with_llm(
-                metadata, num_rows, match_threshold, operation="generate_code")
+                metadata, num_rows, match_threshold, operation="generate_code", model=model)
             # Only track llm_response time (code_generation is redundant as it's the same)
             if llm_response_time:
                 step_timings['llm_response'] = llm_response_time
@@ -232,7 +390,7 @@ class SyntheticDataGenerator:
                     # script, just not for this request: leave it cached, write new code.
                     self.logger.info("Cached code makes a different number of rows; generating new code")
                     generation_code, generation_method, _ = self._generate_code_with_llm(
-                        metadata, num_rows, match_threshold, operation="generate_code")
+                        metadata, num_rows, match_threshold, operation="generate_code", model=model)
                     continue
                 break
             except CodeExecutionError as failure:
@@ -248,7 +406,7 @@ class SyntheticDataGenerator:
                 retried_after_failure = True
                 generation_code, generation_method, _ = self._generate_code_with_llm(
                     metadata, num_rows, match_threshold, operation="regenerate_code",
-                    failed_error=failure.sandbox_stderr)
+                    failed_error=failure.sandbox_stderr, model=model)
         step_timings['code_execution'] = time.time() - exec_start
         
         # Validate the generated data
@@ -262,6 +420,7 @@ class SyntheticDataGenerator:
         # Create generation info with timing
         generation_info = {
             "method": generation_method,
+            "model": ((cached_entry or {}).get("model") or model) if generation_method == 'cached' else model,
             "num_rows": num_rows,
             "match_threshold": match_threshold,
             "use_cached": use_cached,
@@ -274,8 +433,8 @@ class SyntheticDataGenerator:
 
         if validation_passed:
             self.logger.info(f"Successfully generated synthetic data with shape {synthetic_df.shape}")
-            if generation_method == 'llm':
-                self._remember_code(metadata, generation_code, num_rows)
+            if generation_method == 'llm' and use_cached:
+                self._remember_code(metadata, generation_code, num_rows, model)
             return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
@@ -283,24 +442,30 @@ class SyntheticDataGenerator:
             # first result (it ran) and say its columns differ, rather than return nothing.
             try:
                 generation_code, generation_method, _ = self._generate_code_with_llm(
-                    metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code")
+                    metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code",
+                    model=model)
                 second_df = self._execute_generation_code(generation_code)
             except AIGenerationError as e:
                 self.logger.warning(f"Regeneration failed ({type(e).__name__}); keeping the first result")
                 generation_info["structure_mismatch"] = True
                 return synthetic_df, generation_info
             generation_info["method"] = generation_method
+            generation_info["model"] = model
             generation_info["regenerated"] = True
             if not self._validate_synthetic_data(second_df, metadata):
                 generation_info["structure_mismatch"] = True
-            else:
-                self._remember_code(metadata, generation_code, num_rows)
+            elif use_cached:
+                self._remember_code(metadata, generation_code, num_rows, model)
             return second_df, generation_info
 
-    def _remember_code(self, metadata: Dict[str, Any], code: str, num_rows: Optional[int] = None) -> None:
+    def _remember_code(self, metadata: Dict[str, Any], code: str, num_rows: Optional[int] = None,
+                       model: Optional[str] = None) -> None:
         """Cache code only once it has run and produced the expected columns."""
+        model = model or default_model()
         try:
-            self.cache_manager.cache_generation(metadata, code, num_rows=num_rows)
+            self.cache_manager.cache_generation(
+                metadata, code, num_rows=num_rows,
+                variant=cache_variant(metadata, model), model=model)
             self.logger.info("Cached generation code for future use")
         except Exception as e:
             self.logger.warning(f"Failed to cache: {type(e).__name__}")
@@ -323,6 +488,7 @@ class SyntheticDataGenerator:
         match_threshold: float,
         operation: str = "generate_code",
         failed_error: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Tuple[str, str, float]:
         """
         Generate Python code using LLM based on metadata.
@@ -334,6 +500,7 @@ class SyntheticDataGenerator:
             operation: Stable telemetry name for this call (dcri_llm ``operation``)
             failed_error: End of the error output from a previous attempt's code, so the
                 model can avoid the same mistake
+            model: Deployment name for this call (None = the server default)
 
         Returns:
             Tuple of (code, ``"llm"``, LLM seconds).
@@ -342,7 +509,7 @@ class SyntheticDataGenerator:
             AINotConfiguredError: no Azure OpenAI client.
             AIGenerationError: the call failed or returned unusable output.
         """
-        model = settings.azure_openai_chat_deployment
+        model = model or default_model()
         if not self.openai_client:
             err = AINotConfiguredError("Azure OpenAI is not configured on this server")
             self._log_ai_failure(err, operation, model)
@@ -351,10 +518,11 @@ class SyntheticDataGenerator:
         prompt = self._construct_generation_prompt(metadata, num_rows, match_threshold)
         if failed_error is not None:
             prompt += (
-                "\n\nYour previous code for this request failed when it was run. "
-                "Write the code again, complete, avoiding this error. Keep it simple: "
-                "standard library, pandas and numpy only.\n"
-                f"ERROR OUTPUT:\n{failed_error[-_ERROR_DETAIL_CHARS:] or '(none captured)'}"
+                "\n\nYour previous code for this request could not be used. "
+                "Write the code again, complete, avoiding this problem. Keep it simple: "
+                "import only pandas, numpy, random, datetime, math, string, re, uuid, itertools "
+                "and collections; do not read or write files.\n"
+                f"WHAT WENT WRONG: {failed_error[-_ERROR_DETAIL_CHARS:] or '(not reported)'}"
             )
 
         from src.dcri_llm import llm_action  # lazy: keeps module import light
@@ -366,6 +534,8 @@ class SyntheticDataGenerator:
                 {"role": "user", "content": prompt},
             ],
             "max_completion_tokens": LLM_MAX_COMPLETION_TOKENS,
+            # One model call may not hold a request open for longer than this.
+            "timeout": llm_timeout_seconds(),
         }
         is_reasoning = bool(_REASONING_MODEL_RE.match(model or ""))
         if not is_reasoning:
@@ -465,7 +635,8 @@ class SyntheticDataGenerator:
         return """You are a Python code generator specialized in creating synthetic data.
         Generate complete, executable Python code that creates a pandas DataFrame with synthetic data.
         The code should:
-        1. Import necessary libraries (pandas, numpy, random, datetime, etc.)
+        1. Import ONLY from this list: pandas, numpy, random, datetime, math, string, re, uuid, itertools, collections, decimal, typing. Write `import random` and call `random.choice(...)`; do not assign a module to another name. Any other import (os, sys, json, time, faker, pathlib, ...) makes the code unusable
+        1a. Do not read or write files, do not print, do not use eval/exec/getattr, and do not call DataFrame.query, .eval, .to_csv, .to_json or any read_* function. Use '...'.format(...) only on a text literal, or use f-strings
         2. Define a function called generate_synthetic_data() that returns a pandas DataFrame
         3. IMPORTANT: After defining the function, call it and assign to 'result' variable: result = generate_synthetic_data()
         4. Match the statistical properties and patterns described in the metadata
@@ -477,7 +648,7 @@ class SyntheticDataGenerator:
         10. CRITICAL: For categorical columns where 'preserve_values' is True and 'most_common_values' contains actual values (not 'value_0', 'value_1'), you MUST use those exact values with their distributions
         11. CRITICAL: For columns with type='datetime', you MUST generate datetime objects like: pd.date_range('2024-01-01', periods=num_rows, freq='D')
         12. For any column with 'date' or 'time' in the name, generate dates not random strings
-        13. When you see actual categorical values like 'M', 'F' or 'Male', 'Female' in most_common_values, use those exact values
+        13. When you see actual categorical values like 'M', 'F' or 'Male', 'Female' in most_common_values, use those exact values. Keys named 'value_0', 'value_1', ... are masked placeholders that only carry counts: never output them literally, invent realistic values instead
         14. Return ONLY the Python code, no explanations or markdown formatting
         15. The code must end with: result = generate_synthetic_data()
         """
@@ -606,7 +777,15 @@ class SyntheticDataGenerator:
 
     def _execute_generation_code(self, code: str, randomize_seed: bool = True) -> pd.DataFrame:
         """
-        Safely execute the generated Python code.
+        Run a generation script in a child process and return its table.
+
+        The script is model-written (or cached model output), so:
+        * it is screened first (src/core/code_gate.py) and refused if it asks for
+          files, the network, processes or interpreter internals;
+        * it runs with a minimal environment, in its own process group, with a
+          time limit and a cap on the size of any file it writes;
+        * its result comes back as JSON written by a trusted footer and is checked
+          here. Nothing the child writes is ever unpickled.
 
         Args:
             code: Python code string
@@ -617,74 +796,73 @@ class SyntheticDataGenerator:
         """
         self.logger.info("Executing generated code in sandbox")
 
+        try:
+            code_gate.check(code)
+        except code_gate.CodeRejected as refused:
+            # The reasons quote only names and line numbers from the script itself.
+            self.logger.error(f"Generated code refused before running ({len(refused.problems)} reason(s))")
+            raise CodeExecutionError(
+                "generated code was refused before running (it used something a generation "
+                "script may not use)",
+                detail="Refused before running. " + "; ".join(refused.problems)) from None
+
         # Inject random seed to ensure variety even with cached code
         if randomize_seed:
             import random
             new_seed = random.randint(1, 1000000)
             self.logger.info(f"Injecting random seed {new_seed} for variety")
-            # Try to update any existing seed calls
             code = self._inject_random_seed(code, new_seed)
-        
-        # Create a temporary file for the code
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(code)
-            f.write("\n\n# Save result\nresult.to_pickle('synthetic_data.pkl')")
-            temp_file = f.name
-        
+
         try:
-            # Execute in subprocess for safety
             with tempfile.TemporaryDirectory() as temp_dir:
-                pickle_path = Path(temp_dir) / "synthetic_data.pkl"
-                
-                # Modify code to save to specific path
-                modified_code = code.replace(
-                    "result.to_pickle('synthetic_data.pkl')",
-                    f"result.to_pickle('{pickle_path}')"
-                )
-                
-                # Write modified code
+                result_path = Path(temp_dir) / "result.json"
+                stderr_path = Path(temp_dir) / "stderr.txt"
+                script = code + _RESULT_FOOTER.format(path=str(result_path))
                 code_path = Path(temp_dir) / "generator.py"
-                code_path.write_text(modified_code + f"\nresult.to_pickle('{pickle_path}')")
-                
-                # Execute the code with a minimal environment. The code being
-                # run is generated (by an LLM, or from the cache of LLM output),
-                # so it must not inherit credentials such as
+                code_path.write_text(script)
+
+                # Minimal environment: the child must not inherit credentials such as
                 # AZURE_OPENAI_API_KEY or cloud instance-metadata tokens.
-                result = subprocess.run(
-                    [sys.executable, str(code_path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=temp_dir,
-                    env=self._sandbox_environment(temp_dir)
-                )
-                
-                if result.returncode != 0:
-                    # stderr can quote generated values/column names: log its size only.
-                    self.logger.error(f"Code execution failed (exit {result.returncode}, stderr {len(result.stderr or '')} chars)")
+                with open(stderr_path, "wb") as stderr_file:
+                    proc = subprocess.Popen(
+                        [sys.executable, "-I", str(code_path)],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr_file,
+                        cwd=temp_dir, env=self._sandbox_environment(temp_dir),
+                        start_new_session=True, preexec_fn=_limit_child,
+                    )
+                    try:
+                        returncode = proc.wait(timeout=SANDBOX_TIMEOUT_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        _kill_process_group(proc)
+                        self.logger.error("Code execution timeout")
+                        raise CodeExecutionError(
+                            f"generated code timed out after {SANDBOX_TIMEOUT_SECONDS}s in the sandbox",
+                            detail=f"The script did not finish within {SANDBOX_TIMEOUT_SECONDS} seconds.")
+                    finally:
+                        _kill_process_group(proc)  # also ends anything the script left running
+
+                if returncode != 0:
+                    stderr_text = _read_tail(stderr_path, _ERROR_DETAIL_CHARS * 4)
+                    # stderr can quote generated values/column names: log its size only,
+                    # and hand the model a summary built from its own code, not the raw text.
+                    self.logger.error(f"Code execution failed (exit {returncode}, stderr {len(stderr_text)} chars)")
                     raise CodeExecutionError(
-                        f"generated code failed in the sandbox (exit {result.returncode})",
-                        detail=(result.stderr or "")[-_ERROR_DETAIL_CHARS:])
+                        f"generated code failed in the sandbox (exit {returncode})",
+                        detail=_summarise_failure(stderr_text, script, str(code_path)))
 
-                # Load the generated data
-                if not pickle_path.exists():
-                    raise CodeExecutionError("generated code produced no result")
-                return pd.read_pickle(pickle_path)
+                if not result_path.exists():
+                    raise CodeExecutionError(
+                        "generated code produced no result",
+                        detail="The script ended without leaving a pandas DataFrame in `result`.")
+                return _load_result(result_path)
 
-        except subprocess.TimeoutExpired:
-            self.logger.error("Code execution timeout")
-            raise CodeExecutionError("generated code timed out after 30s in the sandbox")
         except AIGenerationError:
             raise
         except Exception as e:
             # No in-process exec fallback: generated code only ever runs in the sandbox.
             self.logger.error(f"Code execution error: {type(e).__name__}")
             raise CodeExecutionError(f"generated code could not be run ({type(e).__name__})") from e
-        finally:
-            # Clean up temp file
-            if Path(temp_file).exists():
-                Path(temp_file).unlink()
-    
+
     def _validate_synthetic_data(self, df: pd.DataFrame, metadata: Dict[str, Any]) -> bool:
         """
         Validate that synthetic data matches expected structure.

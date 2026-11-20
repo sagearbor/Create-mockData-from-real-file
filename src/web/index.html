@@ -48,11 +48,11 @@
                         <span class="info-tooltip info-tooltip-upload">
                             <span class="info-tooltip-icon">i</span>
                             <div class="info-tooltip-content">
-                                <strong>🔒 Privacy-First Design</strong><br><br>
-                                ✅ Safe to upload sensitive/PHI data<br>
-                                ✅ Data never leaves your browser<br>
-                                ✅ Only metadata is sent to LLM<br>
-                                ✅ Original data is never exposed<br><br>
+                                <strong>What happens to your file</strong><br><br>
+                                Your file is sent to this server to be analysed.<br>
+                                Rows are not sent to the AI model. It receives column names, types and summary statistics.<br>
+                                Labels of repeated categories (such as M / F) are sent unless you set Privacy to Strict.<br>
+                                Do not upload real study data or patient identifiers: this release has not been approved for them.<br><br>
                                 See <a href="/about" style="color: #93c5fd;">About</a> for details
                             </div>
                         </span>
@@ -254,6 +254,42 @@
                         </div>
 
                         <div class="settings-item">
+                            <label for="modelSelect">AI model
+                                <span class="info-tooltip">
+                                    <span class="info-tooltip-icon">i</span>
+                                    <div class="info-tooltip-content">
+                                        <strong>AI model</strong><br><br>
+                                        The default is fastest. Choose a stronger model if the result has wrong columns or values.
+                                    </div>
+                                </span>
+                            </label>
+                            <!-- Filled from GET /api/models by app.js; "Server default" alone if that call fails. -->
+                            <select id="modelSelect" title="The default is fastest. Choose a stronger model if the result has wrong columns or values.">
+                                <option value="">Server default</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item">
+                            <label for="privacyMode">Privacy
+                                <span class="info-tooltip">
+                                    <span class="info-tooltip-icon">i</span>
+                                    <div class="info-tooltip-content">
+                                        <strong>What the AI model is told about text columns</strong><br><br>
+                                        <strong>Strict:</strong> no text values at all; numbers are rounded.<br>
+                                        <strong>Balanced:</strong> labels of repeated categories (such as M / F), up to 10 per column.<br>
+                                        <strong>Permissive:</strong> the same, up to 50 per column.<br><br>
+                                        Names, IDs, emails and free text are replaced with placeholders in every mode.
+                                    </div>
+                                </span>
+                            </label>
+                            <select id="privacyMode" title="Strict sends no text values to the AI model.">
+                                <option value="balanced" selected>Balanced</option>
+                                <option value="strict">Strict</option>
+                                <option value="permissive">Permissive</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-item">
                             <label for="demoDataset">Demo</label>
                             <select id="demoDataset">
                                 <option value="">None</option>
@@ -419,7 +455,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=20261118e"></script>
+    <script src="/static/js/app.js?v=20261120e"></script>
     <script src="/static/js/data-editor.js"></script>
 </body>
 </html>

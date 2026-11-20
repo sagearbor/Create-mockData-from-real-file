@@ -45,6 +45,11 @@ properties:
             value: "<AZURE_OPENAI_ENDPOINT>"  # e.g. https://<your-foundry>.openai.azure.com/
           - name: AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
             value: gpt-5-nano
+          # Models a request may choose (comma-separated deployment names). The
+          # default deployment above is always allowed. List only names that passed
+          # tools/release/probe_models.py against this Foundry.
+          - name: LLM_ALLOWED_MODELS
+            value: "gpt-5-nano,gpt-5.4-nano,gpt-5.4-mini,gpt-5.5,gpt-5.6-luna,gpt-5.6-terra,gpt-5.6-sol"
           - name: TELEMETRY_BLOB_ACCOUNT_URL
             value: "<TELEMETRY_BLOB_ACCOUNT_URL>"  # Storage endpoint from ~/dcri/azure-environment.md
           # Optional: reasoning effort for gpt-5.x/o-series (default "low";

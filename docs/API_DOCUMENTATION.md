@@ -43,6 +43,10 @@ curl -s "http://localhost:8201/api/v1/version"
 - `match_threshold` (float, optional): statistical matching threshold, 0-1 (default: 0.8)
 - `safety_mode` (string, optional): "strict", "balanced" or "permissive" (default: "balanced")
 - `use_cache` (boolean, optional): reuse a cached generation script (default: true)
+- `model` (string, optional): the AI model (deployment name) that writes the generation
+  code. It must be one of the names from `GET /api/models`; any other name is refused
+  with `400` `ModelNotAllowed` before anything is generated. Omit it (or send `null` or
+  `""`) for the server default.
 
 Unknown field names are rejected with `422`, so a typo is not silently ignored.
 
@@ -75,9 +79,13 @@ Leave the `X-API-Key` line out when the server has no key set.
   ],
   "shape": [3, 3],
   "columns": ["widget_id", "colour", "weight_g"],
-  "generation_info": {"method": "llm", "num_rows": 3}
+  "generation_info": {"method": "llm", "model": "gpt-5-nano", "num_rows": 3}
 }
 ```
+
+`generation_info.model` is the model that wrote the generation code. When
+`method` is `"cached"` it is the model that wrote the cached script, which is always
+the model the request asked for (see "Choosing the AI model").
 
 Generation calls an AI model and can take a minute or more: set the client timeout
 to several minutes.
@@ -99,6 +107,7 @@ Every failure on `/api/v1` has the same JSON shape:
 | Status | `error_class` | Meaning |
 |--------|---------------|---------|
 | `400` | `GenerationError` | The source data could not be read or used |
+| `400` | `ModelNotAllowed` | `model` is not on the server's list (`GET /api/models`); the message names the allowed models |
 | `401` | `InvalidApiKey` | `X-API-Key` missing or wrong (only when the server has a key set) |
 | `404` / `405` | `HTTPException` | No such `/api/v1` route, or wrong method |
 | `413` | `RequestTooLarge` | Body larger than the size limit |
@@ -114,6 +123,48 @@ curl -s -X POST "http://localhost:8201/api/v1/generate" -H "Content-Type: applic
 ```json
 {"status": "error", "error": "Invalid request: body: Value error, provide exactly one of csv_text or data_content", "error_class": "RequestValidationError"}
 ```
+
+## Choosing the AI model
+
+**Endpoint:** `GET /api/models`
+
+```bash
+curl -s "http://localhost:8201/api/models"
+```
+
+```json
+{
+  "default": "gpt-5-nano",
+  "models": [
+    {"name": "gpt-5-nano", "label": "gpt-5-nano", "note": "default"},
+    {"name": "gpt-5.4-nano", "label": "gpt-5.4-nano", "note": ""},
+    {"name": "gpt-5.4-mini", "label": "gpt-5.4-mini", "note": ""},
+    {"name": "gpt-5.5", "label": "gpt-5.5", "note": ""},
+    {"name": "gpt-5.6-luna", "label": "gpt-5.6-luna", "note": ""},
+    {"name": "gpt-5.6-terra", "label": "gpt-5.6-terra", "note": ""},
+    {"name": "gpt-5.6-sol", "label": "gpt-5.6-sol", "note": ""}
+  ]
+}
+```
+
+- The list holds only the models this server allows. `default` is the server's
+  configured deployment (`AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`); it is always allowed and
+  listed first.
+- The rest of the list comes from the environment variable `LLM_ALLOWED_MODELS`
+  (comma-separated deployment names). When it is unset the list above is used: each of
+  those seven names made one real generation through this app on 2026-11-20
+  (`docs/release-1.0/model-probe-2026-11-20.txt`). The list says which models can be
+  used, not which is better.
+- Every generation request takes an optional `model`: the form field `model` on
+  `/generate`, `/generate-sse` and `/generate-with-dictionary`, the JSON field `model` on
+  `/api/v1/generate`, and the `model` argument of the MCP tool and the A2A `generate`
+  operation. Empty or absent means the server default. Any name not on the list is
+  refused before anything is generated: `400` on the HTTP routes, an error result
+  (`error_class` `ModelNotAllowed`) from MCP and A2A.
+- The response says which model was used: `generation_info.model` in JSON responses,
+  and the header `X-Generation-Model` on file downloads.
+- A cached generation script is reused only for a request with the same model, the
+  same privacy level (`safety_mode`) and the same row count.
 
 ## Endpoints
 
@@ -226,12 +277,23 @@ Generate synthetic data based on uploaded file or metadata.
 
 **Parameters:**
 - `file` (file, optional): The data file to use as template
-- `metadata_json` (string, optional): Pre-extracted metadata JSON
-- `num_rows` (integer, optional): Number of rows to generate
+- `metadata_json` (string, optional): Pre-extracted metadata JSON (as returned by
+  `/metadata`), used when no file is sent. It is validated, not trusted: it needs
+  `structure.columns` (a list of at most 2000 objects with `name` (text, at most 200
+  characters), `dtype` and optional `python_type`), `structure.shape.rows` (1 to 100000)
+  and `structure.shape.columns`, and `statistics` (an object of per-column objects);
+  `patterns` and `correlations` are optional objects. Every other key, including
+  `generation_constraints`, is dropped. At most 1 MB. Anything else is refused with `400`
+  `Invalid metadata_json: ...`.
+- `num_rows` (integer, optional): Number of rows to generate, 1 to 100000 (outside: `400`)
+- `file_count` (integer, optional): Number of files to generate, 1 to 20 (default 1;
+  outside: `400`)
 - `match_threshold` (float, optional): Statistical matching threshold (0-1, default: 0.8)
 - `output_format` (string, optional): Output format - "csv", "json", or "excel" (default: "csv")
 - `use_cache` (boolean, optional): Use cached generation scripts (default: true)
 - `safety_mode` (string, optional): Privacy level for categorical data - "strict", "balanced", or "permissive" (default: "balanced")
+- `model` (string, optional): AI model that writes the generation code, a name from
+  `GET /api/models` (default: the server default; any other name: `400`)
 
 **Request:**
 ```bash
@@ -258,59 +320,25 @@ curl -X POST "http://localhost:8201/generate" \
 **Response (CSV/Excel format):**
 Binary file download
 
-### 5. Batch Generation
+### 5. Batch Generation (not available)
 
-Generate synthetic data for multiple files.
+`POST /generate/batch` and `GET /batch/{batch_id}` are not available in this release.
+Both always answer `501` and read or write nothing:
 
-**Endpoint:** `POST /generate/batch`
-
-**Parameters:**
-- `files` (files, required): Multiple files to process
-- `match_threshold` (float, optional): Statistical matching threshold (default: 0.8)
-
-**Request:**
-```bash
-curl -X POST "http://localhost:8201/generate/batch" \
-  -F "files=@file1.csv" \
-  -F "files=@file2.csv" \
-  -F "match_threshold=0.8"
-```
-
-**Response:**
 ```json
-{
-  "status": "processing",
-  "batch_id": "batch_20240115_143022",
-  "file_count": 2,
-  "message": "Batch processing started. Check status at /batch/batch_20240115_143022"
-}
+{"detail": "Batch generation is not available in this release."}
 ```
 
-### 6. Check Batch Status
+To generate several files from one source, use `file_count` on `POST /generate`.
 
-Check the status of batch processing.
+### 6. Request limits (all routes outside `/api/v1`)
 
-**Endpoint:** `GET /batch/{batch_id}`
-
-**Response:**
-```json
-{
-  "status": "completed",
-  "batch_id": "batch_20240115_143022",
-  "results": [
-    {
-      "filename": "file1.csv",
-      "status": "success",
-      "output_path": "./data/local_storage/batch_20240115_143022/file1.csv_synthetic.csv"
-    },
-    {
-      "filename": "file2.csv",
-      "status": "success",
-      "output_path": "./data/local_storage/batch_20240115_143022/file2.csv_synthetic.csv"
-    }
-  ]
-}
-```
+- Request body: at most 50 MB (52428800 bytes) by default; change it with the environment
+  variable `MOCKDATA_MAX_UPLOAD_BYTES` (bytes). A larger body is refused with `413`:
+  `{"status": "error", "error": "Request body is larger than the ...-byte limit (MOCKDATA_MAX_UPLOAD_BYTES).", "error_class": "RequestTooLarge"}`.
+  `/api/v1` keeps its own limit (`MOCKDATA_API_MAX_BYTES`, above).
+- `num_rows`: 1 to 100000 and `file_count`: 1 to 20 on `/generate`, `/generate-sse` and
+  `/generate-with-dictionary`. Outside the range: `400` with a `detail` that states the range.
 
 ### 7. Clear Cache
 
@@ -341,8 +369,24 @@ curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 ### 8. Data dictionaries
 
 `POST /dictionary/upload` (form: `file`, optional `format`, optional `table`),
-`POST /dictionary/table` (form: `table`), `POST /dictionary/validate` and
-`POST /generate-with-dictionary` (both take an optional `table`).
+`POST /dictionary/table` (form: `table`, `dictionary_id`), `POST /dictionary/validate` and
+`POST /generate-with-dictionary` (both take an optional `table` and `dictionary_id`;
+`/generate-with-dictionary` also takes `safety_mode` for an optional `data_file`, and
+`model`, see "Choosing the AI model"). A download that sends a `preview_id` gets that
+preview's rows only if it also sends the same `model` and `num_rows` as the preview.
+
+An uploaded dictionary belongs to the upload, not to the server: `/dictionary/upload`
+answers with a `dictionary_id` (in both the loaded and the `choose_table` response), and
+later requests use that upload only by sending the id back as the form field
+`dictionary_id`. There is no "last uploaded" dictionary: a request with no file and no
+valid id is refused (`/dictionary/table`: `400` `NoDictionary`; `/dictionary/validate`:
+`400` "No data dictionary provided or stored"; `/generate-with-dictionary`: `400`
+"No data dictionary provided"). An id is unguessable, is forgotten 30 minutes after its
+last use, and the server keeps at most 10 uploads (least recently used dropped first);
+after that, upload the file again. A `dictionary_file` sent inline to
+`/generate-with-dictionary` is used for that request only; a preview (`preview_only=true`)
+made that way returns a new `dictionary_id` (next to `preview_id`) for the download that
+follows. `use_stored_dictionary` / `use_stored` are still accepted but have no effect.
 
 Recognised shapes: CSV/Excel with one row per column; JSON/YAML `{"columns": {...}}`;
 a list of `{"name": ...}` objects; a `{column: type-or-definition}` mapping; JSON Schema
@@ -362,7 +406,8 @@ refused with `400` `UnrecognizedDictionary`.
 Limits (environment variables):
 
 - `MOCKDATA_DICTIONARY_MAX_BYTES` (default 64 MB): largest dictionary file; above it `413`
-  `DictionaryTooLarge`.
+  `DictionaryTooLarge`. The request body limit (`MOCKDATA_MAX_UPLOAD_BYTES`, default 50 MB)
+  applies first: raise it too for a dictionary file over 50 MB.
 - `MOCKDATA_DICTIONARY_PROMPT_MAX_CHARS` (default 60000): dictionary text sent to the AI.
   Over it, a copy is trimmed (value lists to 20, descriptions to 160/60/none, value lists
   to 5, then optional columns, then required ones, from the end) and the response says so in
@@ -409,7 +454,6 @@ fails, `{"status": "error", "error": "...", "error_class": "..."}` with `502`, `
 
 Currently no rate limiting is implemented for local usage. For production:
 - Recommended: 10 requests per minute per IP
-- Batch operations: 1 request per minute
 
 ## WebSocket Support (Future)
 
@@ -480,19 +524,12 @@ curl -X POST "http://localhost:8201/generate" \
   -F "output_format=json" \
   -F "safety_mode=permissive" \
   -o synthetic_data.json
-
-# Batch processing
-curl -X POST "http://localhost:8201/generate/batch" \
-  -F "files=@dataset1.csv" \
-  -F "files=@dataset2.csv" \
-  -F "files=@dataset3.csv" \
-  -F "match_threshold=0.8"
 ```
 
 ## Best Practices
 
-1. **File Size**: Keep individual files under 100MB for optimal performance
-2. **Batch Processing**: Use batch endpoint for multiple files
+1. **File Size**: A request body over 50 MB is refused (`MOCKDATA_MAX_UPLOAD_BYTES`)
+2. **Several files**: Use `file_count` (1 to 20); the batch endpoints are not available
 3. **Caching**: Enable caching for repeated similar datasets
 4. **Error Handling**: Always check response status codes
 5. **Timeouts**: Set client timeout to at least 60 seconds for large files

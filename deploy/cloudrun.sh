@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
+# REFERENCE ONLY — not the approved deployment route for this service. The
+# approved deployment is the organisation's guarded Container Apps procedure.
+# This script is kept for reference; it no longer requests public access.
+#
 # deploy/cloudrun.sh — Deploy the BYOD Mock Data Generator to Google Cloud Run.
 #
 # This script:
 #   1. Ensures the Artifact Registry repository 'apps' exists (creates it if not).
 #   2. Builds the Dockerfile.api image using Cloud Build (cloudbuild.yaml).
-#   3. Deploys the image to Cloud Run as a public, unauthenticated service.
+#   3. Deploys the image to Cloud Run with authentication REQUIRED
+#      (--no-allow-unauthenticated; callers need the Cloud Run invoker role).
 #   4. Optionally forwards Azure OpenAI credentials as Cloud Run env vars so
 #      real (non-fallback) generation works in the deployed service.
 #
@@ -121,15 +126,15 @@ echo ""
 # ---------------------------------------------------------------------------
 # Deploy to Cloud Run
 # ---------------------------------------------------------------------------
-echo "--- Deploying to Cloud Run (unauthenticated) ---"
+echo "--- Deploying to Cloud Run (authentication required) ---"
 gcloud run deploy "${SERVICE}" \
     --image "${IMAGE}" \
     --region "${REGION}" \
     --platform managed \
-    --allow-unauthenticated \
+    --no-allow-unauthenticated \
     --port 8080 \
     --project="${PROJECT_ID}" \
-    ${ENV_VARS}
+    ${ENV_VARS:+"${ENV_VARS}"}
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -144,11 +149,14 @@ echo "============================================================"
 echo "  Deployment complete!"
 echo "  Service URL : ${SERVICE_URL}"
 echo ""
+echo "  The service requires authentication. Send an identity token:"
+echo "    TOKEN=\$(gcloud auth print-identity-token)"
+echo ""
 echo "  Health check:"
-echo "    curl ${SERVICE_URL}/health"
+echo "    curl -H \"Authorization: Bearer \${TOKEN}\" ${SERVICE_URL}/health"
 echo ""
 echo "  Agent card:"
-echo "    curl ${SERVICE_URL}/.well-known/agent.json"
+echo "    curl -H \"Authorization: Bearer \${TOKEN}\" ${SERVICE_URL}/.well-known/agent.json"
 echo ""
 echo "  End-to-end A2A proof:"
 echo "    python3 scripts/e2e_a2a_check.py --url ${SERVICE_URL}"

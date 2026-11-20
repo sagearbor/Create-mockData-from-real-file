@@ -20,6 +20,7 @@ let currentMetadata = null;
 let currentSyntheticData = null;
 let pendingDownloadData = null;
 let currentDictionary = null;
+let currentDictionaryId = null;  // id the server gave this upload; sent back so only this upload is used
 
 // DOM Elements
 const uploadArea = document.getElementById('uploadArea');
@@ -49,6 +50,51 @@ const matchThreshold = document.getElementById('matchThreshold');
 const thresholdValue = document.getElementById('thresholdValue');
 const outputFormat = document.getElementById('outputFormat');
 const useCache = document.getElementById('useCache');
+const modelSelect = document.getElementById('modelSelect');
+const privacyMode = document.getElementById('privacyMode');
+// Model sent with the last preview request; the download that follows sends the same
+// one, even if the select was changed in between. '' = server default.
+let previewModel = '';
+let previewPrivacy = '';
+
+// Fill the model choice from the server's allow-list. Names are server data: they are
+// set with textContent, never as HTML. If the call fails the select keeps its single
+// "Server default" option (empty value) and generation works as before.
+async function loadModelChoices() {
+    if (!modelSelect) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/models`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data || !Array.isArray(data.models) || data.models.length === 0) return;
+        const options = [];
+        for (const model of data.models) {
+            if (!model || typeof model.name !== 'string' || !model.name) continue;
+            const option = document.createElement('option');
+            option.value = model.name;
+            const label = typeof model.label === 'string' && model.label ? model.label : model.name;
+            option.textContent = model.note ? `${label} (${model.note})` : label;
+            options.push(option);
+        }
+        if (options.length === 0) return;
+        modelSelect.replaceChildren(...options);
+        if (typeof data.default === 'string') modelSelect.value = data.default;
+    } catch (error) {
+        console.warn('Could not load the model list; using the server default.');
+    }
+}
+
+// Add the model to a generation request. A preview sends the current choice and
+// remembers it; a download sends what its preview used.
+function appendModel(formData, isPreview) {
+    if (isPreview) {
+        previewModel = modelSelect ? modelSelect.value : '';
+        previewPrivacy = privacyMode ? privacyMode.value : '';
+    }
+    if (previewModel) formData.append('model', previewModel);
+    // Same privacy mode for the download as for the preview it follows.
+    if (previewPrivacy) formData.append('safety_mode', previewPrivacy);
+}
 
 // Initialize event listeners
 function init() {
@@ -149,6 +195,8 @@ function init() {
     if (extractMetadataBtn) extractMetadataBtn.addEventListener('click', extractMetadata);
     if (resetBtn) resetBtn.addEventListener('click', reset);
 
+    loadModelChoices();
+
     // Demo dropdown handler
     const demoDropdown = document.getElementById('demoDataset');
     if (demoDropdown) {
@@ -221,6 +269,14 @@ function processFile(file) {
     if (fileNameEl) fileNameEl.textContent = file.name;
     if (fileStatsEl) fileStatsEl.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
     if (fileInfoEl) fileInfoEl.style.display = 'block';
+
+    // Say which file is loaded, in the upload area itself (text only: a file name is not HTML).
+    if (uploadArea) {
+        const lines = uploadArea.querySelectorAll('p');
+        if (lines[0]) lines[0].textContent = `Loaded: ${file.name}`;
+        if (lines[1]) lines[1].textContent = formatFileSize(file.size);
+        uploadArea.classList.add('file-loaded');
+    }
 
     // Update sections - keep config visible and open
     if (configSection) {
@@ -305,6 +361,7 @@ async function generateSyntheticData() {
 
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'true');  // Request preview mode
+    appendModel(formData, true);
     
     console.log('FormData being sent:');
     for (let [key, value] of formData.entries()) {
@@ -597,6 +654,13 @@ async function extractMetadata() {
 }
 
 // Display functions
+// Text that came from an uploaded file or a server response is never inserted as HTML
+// without this: column names, cell values and messages can hold markup.
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, c => (
+        {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
 function displayResults(data) {
     resultsSection.style.display = 'block';
     
@@ -605,14 +669,14 @@ function displayResults(data) {
         html += '<h3>✅ Synthetic Data Generated Successfully!</h3>';
         
         if (data.shape) {
-            html += `<p>Generated ${data.shape[0]} rows × ${data.shape[1]} columns</p>`;
+            html += `<p>Generated ${escapeHtml(data.shape[0])} rows × ${escapeHtml(data.shape[1])} columns</p>`;
         }
         
         if (data.columns) {
             html += '<h4>Columns:</h4>';
             html += '<ul>';
             data.columns.forEach(col => {
-                html += `<li>${col}</li>`;
+                html += `<li>${escapeHtml(col)}</li>`;
             });
             html += '</ul>';
         }
@@ -636,7 +700,7 @@ function displayResults(data) {
             };
         }
     } else {
-        resultsContent.innerHTML = `<p>${data.message || 'Generation completed'}</p>`;
+        resultsContent.innerHTML = `<p>${escapeHtml(data.message || 'Generation completed')}</p>`;
     }
 }
 
@@ -649,13 +713,13 @@ function displayMetadata(metadata) {
     
     let html = '<div class="metadata-summary">';
     html += '<h3>📊 Metadata Extracted</h3>';
-    html += `<p><strong>Rows:</strong> ${metadata.structure.shape.rows}</p>`;
-    html += `<p><strong>Columns:</strong> ${metadata.structure.shape.columns}</p>`;
+    html += `<p><strong>Rows:</strong> ${escapeHtml(metadata.structure.shape.rows)}</p>`;
+    html += `<p><strong>Columns:</strong> ${escapeHtml(metadata.structure.shape.columns)}</p>`;
     html += '<h4>Column Details:</h4>';
     html += '<ul>';
     
     metadata.structure.columns.forEach(col => {
-        html += `<li><strong>${col.name}</strong>: ${col.python_type} (${col.unique_count} unique values)</li>`;
+        html += `<li><strong>${escapeHtml(col.name)}</strong>: ${escapeHtml(col.python_type)} (${escapeHtml(col.unique_count)} unique values)</li>`;
     });
     
     html += '</ul>';
@@ -749,7 +813,7 @@ function createTableFromJSON(data) {
     // Header
     html += '<thead><tr>';
     Object.keys(data[0]).forEach(key => {
-        html += `<th style="border: 1px solid #ddd; padding: 8px; background: #f5f5f5;">${key}</th>`;
+        html += `<th style="border: 1px solid #ddd; padding: 8px; background: #f5f5f5;">${escapeHtml(key)}</th>`;
     });
     html += '</tr></thead>';
     
@@ -758,7 +822,7 @@ function createTableFromJSON(data) {
     data.forEach(row => {
         html += '<tr>';
         Object.values(row).forEach(value => {
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${value}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${escapeHtml(value)}</td>`;
         });
         html += '</tr>';
     });
@@ -970,7 +1034,7 @@ function reset() {
     currentFile = null;
     currentMetadata = null;
     fileInput.value = '';
-    fileInfo.style.display = 'none';
+    if (fileInfo) fileInfo.style.display = 'none';
 
     // Reset upload area to original state
     const uploadArea = document.getElementById('uploadArea');
@@ -1009,6 +1073,14 @@ function reset() {
     // Hide experimental features since no data is loaded
     const experimentalSection = document.getElementById('experimentalSection');
     if (experimentalSection) experimentalSection.style.display = 'none';
+
+    // Nothing from the previous file stays on screen or in memory.
+    for (const id of ['previewSection', 'dataEditorSection']) {
+        const section = document.getElementById(id);
+        if (section) section.style.display = 'none';
+    }
+    window.currentEditedData = null;
+    currentSyntheticData = null;
 }
 
 // Helper function to convert data to CSV (if not defined in data-editor.js)
@@ -1052,7 +1124,7 @@ function displayPreview(data) {
     const shownText = shown >= data.total_rows
         ? `all ${data.total_rows} rows are shown below.`
         : `the first ${shown} are shown below. Download gives all ${data.total_rows}.`;
-    info.innerHTML = `<strong>${fileCountText}</strong> - ${data.total_rows} rows × ${data.total_columns} columns generated; ${shownText}`;
+    info.innerHTML = `<strong>${escapeHtml(fileCountText)}</strong> - ${escapeHtml(data.total_rows)} rows × ${escapeHtml(data.total_columns)} columns generated; ${escapeHtml(shownText)}`;
 
     // Build table
     const thead = document.getElementById('previewHead');
@@ -1133,6 +1205,19 @@ function displayGenerationBadges(generationInfo, dictionaryApplied) {
         }
         if (methodBadge) {
             badgesContainer.appendChild(methodBadge);
+        }
+
+        // Which AI model wrote the generation code (createBadge sets it with textContent)
+        if (typeof generationInfo.model === 'string' && generationInfo.model) {
+            const modelTitle = generationInfo.method === 'cached'
+                ? 'AI model that wrote the cached generation code'
+                : 'AI model that wrote the generation code';
+            const modelBadge = createBadge(`🧠 ${generationInfo.model}`, 'badge-model', modelTitle);
+            // The name as written (badges are upper-cased by default), in a neutral colour.
+            modelBadge.style.textTransform = 'none';
+            modelBadge.style.background = '#475569';
+            modelBadge.style.color = 'white';
+            badgesContainer.appendChild(modelBadge);
         }
 
         // Add processing time badge if timings are available
@@ -1260,7 +1345,7 @@ function showTimingBreakdown(target, timings, generationMethod) {
             const timeStr = value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(2)}s`;
             const cssClass = key === 'total' ? 'timing-total' : '';
             html += `<div class="timing-item ${cssClass}">
-                <span class="timing-label">${label}</span>
+                <span class="timing-label">${escapeHtml(label)}</span>
                 <span class="timing-value">${timeStr}</span>
             </div>`;
         }
@@ -1387,10 +1472,12 @@ async function downloadDictionaryData() {
     showLoading(`Preparing download of ${fileCount} file${fileCount > 1 ? 's' : ''}...`);
     const formData = new FormData();
     formData.append('use_stored_dictionary', 'true');
+    if (currentDictionaryId) formData.append('dictionary_id', currentDictionaryId);
     formData.append('num_rows', numRows.value || '100');
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');
+    appendModel(formData, false);  // same model as the preview
     if (currentSyntheticData?.preview_id) {
         formData.append('preview_id', currentSyntheticData.preview_id);
     }
@@ -1451,6 +1538,7 @@ async function downloadGeneratedData(preview = false) {
 
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');  // Request actual download
+    appendModel(formData, false);  // same model as the preview
 
     try {
         const response = await fetch(`${API_BASE}/generate`, {
@@ -1462,14 +1550,22 @@ async function downloadGeneratedData(preview = false) {
             throw new Error(await responseErrorMessage(response));
         }
 
-        const contentType = response.headers.get('content-type');
-        const blob = await response.blob();
-
+        const contentType = response.headers.get('content-type') || '';
+        let blob;
         let filename;
-        if (contentType && contentType.includes('application/zip')) {
+        if (contentType.includes('application/zip')) {
+            blob = await response.blob();
             filename = `synthetic_data_${new Date().toISOString().slice(0,10)}.zip`;
+        } else if (contentType.includes('application/json')) {
+            // The server wraps JSON rows in a status object; the saved file holds the rows only.
+            const payload = await response.json();
+            const rows = Array.isArray(payload) ? payload : (payload.data || []);
+            blob = new Blob([JSON.stringify(rows, null, 2)], {type: 'application/json'});
+            filename = 'synthetic_data.json';
         } else {
-            filename = `synthetic_data.${outputFormat.value}`;
+            blob = await response.blob();
+            const ext = outputFormat.value === 'excel' ? 'xlsx' : outputFormat.value;
+            filename = `synthetic_data.${ext}`;
         }
 
         downloadFile(blob, filename);
@@ -1550,6 +1646,7 @@ async function processDictionaryFile(file) {
         }
 
         const data = await response.json();
+        currentDictionaryId = data.dictionary_id || null;
         if (data.status === 'choose_table') {
             showDictionaryTableChooser(data, file.name);
             return;
@@ -1622,6 +1719,7 @@ async function chooseDictionaryTable(table, fileName) {
     showLoading(`Loading table ${table}...`);
     const formData = new FormData();
     formData.append('table', table);
+    if (currentDictionaryId) formData.append('dictionary_id', currentDictionaryId);
     try {
         const response = await fetch(`${API_BASE}/dictionary/table`, {
             method: 'POST',
@@ -1631,6 +1729,7 @@ async function chooseDictionaryTable(table, fileName) {
             throw new Error(await responseErrorMessage(response));
         }
         const data = await response.json();
+        if (data.dictionary_id) currentDictionaryId = data.dictionary_id;
         showLoadedDictionary(data, fileName);
         showSuccess(`Table ${data.table || table} loaded`);
     } catch (error) {
@@ -1674,8 +1773,7 @@ function showLoadedDictionary(data, fileName) {
             const columnsDiv = document.getElementById('dictionaryColumns');
             if (columnsDiv) {
                 // Names and values come from the uploaded file: escape before inserting as HTML.
-                const esc = (s) => String(s).replace(/[&<>"']/g, c => (
-                    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+                const esc = escapeHtml;
                 columnsDiv.innerHTML = '<h4>Defined Columns:</h4><ul>' +
                     Object.keys(data.dictionary.columns || {}).map(col => {
                         const colDef = data.dictionary.columns[col];
@@ -1716,10 +1814,12 @@ async function generateFromDictionary() {
 
     const formData = new FormData();
     formData.append('use_stored_dictionary', 'true');
+    if (currentDictionaryId) formData.append('dictionary_id', currentDictionaryId);
     formData.append('num_rows', numRows.value || '100');
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'true');
+    appendModel(formData, true);
 
     try {
         const response = await fetch(`${API_BASE}/generate-with-dictionary`, {
@@ -1756,6 +1856,7 @@ function showDictionaryOnlyMode() {
 
 function clearDataDictionary() {
     currentDictionary = null;
+    currentDictionaryId = null;
     pendingDictionaryTables = null;
 
     // Hide dictionary info and details

@@ -116,6 +116,15 @@ async def main() -> None:
                                 "similar schemas. Default: true."
                             ),
                         },
+                        "model": {
+                            "type": "string",
+                            "description": (
+                                "AI model (deployment name) that writes the "
+                                "generation code. Must be on the server's "
+                                "allow-list (env LLM_ALLOWED_MODELS); any other "
+                                "name is refused. Omit for the server default."
+                            ),
+                        },
                     },
                 },
             ),

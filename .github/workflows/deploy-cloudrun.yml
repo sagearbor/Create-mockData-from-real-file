@@ -1,6 +1,14 @@
+# REFERENCE ONLY — not the approved deployment route for this service. The
+# approved deployment is the organisation's guarded Container Apps procedure.
+# This workflow is kept for reference; it no longer requests public access.
+#
 # .github/workflows/deploy-cloudrun.yml
 #
-# Deploy the BYOD Mock Data Generator to Google Cloud Run (public endpoint).
+# Deploy the BYOD Mock Data Generator to Google Cloud Run (authentication
+# required: --no-allow-unauthenticated).
+#
+# Dispatch inputs and secrets reach the shell only through `env:` and are
+# always quoted; never interpolate ${{ ... }} inside a `run:` script.
 #
 # ============================================================
 # REQUIRED secret (Settings > Secrets and variables > Actions):
@@ -52,6 +60,12 @@ on:
 
 env:
   ARTIFACT_REPO: apps
+  # Free-text dispatch inputs: passed as environment variables, never
+  # interpolated into shell.
+  PROJECT_ID: ${{ inputs.project_id }}
+  REGION: ${{ inputs.region }}
+  SERVICE: ${{ inputs.service }}
+  GIT_SHA: ${{ github.sha }}
 
 jobs:
   deploy:
@@ -93,11 +107,11 @@ jobs:
       # -------------------------------------------------------------------
       - name: Ensure Artifact Registry repository
         run: |
-          IMAGE_HOST="${{ inputs.region }}-docker.pkg.dev"
+          IMAGE_HOST="${REGION}-docker.pkg.dev"
           gcloud artifacts repositories create "${ARTIFACT_REPO}" \
             --repository-format=docker \
-            --location="${{ inputs.region }}" \
-            --project="${{ inputs.project_id }}" \
+            --location="${REGION}" \
+            --project="${PROJECT_ID}" \
             --description="Container images for BYOD services" \
             2>/dev/null || true
           gcloud auth configure-docker "${IMAGE_HOST}" --quiet
@@ -107,12 +121,12 @@ jobs:
       # -------------------------------------------------------------------
       - name: Build image with Cloud Build
         run: |
-          IMAGE="${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/${ARTIFACT_REPO}/${{ inputs.service }}:${{ github.sha }}"
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${SERVICE}:${GIT_SHA}"
           echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
           gcloud builds submit \
             --config cloudbuild.yaml \
             --substitutions="_IMAGE=${IMAGE}" \
-            --project="${{ inputs.project_id }}" \
+            --project="${PROJECT_ID}" \
             .
 
       # -------------------------------------------------------------------
@@ -120,19 +134,24 @@ jobs:
       # -------------------------------------------------------------------
       - name: Prepare Azure OpenAI env-vars
         id: azure_env
+        env:
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
         run: |
           PAIRS=()
-          if [[ -n "${{ secrets.AZURE_OPENAI_API_KEY }}" ]]; then
-            PAIRS+=("AZURE_OPENAI_API_KEY=${{ secrets.AZURE_OPENAI_API_KEY }}")
+          if [[ -n "${AZURE_OPENAI_API_KEY}" ]]; then
+            PAIRS+=("AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}")
           fi
-          if [[ -n "${{ secrets.AZURE_OPENAI_ENDPOINT }}" ]]; then
-            PAIRS+=("AZURE_OPENAI_ENDPOINT=${{ secrets.AZURE_OPENAI_ENDPOINT }}")
+          if [[ -n "${AZURE_OPENAI_ENDPOINT}" ]]; then
+            PAIRS+=("AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}")
           fi
-          if [[ -n "${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}" ]]; then
-            PAIRS+=("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=${{ secrets.AZURE_OPENAI_CHAT_DEPLOYMENT_NAME }}")
+          if [[ -n "${AZURE_OPENAI_CHAT_DEPLOYMENT_NAME}" ]]; then
+            PAIRS+=("AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=${AZURE_OPENAI_CHAT_DEPLOYMENT_NAME}")
           fi
-          if [[ -n "${{ secrets.AZURE_OPENAI_API_VERSION }}" ]]; then
-            PAIRS+=("AZURE_OPENAI_API_VERSION=${{ secrets.AZURE_OPENAI_API_VERSION }}")
+          if [[ -n "${AZURE_OPENAI_API_VERSION}" ]]; then
+            PAIRS+=("AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}")
           fi
 
           if [[ ${#PAIRS[@]} -gt 0 ]]; then
@@ -146,18 +165,20 @@ jobs:
           fi
 
       # -------------------------------------------------------------------
-      # 7. Deploy to Cloud Run (allow unauthenticated)
+      # 7. Deploy to Cloud Run (authentication required)
       # -------------------------------------------------------------------
       - name: Deploy to Cloud Run
+        env:
+          ENV_FLAG: ${{ steps.azure_env.outputs.env_flag }}
         run: |
-          gcloud run deploy "${{ inputs.service }}" \
+          gcloud run deploy "${SERVICE}" \
             --image "${IMAGE}" \
-            --region "${{ inputs.region }}" \
+            --region "${REGION}" \
             --platform managed \
-            --allow-unauthenticated \
+            --no-allow-unauthenticated \
             --port 8080 \
-            --project "${{ inputs.project_id }}" \
-            ${{ steps.azure_env.outputs.env_flag }}
+            --project "${PROJECT_ID}" \
+            ${ENV_FLAG:+"${ENV_FLAG}"}
 
       # -------------------------------------------------------------------
       # 8. Retrieve service URL and write to job summary
@@ -165,34 +186,38 @@ jobs:
       - name: Get service URL
         id: service_url
         run: |
-          URL=$(gcloud run services describe "${{ inputs.service }}" \
-            --region "${{ inputs.region }}" \
-            --project "${{ inputs.project_id }}" \
+          URL=$(gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
             --format="value(status.url)")
           echo "url=${URL}" >> "${GITHUB_OUTPUT}"
 
       - name: Write job summary
+        env:
+          SERVICE_URL: ${{ steps.service_url.outputs.url }}
         run: |
-          SERVICE_URL="${{ steps.service_url.outputs.url }}"
           cat >> "${GITHUB_STEP_SUMMARY}" <<EOF
           ## Cloud Run Deployment Complete
 
           | Field | Value |
           |-------|-------|
-          | Service | \`${{ inputs.service }}\` |
-          | Region | \`${{ inputs.region }}\` |
-          | Project | \`${{ inputs.project_id }}\` |
-          | Image SHA | \`${{ github.sha }}\` |
+          | Service | \`${SERVICE}\` |
+          | Region | \`${REGION}\` |
+          | Project | \`${PROJECT_ID}\` |
+          | Image SHA | \`${GIT_SHA}\` |
           | **Service URL** | **${SERVICE_URL}** |
 
           ### Quick checks
 
           \`\`\`bash
+          # The service requires authentication: send an identity token
+          TOKEN=\$(gcloud auth print-identity-token)
+
           # Health
-          curl ${SERVICE_URL}/health
+          curl -H "Authorization: Bearer \${TOKEN}" ${SERVICE_URL}/health
 
           # Agent card
-          curl ${SERVICE_URL}/.well-known/agent.json
+          curl -H "Authorization: Bearer \${TOKEN}" ${SERVICE_URL}/.well-known/agent.json
 
           # End-to-end A2A proof
           python3 scripts/e2e_a2a_check.py --url ${SERVICE_URL}
@@ -200,9 +225,9 @@ jobs:
 
           ### Notes
 
-          - The endpoint is **public and unauthenticated** — intended for
-            temporary demos only.  Add Cloud Run IAM or an API gateway before
-            promoting to production.
+          - The endpoint **requires authentication** (Cloud Run IAM invoker
+            role). This path is kept for reference only; the approved
+            deployment is the organisation's guarded Container Apps procedure.
           - If the Azure OpenAI secrets were not configured, generation uses the
             **deterministic fallback path** (lower fidelity; still functional).
           EOF

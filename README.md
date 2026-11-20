@@ -1,6 +1,10 @@
 # BYOD Synthetic Data Generator
 
-Generate privacy-safe synthetic data that preserves the statistical properties of your original data without exposing sensitive information.
+Upload a data file and/or a data dictionary. The server builds a description of the data, an Azure OpenAI model hosted by the organisation writes a Python script from that description, the server runs the script, and made-up data comes back.
+
+**What is sent where.** Your file is sent to this server and analysed there. Rows are not sent to the AI model. The model receives column names, data types, counts and summary statistics. For text columns it receives lengths and formats, plus the labels of repeated categories (such as M / F) in Balanced and Permissive modes; in Strict mode it receives no text values. Other text values, such as IDs, emails, phone numbers and free text, are replaced with placeholders. Details: [What the AI model receives](#what-the-ai-model-receives).
+
+**Do not upload real study data or patient identifiers.** This release has not been approved for them. No compliance assessment has been done.
 
 ## 🚀 Quick Start
 
@@ -31,7 +35,7 @@ pip install -r requirements.txt
 4. **Configure environment variables**
 ```bash
 cp .env.example .env
-# Edit .env to add your Azure OpenAI credentials (optional)
+# Edit .env: AZURE_OPENAI_ENDPOINT is required. Without it every generation request fails.
 ```
 
 5. **Start the application**
@@ -48,52 +52,77 @@ Check the server status:
 curl http://localhost:8201/health
 ```
 
-You should see:
+You should see something like this (`ai_ready` is `false`, with a reason, until the AI model is configured):
 ```json
 {
   "status": "healthy",
-  "openai_configured": false,
+  "openai_configured": true,
+  "ai_ready": true,
+  "ai_not_ready_reason": null,
   "cache_enabled": true,
-  "environment": "local"
+  "environment": "local",
+  "a2a_backend": "shim"
 }
 ```
 
+`GET /ready` answers 200 only when the AI model is configured, otherwise 503.
+
 ## 📊 Features
 
-### ✅ Production Ready
-- **Privacy-First**: LLM never sees actual data values, only statistical metadata
-- **Multiple Formats**: Supports CSV, JSON, Excel, Parquet, TSV
-- **Web Interface**: User-friendly drag-and-drop interface with About page
-- **Multi-File Generation**: Generate 1-20 files at once with ZIP download
-- **REST API**: Programmatic access for automation
-- **Local-First**: Works without cloud services
-- **Smart Pattern Detection**: Automatically detects and preserves:
-  - ID patterns with prefixes (e.g., C001, INV-2024)
-  - Email addresses with realistic domains
-  - Phone numbers maintaining format
-  - Currency values with proper decimal places
+### ✅ In this release
+- **Description, not rows**: The AI model receives a description of the data, never the rows. See [What the AI model receives](#what-the-ai-model-receives)
+- **Input formats**: CSV, JSON, Excel, Parquet, TSV
+- **Output formats**: CSV, JSON, Excel
+- **Data dictionary**: Generate from a dictionary file (JSON, YAML, CSV, Excel, PDF), with or without a data file. The dictionary's content is sent to the AI model
+- **Web Interface**: Drag-and-drop page, an About page and a usage dashboard
+- **Multi-File Generation**: 1-20 files at once, returned as a ZIP
+- **REST API**: Form upload routes and a JSON API under `/api/v1`
+- **Choice of AI model**: A request can name a model from the server's allow-list (`GET /api/models`). Without a name the server default is used
+- **Pattern detection**: The description notes
+  - ID shapes (for example `MRN-<7 digits>`), never a real ID as an example
+  - Email and phone formats
+  - Currency values and their decimal places
   - Datetime formats including timestamps
-- **Configurable Safety Modes**: Three privacy levels:
-  - **Strict**: Maximum privacy, all categorical data anonymized
-  - **Balanced**: Preserves common non-sensitive categories (default)
-  - **Permissive**: Preserves more categorical values for better realism
-- **Intelligent Caching**: Reuses generation code for similar data structures
+- **Safety modes**: Three levels that control which text values the AI model may see:
+  - **Strict**: No text value is sent. Numbers are rounded and ranges widened
+  - **Balanced** (default): Repeated short category labels are sent for columns with up to 10 distinct values
+  - **Permissive**: The same rule, for columns with up to 50 distinct values
+- **Script cache**: The generated script is saved on the server's disk with the description it was written for, and reused for a later request with a similar description and the same number of rows
   - Cache hit indicators: ✓ for hit, − for miss
-  - Significant performance improvement (8s → <0.1s for cached)
-  - Safe matching based on exact column structure
-- **Real-Time Progress Tracking**: Visual generation pipeline with timing
-  - Shows each step: Extract Metadata → Check Cache → AI Response → Execute → Validate
-  - Live timing display for each completed step
-  - Processing time breakdown with hoverable details
-- **Usage Analytics**: Comprehensive logging with automatic rotation
-  - Tracks generation methods (LLM/cached/fallback)
-  - Distinguishes test/demo data from production use
-  - Daily logs with automatic archival after 2 days
+  - A cache hit skips the call to the AI model
+- **Progress display**: Extract Metadata → Check Cache → AI Response → Execute → Validate, with the time each step took
+- **Usage log**: One line per generation in `logs/usage/` with the time, method (AI model or cached), row and column counts and timings. `rotate_logs.py` archives log files older than 2 days
 
-### 🚧 In Development
-- **Statistical Preservation**: Basic distributions maintained (advanced correlations coming)
-- **Clinical Data Support**: Domain-specific value generation planned
-- **Data Dictionary Upload**: Constraint validation feature planned
+### Not in this release
+- **Approval for real data**: Not approved for real study data or patient identifiers
+- **Sign-in**: There is none. Anyone who can reach the site on the organisation network (VPN) can use it
+- **Isolation of generated scripts**: Scripts are screened before running (only data libraries; no file, network or process access) but they run on the same server as the application. This is not full isolation
+- **Batch generation**: Switched off. `POST /generate/batch` and `GET /batch/{batch_id}` answer 501
+- **A generator without the AI model**: There is none. If the AI model is unavailable, generation fails with a clear error
+- **A production environment**: There is none yet
+- **Advanced statistics**: Basic distributions are described; relationships across several columns are not fully kept
+
+## What the AI model receives
+
+Rows are never sent. The model receives a description built in `src/core/metadata_extractor.py`:
+
+- **Column names**: Always sent, exactly as they are in the file.
+- **Every column**: Data type, number of values, empty values and distinct values.
+- **Number columns**: Average, spread and similar summary numbers. In Balanced and Permissive modes, for a column with 20 or more values, this includes the real smallest, largest, middle and quartile values. In Strict mode, and for a column with fewer than 20 values, the numbers are rounded and the range is widened. A column whose name looks like an identifier (`patient_id`, `mrn`, `zip`, ...) sends no smallest, largest, middle or quartile value.
+- **Date columns**: The range widened to whole months, or to whole years for columns named like a date of birth, in Strict mode, and for columns with fewer than 20 values. The exact earliest and latest dates are not sent.
+- **Text columns**: Lengths, formats and how often the most common values occur. The values are replaced with placeholders (`value_0`, `value_1`, ...) unless they are repeated short category labels: 30 characters or fewer, occurring at least 5 times, in a column with 20 or more values and a name that does not look like an identifier, with no value that looks like an email, phone number, date or long number. Balanced mode allows up to 10 distinct labels, Permissive up to 50, Strict none.
+- **A limit of this rule**: It cannot tell a category from a name. A person's name that occurs 5 or more times in a column with an ordinary name is treated as a category label and is sent in Balanced and Permissive modes.
+- **Shared beginnings and endings**: Outside Strict mode, for a column with 20 or more values, a beginning or ending of up to 6 characters with no digits that many values share can be sent.
+- **ID-shaped columns**: Described by shape (for example `MRN-<7 digits>`), never by a real example.
+- **Relationships**: How strongly columns move together.
+- **A data dictionary, if uploaded**: Its column names, types, descriptions, allowed values, ranges and patterns, cut to a size limit.
+
+What is stored on the server:
+
+- The description and the generated script are saved in the cache folder (`data/cache` by default) until the cache is cleared. A request with `use_cache=false` does not read or write the cache.
+- The uploaded file is not written to the cache. While a request is processed it is held in memory, and the web framework may also keep it in a temporary file.
+- An uploaded data dictionary, and a preview made from one, are kept in memory for up to 30 minutes after their last use.
+- Column names from cached descriptions are returned by `GET /api/cache-info` and shown on the usage dashboard.
 
 ## 🖥️ Using the Web Interface
 
@@ -103,7 +132,8 @@ You should see:
    - **Number of rows**: How many synthetic records to generate
    - **Match strictness**: How closely to match statistical properties (70-85% recommended)
    - **Number of files**: Generate 1-20 synthetic files at once
-   - **Safety mode**: Choose privacy level (strict/balanced/permissive)
+   - **Safety mode**: Strict, Balanced or Permissive (which text values the AI model may see)
+   - **AI model**: Leave the server default or choose another model from the list
 4. Click "Generate Synthetic Data"
 5. Download your synthetic dataset (single file or ZIP for multiple)
 
@@ -114,7 +144,7 @@ See [docs/INTEGRATION.md](docs/INTEGRATION.md) for full details.
 
 | Interface | How to call |
 |-----------|-------------|
-| **REST** | `POST /generate`, `POST /metadata`, etc. (FastAPI, default port 8201) |
+| **REST** | `POST /generate`, `POST /metadata`, `POST /api/v1/generate` (JSON), etc. (FastAPI, default port 8201). See [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) |
 | **MCP** | `python -m src.mcp_server` — tools: `generate_synthetic_data`, `extract_metadata` |
 | **A2A** | `POST /a2a/mock-data-generator` with an encoded A2A Message envelope; AgentCard at `GET /.well-known/agent.json` |
 
@@ -168,6 +198,19 @@ curl -X POST "http://localhost:8201/generate" \
   --output synthetic_data.zip
 ```
 
+### Choose the AI model
+
+```bash
+# Names a request may use
+curl "http://localhost:8201/api/models"
+
+# JSON API: "model" is optional; leave it out for the server default.
+# A name that is not on the list is refused with 400.
+curl -X POST "http://localhost:8201/api/v1/generate" \
+  -H "Content-Type: application/json" \
+  -d '{"csv_text": "widget_id,colour\nW001,red\nW002,blue\n", "num_rows": 20, "model": "gpt-5-nano"}'
+```
+
 ### Extract metadata only
 
 ```bash
@@ -182,23 +225,16 @@ View interactive API docs at: `http://localhost:8201/docs`
 
 ## 🎯 Common Use Cases
 
-### 1. Remove PHI from Medical Data
-```python
-# Upload medical records with patient information
-# Get back statistically similar data without any real patient details
-```
+This release is not approved for real study data or patient identifiers. Use it with data you are allowed to send to this server.
 
-### 2. Create Test Data for Development
-```python
-# Upload small production sample
-# Generate large test dataset maintaining relationships and patterns
-```
+### 1. Create Test Data for Development
+Upload a small sample and generate a larger test dataset with the same columns and similar statistics.
 
-### 3. Share Data Safely
-```python
-# Upload sensitive financial data
-# Generate shareable synthetic version for vendors or partners
-```
+### 2. Generate From a Data Dictionary
+Upload a dictionary and generate data that follows its column definitions. No data file is needed.
+
+### 3. Fixtures for Automated Tests
+Call `POST /api/v1/generate` from a script and save the rows it returns.
 
 ## ⚙️ Configuration
 
@@ -207,13 +243,16 @@ View interactive API docs at: `http://localhost:8201/docs`
 Key settings in `.env`:
 
 ```env
-# Azure OpenAI (optional - enables LLM generation; unset = template fallback)
+# Azure OpenAI (required: unset = /ready answers 503 and every generation request fails)
 AZURE_OPENAI_ENDPOINT=https://<your-foundry>.openai.azure.com/
 AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=gpt-5-nano
 SOLUTION_NAME=mock-data-generator
 # Keyless by default (src/dcri_llm.py): `az login` locally, managed identity on ACA.
 LLM_AUTH=identity
 # LLM_AUTH=key + AZURE_OPENAI_API_KEY only for people without an Azure identity
+# Optional: the models a request may choose (comma-separated deployment names).
+# Unset = the built-in list in src/core/models.py. The default above is always allowed.
+# LLM_ALLOWED_MODELS=<deployment-name-1>,<deployment-name-2>
 
 # Application Settings
 LOG_LEVEL=INFO
@@ -247,9 +286,10 @@ Create-mockData-from-real-file/
 ├── data/
 │   ├── samples/        # Sample data files
 │   ├── cache/          # Cached generation scripts
-│   └── local_storage/  # Temporary storage
+│   └── local_storage/  # Created at start-up; not used by the current code
 ├── tests/              # Unit tests
-├── infrastructure/     # IaC scripts (Terraform/Bicep)
+├── infrastructure/     # Terraform/Bicep templates from an earlier plan (not the deployed route)
+├── deploy/aca/         # Container Apps manifest (the deployed route)
 ├── docs/               # Documentation
 ├── main.py             # Application entry point
 ├── requirements.txt    # Python dependencies
@@ -281,26 +321,26 @@ docker run -p 8201:8201 --env-file .env byod-synthetic:latest
 ```
 
 ### Azure Deployment
-```bash
-cd infrastructure/terraform
-terraform init
-terraform apply
-```
+The service runs as a container on Azure Container Apps, built from `Dockerfile.aca` with the manifest in `deploy/aca/containerapp.yaml`. It is deployed through the organisation's guarded Container Apps procedure. There is no production environment yet.
 
-See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md) for detailed instructions.
+The Terraform and Bicep templates in `infrastructure/` and the Cloud Run script in `deploy/cloudrun.sh` are kept for reference only. They are not the approved route.
+
+See [docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md).
 
 ## 📚 Documentation
 
 - [Architecture Overview](docs/architecture-diagram.md) - System design and data flow
-- [Developer Task List](developer_tasklist.md) - Active development tasks
+- [Developer Task List](docs/developer_tasklist.md) - Open work
 - [Completed Tasks](archived/developer_tasklist_ARCHIVED.md) - Finished work archive
-- [About Page](http://localhost:8201/about) - Interactive architecture diagram and FAQ
+- [About Page](http://localhost:8201/about) - What is sent to the AI model, API examples and a diagram
 
 ## ⚠️ Known Limitations
 
-- **Large Files**: Memory-based processing (streaming support planned)
+- **Large Files**: The whole file is read into memory. Uploads are limited to 50 MB by default (`MOCKDATA_MAX_UPLOAD_BYTES`)
 - **Complex Relationships**: Multi-column correlations not fully preserved yet
-- **Azure OpenAI**: Falls back to template generation if Azure OpenAI is not configured
+- **Azure OpenAI is required**: If the AI model is not configured or not reachable, generation fails with a clear error. There is no other generator
+- **No sign-in, no per-user limits**
+- **Batch generation**: Switched off in this release
 
 ## 🛠️ Troubleshooting
 
@@ -316,8 +356,8 @@ kill -9 $(lsof -t -i:8201)
 pip install --upgrade -r requirements.txt
 ```
 
-### No OpenAI credentials
-The system works without Azure OpenAI using template-based generation. For enhanced AI generation, add credentials to `.env`.
+### AI model not configured
+`GET /ready` answers 503 and gives the reason. Set `AZURE_OPENAI_ENDPOINT` in `.env` and sign in with `az login` (or use `LLM_AUTH=key` with `AZURE_OPENAI_API_KEY`). Generation does not work without the AI model.
 
 ## 🤝 Contributing
 
@@ -346,23 +386,8 @@ This project is proprietary and confidential.
 
 ## 🏗️ Current Development Status
 
-### Recently Completed (September 2025)
-- ✅ Multi-file generation with ZIP download
-- ✅ About page with architecture documentation
-- ✅ Privacy documentation and FAQ
-- ✅ Enhanced pattern detection for IDs, emails, phones, cities
-- ✅ Smart categorical value preservation based on safety mode
-- ✅ Currency and datetime format detection
-- ✅ Realistic name and location generation
-
-### Active Development
-- 🔧 Fixing date type detection for medical data
-- 🔧 Adding clinical reference data library
-- 🔧 Implementing data dictionary validation
-- 🔧 Enhancing LLM column understanding
-
-See [developer_tasklist.md](developer_tasklist.md) for detailed development plans.
+Release 1.0 work is tracked in Jira epic ADP-40. Open items are listed in [docs/developer_tasklist.md](docs/developer_tasklist.md); completed items are in [archived/developer_tasklist_ARCHIVED.md](archived/developer_tasklist_ARCHIVED.md).
 
 ---
 
-**Privacy Note**: Your uploaded file is processed in memory only and never saved to disk. Only statistical metadata (no actual values) is sent to the LLM for code generation, making it safe for PHI, PII, and other confidential information.
+**Data note**: Your uploaded file is sent to this server and analysed there. Rows are not sent to the AI model; a description of the data is (see [What the AI model receives](#what-the-ai-model-receives)). The description and the generated script are stored in the server's cache folder. This release has not been approved for real study data or patient identifiers.

@@ -1,0 +1,19 @@
+{"ts": "2026-11-20T14:12:00-0500", "event": "start", "slug": "reliability", "what": "Merge pending fixes (PR 12), create worktree (time approximate)"}
+{"ts": "2026-11-20T14:15:29-0500", "event": "stop", "slug": "reliability", "what": "PR 12 merged"}
+{"ts": "2026-11-20T14:15:29-0500", "event": "start", "slug": "security-review", "what": "Independent security review started (time approximate)"}
+{"ts": "2026-11-20T14:19:36-0500", "event": "start", "slug": "deploy", "what": "Baseline deploy of main 4c0930c (time approximate)"}
+{"ts": "2026-11-20T14:21:30-0500", "event": "stop", "slug": "deploy", "what": "Baseline live, healthy, revision 0000010 (time approximate)"}
+{"ts": "2026-11-20T14:22:12-0500", "event": "start", "slug": "model-choice", "what": "Probe Foundry models with real calls"}
+{"ts":"2026-11-20T14:24:03-0500","event":"start","slug":"sdlc-docs","what":"Copy SDLC templates into Confluence"}
+{"ts":"2026-11-20T14:25:17-0500","event":"stop","slug":"sdlc-docs","what":"Seven template copies created in Confluence (not yet filled)"}
+{"ts":"2026-11-20T14:25:53-0500","event":"start","slug":"sec-xss","what":"Fix HTML injection sinks"}
+{"ts":"2026-11-20T14:27:37-0500","event":"stop","slug":"security-review","what":"Own review complete and saved"}
+{"ts":"2026-11-20T14:29:00-0500","event":"start","slug":"security-tickets","what":"File merged findings in Jira"}
+{"ts":"2026-11-20T14:29:24-0500","event":"stop","slug":"security-tickets","what":"13 security tickets filed"}
+{"ts":"2026-11-20T14:32:27-0500","event":"start","slug":"sec-01","what":"Screen generated code before it runs"}
+{"ts":"2026-11-20T14:34:26-0500","event":"start","slug":"sdlc-docs","what":"Fill SDLC documents (agent)"}
+{"ts":"2026-11-20T14:39:31-0500","event":"stop","slug":"about-api","what":"About page committed"}
+{"ts":"2026-11-20T14:42:59-0500","event":"stop","slug":"sec-01","what":"Runner and routes committed"}
+{"ts":"2026-11-20T14:46:43-0500","event":"start","slug":"model-choice","what":"Model choice feature, cache keyed by model and privacy mode"}
+{"ts":"2026-11-20T14:54:22-0500","event":"stop","slug":"sdlc-docs","what":"Seven SDLC pages filled as drafts"}
+{"ts":"2026-11-20T15:07:16-0500","event":"stop","slug":"model-choice","what":"Model and privacy choice committed"}

@@ -1,14 +1,17 @@
 # 🚀 Quick Run Instructions
 
-## ✅ Server is Ready to Run!
+The application runs on **port 8201**.
 
-The application is configured to run on **port 8201** (avoiding common port conflicts).
+Generation needs an Azure OpenAI model: set `AZURE_OPENAI_ENDPOINT` in `.env` (see
+`.env.example`). Without it the server starts, `/ready` answers 503, and every
+generation request fails with an error. Do not upload real study data or patient
+identifiers: this release has not been approved for them.
 
 ## Start the Server
 
 ```bash
 # From the project directory:
-cd /dcri/sasusers/home/scb2/gitRepos/Create-mockData-from-real-file
+cd Create-mockData-from-real-file
 
 # With virtual environment activated:
 python3 main.py
@@ -30,13 +33,16 @@ In a new terminal:
 curl http://localhost:8201/health
 ```
 
-You should see:
+You should see something like this (`ai_ready` is `false`, with a reason, until the AI model is configured):
 ```json
 {
   "status": "healthy",
-  "openai_configured": false,
+  "openai_configured": true,
+  "ai_ready": true,
+  "ai_not_ready_reason": null,
   "cache_enabled": true,
-  "environment": "local"
+  "environment": "local",
+  "a2a_backend": "shim"
 }
 ```
 
@@ -70,7 +76,6 @@ When running correctly:
 INFO:     Started server process [PID]
 INFO:     Waiting for application startup.
 2025-09-06 13:34:16 - byod_synthetic - INFO - Starting BYOD Synthetic Data Generator
-2025-09-06 13:34:16 - byod_synthetic - WARNING - OpenAI credentials not configured, using fallback generation
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8201 (Press CTRL+C to quit)
 ```
@@ -96,6 +101,7 @@ kill -9 $(lsof -t -i:8201)
 APP_PORT=8205 python3 main.py
 ```
 
-## Note on Warnings
+## If the AI model is not configured
 
-The warning "OpenAI credentials not configured" is expected - the app works without them using template-based generation.
+`curl -i http://localhost:8201/ready` answers 503 and gives the reason. The app does
+not generate data without the AI model: each generation request fails with an error.

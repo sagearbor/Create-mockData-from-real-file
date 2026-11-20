@@ -2,6 +2,23 @@
 
 > **Note**: Completed tasks are moved to `archived/developer_tasklist_ARCHIVED.md`
 
+## 2026-11-20: Release 1.0 work — tracked in Jira epic ADP-40
+
+Completed items for this date are in `archived/developer_tasklist_ARCHIVED.md`. Open after today:
+
+- [ ] **ADP-56**: Run generated scripts in an isolated worker. Needs platform work. (The screening part is done.)
+- [ ] **ADP-60**: Sign-in and an admin role. Needs an IT app registration.
+- [ ] **ADP-59**: Owner decision on cache files in Git history.
+- [ ] **ADP-67**: Spreadsheet formula text in exports. Needs a decision.
+- [ ] **ADP-62** (remaining part): Per-user limits.
+- [ ] **ADP-68** (remaining part): Stable error names and request ids on every route.
+- [ ] **ADP-43**: Model choice. In progress at the time of writing.
+- [ ] No production environment yet.
+
+This release has not been approved for real study data or patient identifiers.
+
+Older sections below are kept as history. Where they disagree with this section, this section is current.
+
 ## Current Status
 - **Current Phase**: Phase 2 (LLM Integration) - 80% Complete
 - **Total Completed Tasks**: 15 (see archived list)
@@ -25,7 +42,7 @@
   - ✅ Validates uploaded data against dictionary rules
   - ✅ Generates mock data respecting dictionary constraints
   - ✅ Web UI section for dictionary upload/management
-  - **No PHI risk**: Dictionary validation happens locally without data exposure
+  - Dictionary validation runs on the server. When a dictionary is used for generation, its content is sent to the AI model
 
 ## Phase 2: LLM Integration & Dynamic Code Generation ⏳ 80% COMPLETE
 
@@ -113,7 +130,7 @@
 ### Task 6.2: Production Readiness
 - [ ] **6.2.1**: Add rate limiting and quotas
 - [ ] **6.2.2**: Implement file size limits and validation
-  - Done for `/api/v1` only (ST-363, `MOCKDATA_API_MAX_BYTES`); upload routes still unlimited
+  - `/api/v1`: ST-363, `MOCKDATA_API_MAX_BYTES`. Upload routes: ADP-62, `MOCKDATA_MAX_UPLOAD_BYTES` (2026-11-20). Per-user limits are still open (ADP-62)
 - [ ] **6.2.3**: Add monitoring and alerting
 - [ ] **6.2.4**: Security hardening and penetration testing
 - [x] **SEC.1**: Fix code injection in the fallback generator ✅
@@ -157,14 +174,15 @@
   - ✅ Vendored `src/dcri_llm.py` (v1.0.0, unmodified); one client builder
     `src/core/llm_client.py` used by the web app and the MCP/A2A service layer
   - ✅ Default auth is managed identity (`LLM_AUTH=identity`); API key only via
-    `LLM_AUTH=key`. No endpoint or a failed call -> template fallback, and the
-    reason is returned in `generation_info["llm_error"]`
+    `LLM_AUTH=key`. No endpoint or a failed call -> the request fails with a clear
+    error (502/503). The template fallback described here originally was removed later
   - ✅ `max_completion_tokens=40000` (was `max_tokens=4000`); `finish_reason=length`
     or empty output is treated as a failure, not success
   - ✅ PHI: usage logs no longer store column names; loader/dictionary/sandbox logs
     report counts instead of column names, sheet names or stderr text
-  - [ ] **Open question (Sage):** the prompt still sends real `most_common_values`
-    for categorical columns to the LLM — decide whether that is acceptable
+  - [x] Question closed by ADP-58 (2026-11-20): `most_common_values` are masked where
+    the description is built; only repeated short category labels are sent, and none
+    in Strict mode
   - Regression tests: `tests/test_dcri_llm_integration.py`
 
 ## Known Issues & Technical Debt
@@ -187,13 +205,11 @@ Prefer the helpers in `src/utils/pandas_compat.py` over `is_object_dtype()` and
 ordinary text columns rather than raising.
 
 ### Security Notes
-- **Public deployment**: `deploy/cloudrun.sh` intentionally deploys with
-  `--allow-unauthenticated`. Anything reachable there is reachable by anyone,
-  so the exec path must stay injection-free — see SEC.1 and its tests.
-- **Generated code is still executed**: the LLM and cache paths produce Python
-  that is run in a subprocess. The subprocess has a scrubbed environment and a
-  30s timeout, but no CPU/memory/network sandbox. Untrusted *cache contents*
-  would still be a code-execution vector.
+- **Cloud Run files** (`deploy/cloudrun.sh`, the workflow): reference only, not the
+  approved route. They deploy with authentication required (ADP-65).
+- **Generated code is executed on the application's server**: it is screened first
+  and runs in a separate process with a minimal environment and a 30s timeout. It is
+  not isolated from the application. Tracked as ADP-56; cache files as ADP-59.
 
 ### Current Bugs
 1. **Date Detection**: Standard date formats (YYYY-MM-DD) not properly detected
@@ -215,9 +231,9 @@ ordinary text columns rather than raising.
 
 ### Environment Variables Required
 ```bash
-AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
-AZURE_OPENAI_API_KEY="your-key"
-AZURE_OPENAI_CHAT_DEPLOYMENT_NAME="gpt-4"
+AZURE_OPENAI_ENDPOINT="https://<your-foundry>.openai.azure.com/"
+LLM_AUTH="identity"            # or "key" with AZURE_OPENAI_API_KEY
+AZURE_OPENAI_CHAT_DEPLOYMENT_NAME="gpt-5-nano"
 ```
 
 ### Testing Commands
@@ -254,6 +270,6 @@ curl -X POST http://localhost:8201/generate \
 5. **CLINICAL.2**: Data dictionary upload feature
 
 ---
-**Last Updated**: September 2025
+**Last Updated**: 2026-11-20
 **Active Developer**: AI Assistant
 **Project Phase**: MVP Enhancement

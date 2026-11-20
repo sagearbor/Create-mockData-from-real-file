@@ -1,5 +1,12 @@
 # Mock Data Generator 1.0: SDLC document package
 
+> **Correction, 20 Nov 2026.** The seven pages listed below were started from the DS-S-001
+> template family by mistake. This tool falls under TS-S-001 v2.0 (to be confirmed by the
+> Quality Manager). The TS-S-001 drafts are under the Confluence page "DRAFT Mock Data Generator
+> 1.0 - TS-S-001 SDLC Package" (page id 6259474575); their page ids are in `tracking.json` under
+> the `ts-*` entries. The DS-S-001 drafts below are kept unchanged for reference only.
+
+
 Index of the release documents in Confluence (space ADP). Jira: ADP-45, epic ADP-40.
 The URL paths below follow the address of the organisation's Confluence site, which is not written here because this repository is public.
 

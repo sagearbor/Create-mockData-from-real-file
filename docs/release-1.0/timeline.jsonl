@@ -17,3 +17,5 @@
 {"ts":"2026-11-20T14:46:43-0500","event":"start","slug":"model-choice","what":"Model choice feature, cache keyed by model and privacy mode"}
 {"ts":"2026-11-20T14:54:22-0500","event":"stop","slug":"sdlc-docs","what":"Seven SDLC pages filled as drafts"}
 {"ts":"2026-11-20T15:07:16-0500","event":"stop","slug":"model-choice","what":"Model and privacy choice committed"}
+{"ts":"2026-11-20T15:58:34-0500","event":"stop","slug":"deploy-release","what":"Release build 146eb1f live on dev, revision 0000011"}
+{"ts":"2026-11-20T15:58:34-0500","event":"stop","slug":"site-test","what":"18 browser tests passed on the live site; recorded in Zephyr cycle ADP-R2"}

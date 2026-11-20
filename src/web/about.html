@@ -146,6 +146,130 @@
             margin: 24px 0;
             box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
         }
+
+        /* "Use it from code": copy-and-paste API blocks */
+        .api-subhead {
+            color: #0f172a;
+            font-weight: 600;
+            font-size: 1.15rem;
+            margin: 1.75rem 0 0.5rem;
+        }
+
+        .info-block p.api-note {
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .api-inline,
+        .api-table code {
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.85em;
+            background: rgba(99, 102, 241, 0.08);
+            color: #4f46e5;
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
+
+        .api-block {
+            margin: 12px 0 16px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .api-block-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 8px 12px 8px 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .api-block pre.api-code {
+            margin: 0;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            color: #e2e8f0;
+            white-space: pre;
+            line-height: 1.5;
+        }
+
+        .api-block pre.api-code code {
+            font-family: inherit;
+            font-size: inherit;
+            color: inherit;
+            background: none;
+        }
+
+        .copy-btn {
+            flex: none;
+            background: #6366f1;
+            color: white;
+            border: none;
+            padding: 5px 14px;
+            border-radius: 9999px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 500;
+            font-size: 0.8rem;
+            min-width: 76px;
+            transition: background 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #4f46e5;
+        }
+
+        .copy-btn.copied {
+            background: #10b981;
+        }
+
+        .api-table-wrap {
+            overflow-x: auto;
+            margin: 12px 0 16px;
+        }
+
+        .api-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            color: #475569;
+        }
+
+        .api-table th,
+        .api-table td {
+            text-align: left;
+            vertical-align: top;
+            padding: 8px 12px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .api-table th {
+            color: #0f172a;
+            font-weight: 600;
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .api-more {
+            margin-top: 1.25rem;
+            color: #475569;
+            font-size: 1rem;
+        }
+
+        .api-link {
+            color: #6366f1;
+            font-weight: 500;
+        }
+
+        .api-link:hover {
+            color: #4f46e5;
+        }
     </style>
 </head>
 <body>
@@ -322,36 +446,293 @@
                 </p>
             </section>
 
-            <section class="info-block">
-                <h2>🚀 API Usage</h2>
+            <section class="info-block" id="use-it-from-code">
+                <h2>🚀 Use it from code</h2>
                 <p>
-                    Use our RESTful API for <span class="accordion-word" onclick="toggleAccordion(this)">programmatic access</span>
-                    <span class="accordion-content">
-                        <strong>Basic generation:</strong>
-                        <div class="code-example">
-curl -X POST http://localhost:8201/generate \
+                    Your own programs can generate data too. Copy a block below, paste it, and change only
+                    the file names.
+                    <span id="api-origin-note">Replace <code class="api-inline">https://YOUR-SITE</code> with the
+                    address of this site (the page fills it in for you when JavaScript is on).</span>
+                </p>
+                <p class="api-note">
+                    <strong>API key:</strong> the <code class="api-inline">X-API-Key</code> header is only needed if
+                    this server was configured with a key; if it was not, the header is ignored. The examples read
+                    the key from the environment variable <code class="api-inline">MOCKDATA_API_KEY</code>. It
+                    applies to the <code class="api-inline">/api/v1</code> routes only.
+                </p>
+                <p class="api-note">
+                    Generation calls an AI model, so a request can take a minute or more.
+                </p>
+
+                <h3 class="api-subhead">Generate from a JSON request</h3>
+
+                <div class="api-block" data-block="curl-json" data-lang="curl">
+                    <div class="api-block-head">
+                        <span class="api-block-title">curl &middot; POST /api/v1/generate</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>curl -X POST "https://YOUR-SITE/api/v1/generate" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $MOCKDATA_API_KEY" \
+  -d '{"csv_text": "widget_id,colour,weight_g\nW001,red,12.5\nW002,blue,14.1\nW003,green,11.8\n", "num_rows": 20}'</code></pre>
+                </div>
+
+                <div class="api-block" data-block="python-json" data-lang="python">
+                    <div class="api-block-head">
+                        <span class="api-block-title">Python (requests) &middot; POST /api/v1/generate</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>import os
+
+import requests
+
+BASE = "https://YOUR-SITE"
+# Only needed if the server was configured with a key; ignored otherwise.
+HEADERS = {"X-API-Key": os.environ.get("MOCKDATA_API_KEY", "")}
+
+response = requests.post(
+    BASE + "/api/v1/generate",
+    headers=HEADERS,
+    json={
+        "csv_text": "widget_id,colour,weight_g\nW001,red,12.5\nW002,blue,14.1\nW003,green,11.8\n",
+        "num_rows": 20,
+    },
+    timeout=300,  # generation calls an AI model and can take a minute or more
+)
+body = response.json()
+if not response.ok:
+    raise SystemExit(f"{body['error_class']}: {body['error']}")
+
+print(body["shape"], body["columns"])
+for row in body["data"][:5]:
+    print(row)</code></pre>
+                </div>
+
+                <div class="api-block" data-block="javascript-json" data-lang="javascript">
+                    <div class="api-block-head">
+                        <span class="api-block-title">JavaScript (fetch, Node 18+) &middot; POST /api/v1/generate</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>const BASE = "https://YOUR-SITE";
+// Only needed if the server was configured with a key; ignored otherwise.
+const API_KEY = (typeof process !== "undefined" &amp;&amp; process.env.MOCKDATA_API_KEY) || "";
+
+async function generate() {
+  const response = await fetch(BASE + "/api/v1/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": API_KEY },
+    body: JSON.stringify({
+      csv_text: "widget_id,colour,weight_g\nW001,red,12.5\nW002,blue,14.1\nW003,green,11.8\n",
+      num_rows: 20,
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(body.error_class + ": " + body.error);
+  }
+  return body.data; // one object per row
+}
+
+generate().then(console.table).catch(console.error);</code></pre>
+                </div>
+
+                <h3 class="api-subhead">Send a file from disk</h3>
+
+                <div class="api-block" data-block="python-pandas" data-lang="python">
+                    <div class="api-block-head">
+                        <span class="api-block-title">Python &middot; local CSV in, pandas DataFrame out</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>import os
+from pathlib import Path
+
+import pandas as pd
+import requests
+
+BASE = "https://YOUR-SITE"
+SOURCE_FILE = "your_data.csv"
+# Only needed if the server was configured with a key; ignored otherwise.
+HEADERS = {"X-API-Key": os.environ.get("MOCKDATA_API_KEY", "")}
+
+response = requests.post(
+    BASE + "/api/v1/generate",
+    headers=HEADERS,
+    json={
+        "csv_text": Path(SOURCE_FILE).read_text(encoding="utf-8"),
+        "num_rows": 500,
+    },
+    timeout=300,  # generation calls an AI model and can take a minute or more
+)
+body = response.json()
+if not response.ok:
+    raise SystemExit(f"{body['error_class']}: {body['error']}")
+
+df = pd.DataFrame(body["data"], columns=body["columns"])
+print(df.head())
+df.to_csv("synthetic.csv", index=False)</code></pre>
+                </div>
+
+                <div class="api-block" data-block="curl-file" data-lang="curl">
+                    <div class="api-block-head">
+                        <span class="api-block-title">curl &middot; upload a file, save a CSV &middot; POST /generate</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>curl -X POST "https://YOUR-SITE/generate" \
   -F "file=@your_data.csv" \
   -F "num_rows=1000" \
-  -F "file_count=3" \
-  -F "output_format=csv"
-                        </div>
+  -F "output_format=csv" \
+  -o synthetic.csv</code></pre>
+                </div>
+                <p class="api-note">
+                    The upload accepts CSV, TSV, JSON, Excel and Parquet files. Leave out
+                    <code class="api-inline">num_rows</code> to get as many rows as the source file.
+                    <code class="api-inline">output_format</code> can be <code class="api-inline">csv</code>,
+                    <code class="api-inline">json</code> or <code class="api-inline">excel</code>. If the request
+                    fails, <code class="api-inline">synthetic.csv</code> will hold a short JSON error message
+                    instead of data.
+                </p>
 
-                        <strong>With data dictionary:</strong>
-                        <div class="code-example">
-curl -X POST http://localhost:8201/generate-with-dictionary \
-  -F "dictionary_file=@rules.json" \
-  -F "data_file=@sample.csv" \
-  -F "num_rows=5000"
-                        </div>
+                <h3 class="api-subhead">Generate from a data dictionary only</h3>
 
-                        <strong>Dictionary only (no data file):</strong>
-                        <div class="code-example">
-curl -X POST http://localhost:8201/generate-with-dictionary \
-  -F "dictionary_file=@schema.yaml" \
+                <div class="api-block" data-block="curl-dictionary" data-lang="curl">
+                    <div class="api-block-head">
+                        <span class="api-block-title">curl &middot; no data file needed &middot; POST /generate-with-dictionary</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>curl -X POST "https://YOUR-SITE/generate-with-dictionary" \
+  -F "dictionary_file=@dictionary.json" \
   -F "num_rows=1000" \
-  -F "output_format=json"
-                        </div>
-                    </span>.
+  -F "output_format=csv" \
+  -o synthetic.csv</code></pre>
+                </div>
+                <p class="api-note">
+                    Add <code class="api-inline">-F "data_file=@your_data.csv"</code> to also use a real file for
+                    the statistics. <code class="api-inline">num_rows</code> defaults to 100 on this route. If the
+                    dictionary describes several tables, name one with
+                    <code class="api-inline">-F "table=TABLE_NAME"</code>.
+                </p>
+
+                <h3 class="api-subhead">Request fields: POST /api/v1/generate</h3>
+                <p class="api-note">
+                    Send a JSON object. Give exactly one of <code class="api-inline">csv_text</code> or
+                    <code class="api-inline">data_content</code>. Unknown fields are rejected.
+                </p>
+                <div class="api-table-wrap">
+                    <table class="api-table" id="api-fields">
+                        <thead>
+                            <tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr data-field="csv_text"><td><code>csv_text</code></td><td>string</td><td>none</td><td>The source data as plain CSV text, header row first.</td></tr>
+                            <tr data-field="data_content"><td><code>data_content</code></td><td>string (base64)</td><td>none</td><td>The source file's bytes, base64-encoded. Use together with <code>format</code>.</td></tr>
+                            <tr data-field="format"><td><code>format</code></td><td>csv, tsv, json, excel or parquet</td><td>csv</td><td>Format of <code>data_content</code>. Ignored for <code>csv_text</code>.</td></tr>
+                            <tr data-field="num_rows"><td><code>num_rows</code></td><td>whole number, 1 to 100,000</td><td>source row count</td><td>Rows to generate. Leave out to match the source.</td></tr>
+                            <tr data-field="match_threshold"><td><code>match_threshold</code></td><td>number, 0 to 1</td><td>0.8</td><td>How closely the statistics must match the source.</td></tr>
+                            <tr data-field="safety_mode"><td><code>safety_mode</code></td><td>strict, balanced or permissive</td><td>balanced</td><td>Privacy level for categorical values.</td></tr>
+                            <tr data-field="use_cache"><td><code>use_cache</code></td><td>true or false</td><td>true</td><td>Reuse a cached generation script for similar data.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="api-note" id="api-response-keys">
+                    <strong>Response (200):</strong> a JSON object with
+                    <code class="api-inline">status</code> (always "success"),
+                    <code class="api-inline">data</code> (one object per row),
+                    <code class="api-inline">shape</code> ([rows, columns]),
+                    <code class="api-inline">columns</code> (column names in order) and
+                    <code class="api-inline">generation_info</code> (how the data was made).
+                </p>
+
+                <h3 class="api-subhead">Limits and errors</h3>
+                <p class="api-note" id="api-limits">
+                    <strong>Limits:</strong> <code class="api-inline">num_rows</code> is at most 100,000. A request
+                    body to <code class="api-inline">/api/v1</code> may be at most 10 MB unless the server was
+                    configured with a different limit (<code class="api-inline">MOCKDATA_API_MAX_BYTES</code>).
+                </p>
+                <p class="api-note">
+                    <strong>Errors:</strong> every failure under <code class="api-inline">/api/v1</code> has the
+                    same shape. The older upload routes (<code class="api-inline">/generate</code>,
+                    <code class="api-inline">/generate-with-dictionary</code>) mostly answer with
+                    <code class="api-inline">{"detail": "..."}</code> instead.
+                </p>
+                <div class="api-block" data-block="error-shape" data-lang="json">
+                    <div class="api-block-head">
+                        <span class="api-block-title">The one error shape of /api/v1</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>{"status": "error", "error": "what went wrong, in words", "error_class": "RequestValidationError"}</code></pre>
+                </div>
+                <div class="api-table-wrap">
+                    <table class="api-table" id="api-errors">
+                        <thead>
+                            <tr><th>HTTP status</th><th>error_class</th><th>What it means</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>400</td><td><code>GenerationError</code></td><td>The source data could not be read or used.</td></tr>
+                            <tr><td>401</td><td><code>InvalidApiKey</code></td><td>The server requires a key and <code>X-API-Key</code> is missing or wrong.</td></tr>
+                            <tr><td>413</td><td><code>RequestTooLarge</code></td><td>The request body is over the size limit.</td></tr>
+                            <tr><td>422</td><td><code>RequestValidationError</code></td><td>A field is missing, unknown or out of range.</td></tr>
+                            <tr><td>500</td><td><code>InternalError</code></td><td>Unexpected server error. No data was generated.</td></tr>
+                            <tr><td>502</td><td>varies</td><td>The AI generation failed. No data was generated.</td></tr>
+                            <tr><td>503</td><td>varies</td><td>AI is not configured on the server. No data was generated.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="api-block" data-block="curl-version" data-lang="curl">
+                    <div class="api-block-head">
+                        <span class="api-block-title">curl &middot; check the service &middot; GET /api/v1/version</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>curl "https://YOUR-SITE/api/v1/version" -H "X-API-Key: $MOCKDATA_API_KEY"</code></pre>
+                </div>
+
+                <h3 class="api-subhead">Interactive API reference</h3>
+                <p id="api-reference-links">
+                    Every route, with its fields, can be tried in the browser:
+                    <a class="api-link" href="/docs">interactive API reference (/docs)</a>,
+                    <a class="api-link" href="/redoc">reference to read (/redoc)</a>,
+                    <a class="api-link" href="/openapi.json">OpenAPI description (/openapi.json)</a>.
+                </p>
+
+                <h3 class="api-subhead">For AI agents: A2A and MCP</h3>
+                <p class="api-note">
+                    <strong>A2A:</strong> this site publishes an agent card at
+                    <code class="api-inline">/.well-known/agent.json</code> and accepts agent messages at
+                    <code class="api-inline">POST /a2a/mock-data-generator</code>. The body is this project's own JSON envelope
+                    (not a general A2A standard message) with a
+                    <code class="api-inline">payload</code> (the file as base64 in
+                    <code class="api-inline">data_content</code>, plus options) and a
+                    <code class="api-inline">metadata</code> object (<code class="api-inline">correlation_id</code>,
+                    <code class="api-inline">cycle</code>, <code class="api-inline">agent_id</code>).
+                </p>
+                <div class="api-block" data-block="curl-agent-card" data-lang="curl">
+                    <div class="api-block-head">
+                        <span class="api-block-title">curl &middot; read the agent card &middot; GET /.well-known/agent.json</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>curl "https://YOUR-SITE/.well-known/agent.json"</code></pre>
+                </div>
+                <p class="api-note">
+                    <strong>MCP:</strong> the MCP server is not reachable at this site's address. It is a program you
+                    start on your own machine from a copy of the source code (it talks over standard input and
+                    output), and it offers two tools: <code class="api-inline">generate_synthetic_data</code> and
+                    <code class="api-inline">extract_metadata</code>.
+                </p>
+                <div class="api-block" data-block="mcp-start" data-lang="shell">
+                    <div class="api-block-head">
+                        <span class="api-block-title">shell &middot; start the MCP server (run in the source code folder)</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>python -m src.mcp_server</code></pre>
+                </div>
+
+                <p class="api-note" data-local-dev-note>
+                    <strong>Local development note:</strong> when you run the app on your own machine, the address
+                    is usually <code class="api-inline">http://localhost:8201</code>.
+                </p>
+
+                <!-- A div, not a p: the lists inside these click-to-expand notes would end a p early. -->
+                <div class="api-more">
                     Generate data in <span class="accordion-word" onclick="toggleAccordion(this)">multiple formats</span>
                     <span class="accordion-content">
                         Output formats supported:
@@ -374,7 +755,7 @@ curl -X POST http://localhost:8201/generate-with-dictionary \
                         </ul>
                         Can be deployed as Azure Function for serverless operation.
                     </span>.
-                </p>
+                </div>
             </section>
 
             <div class="highlight-box">
@@ -472,15 +853,88 @@ curl -X POST http://localhost:8201/generate-with-dictionary \
         });
     </script>
 
-    <!-- Show curl examples against this server's own origin (e.g. the ACA FQDN),
-         not the local-dev default, whenever the page is served over http(s). -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            if (!/^https?:$/.test(window.location.protocol)) return;
-            document.querySelectorAll('.code-example').forEach(function(el) {
-                el.textContent = el.textContent.split('http://localhost:8201').join(window.location.origin);
+    <!-- "Use it from code": show this site's own address in the examples, and
+         make each Copy button put its block's exact text on the clipboard. -->
+    <script id="api-blocks-script">
+        (function () {
+            var PLACEHOLDER = 'https://YOUR-SITE';
+
+            function fillOrigin() {
+                if (!/^https?:$/.test(window.location.protocol)) return;
+                var origin = window.location.origin;
+                document.querySelectorAll('.api-block pre code').forEach(function (code) {
+                    code.textContent = code.textContent.split(PLACEHOLDER).join(origin);
+                });
+                var note = document.getElementById('api-origin-note');
+                if (note) {
+                    var shown = document.createElement('code');
+                    shown.className = 'api-inline';
+                    shown.textContent = origin;
+                    note.textContent = 'The examples already use the address of this site: ';
+                    note.appendChild(shown);
+                    note.appendChild(document.createTextNode('.'));
+                }
+            }
+
+            // For pages not served over https, where navigator.clipboard is unavailable.
+            function fallbackCopy(text) {
+                var area = document.createElement('textarea');
+                area.value = text;
+                area.setAttribute('readonly', '');
+                area.style.position = 'fixed';
+                area.style.top = '0';
+                area.style.left = '-9999px';
+                document.body.appendChild(area);
+                area.select();
+                area.setSelectionRange(0, text.length);
+                var ok = false;
+                try {
+                    ok = document.execCommand('copy');
+                } catch (err) {
+                    ok = false;
+                }
+                document.body.removeChild(area);
+                return ok;
+            }
+
+            function copyText(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                    return navigator.clipboard.writeText(text).then(
+                        function () { return true; },
+                        function () { return fallbackCopy(text); }
+                    );
+                }
+                return Promise.resolve(fallbackCopy(text));
+            }
+
+            function showResult(button, ok) {
+                button.textContent = ok ? 'Copied' : 'Copy failed';
+                button.classList.toggle('copied', ok);
+                window.clearTimeout(button._resetTimer);
+                button._resetTimer = window.setTimeout(function () {
+                    button.textContent = 'Copy';
+                    button.classList.remove('copied');
+                }, 1500);
+            }
+
+            function wireCopyButtons() {
+                document.querySelectorAll('.api-block').forEach(function (block) {
+                    var button = block.querySelector('.copy-btn');
+                    var code = block.querySelector('pre code');
+                    if (!button || !code) return;
+                    button.addEventListener('click', function () {
+                        copyText(code.textContent).then(function (ok) {
+                            showResult(button, ok);
+                        });
+                    });
+                });
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                fillOrigin();
+                wireCopyButtons();
             });
-        });
+        })();
     </script>
 
     <!-- Mermaid initialization -->

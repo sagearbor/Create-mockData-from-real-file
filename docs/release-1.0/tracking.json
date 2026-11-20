@@ -164,6 +164,60 @@
    "id": "6260031544",
    "title": "DRAFT Mock Data Generator 1.0_VRRAF",
    "template": "4439736480"
+  },
+  "ts-parent": {
+   "id": "6259474575",
+   "title": "DRAFT Mock Data Generator 1.0 - TS-S-001 SDLC Package"
+  },
+  "ts-tsra": {
+   "id": "6259605636",
+   "title": "DRAFT Mock Data Generator 1.0_TSRA",
+   "template": "4771020831"
+  },
+  "ts-mvp": {
+   "id": "6259474596",
+   "title": "DRAFT Mock Data Generator 1.0_MVP",
+   "template": "4735205475"
+  },
+  "ts-rs": {
+   "id": "6258688139",
+   "title": "DRAFT Mock Data Generator 1.0_RS (TS-S-001)",
+   "template": "4735238296"
+  },
+  "ts-ds": {
+   "id": "6258327708",
+   "title": "DRAFT Mock Data Generator 1.0_DS",
+   "template": "4735303789"
+  },
+  "ts-crut": {
+   "id": "6259802202",
+   "title": "DRAFT Mock Data Generator 1.0_CR_UT",
+   "template": "4735238252"
+  },
+  "ts-iqp": {
+   "id": "6260031612",
+   "title": "DRAFT Mock Data Generator 1.0_IQP",
+   "template": "4735271088"
+  },
+  "ts-iqc": {
+   "id": "6258229424",
+   "title": "DRAFT Mock Data Generator 1.0_IQCV",
+   "template": "4735303813"
+  },
+  "ts-ptp": {
+   "id": "6259572837",
+   "title": "DRAFT Mock Data Generator 1.0_PTP",
+   "template": "4735238319"
+  },
+  "ts-pq": {
+   "id": "6259474615",
+   "title": "DRAFT Mock Data Generator 1.0_PQ_UAT",
+   "template": "4735238283"
+  },
+  "ts-ptr": {
+   "id": "6258589807",
+   "title": "DRAFT Mock Data Generator 1.0_PTR",
+   "template": "4735303823"
   }
  }
 }

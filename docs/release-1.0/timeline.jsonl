@@ -16,3 +16,4 @@
 {"ts":"2026-11-20T14:42:59-0500","event":"stop","slug":"sec-01","what":"Runner and routes committed"}
 {"ts":"2026-11-20T14:46:43-0500","event":"start","slug":"model-choice","what":"Model choice feature, cache keyed by model and privacy mode"}
 {"ts":"2026-11-20T14:54:22-0500","event":"stop","slug":"sdlc-docs","what":"Seven SDLC pages filled as drafts"}
+{"ts":"2026-11-20T15:07:16-0500","event":"stop","slug":"model-choice","what":"Model and privacy choice committed"}

@@ -4,7 +4,7 @@ Index of the release documents in Confluence (space ADP). Jira: ADP-45, epic ADP
 The URL paths below follow the address of the organisation's Confluence site, which is not written here because this repository is public.
 
 All seven pages are **Draft**: prepared by Claude Code for Sage Arbor on 20 Nov 2026, not reviewed, not
-approved, nothing released. Signature and approval blocks are empty. The risk level (Low) and the solution
+approved, nothing released. Signature and approval blocks are empty. The preliminary risk level (Medium: Impact Low, Complexity High; release request ADP-92) and the solution
 type (Integrations) are assumptions for the Release Advisory Board (RAB) to confirm.
 
 Until the open security items are closed and a person signs off, the tool must not be used with real study

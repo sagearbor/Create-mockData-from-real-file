@@ -121,6 +121,12 @@
    "id": "219605",
    "type": "Task",
    "summary": "(security ticket: see Jira)"
+  },
+  "release-request": {
+   "key": "ADP-92",
+   "id": "219632",
+   "type": "Change Request",
+   "summary": "Mock Data Generator 1.0: release request (first release)"
   }
  },
  "pages": {

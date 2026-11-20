@@ -236,9 +236,12 @@ def test_identifier_numeric_column_does_not_emit_exact_min_max(mode):
     assert stats["min_max_omitted"] is True
     assert "mean" in stats and "std" in stats
     _assert_absent([str(min(ids)), str(max(ids))], dumped, prompt, mode)
-    # Ordinary numeric columns keep their range.
-    assert metadata["statistics"]["age"]["min"] == 40.0
-    assert metadata["statistics"]["age"]["max"] == 79.0
+    # Ordinary numeric columns keep their range; strict mode widens and rounds it.
+    age = metadata["statistics"]["age"]
+    if mode == "strict":
+        assert (age["min"], age["max"], age["values_rounded"]) == (40.0, 80.0, True)
+    else:
+        assert (age["min"], age["max"]) == (40.0, 79.0)
 
 
 @pytest.mark.parametrize("name", [

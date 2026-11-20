@@ -20,6 +20,7 @@ let currentMetadata = null;
 let currentSyntheticData = null;
 let pendingDownloadData = null;
 let currentDictionary = null;
+let currentDictionaryId = null;  // id the server gave this upload; sent back so only this upload is used
 
 // DOM Elements
 const uploadArea = document.getElementById('uploadArea');
@@ -1394,6 +1395,7 @@ async function downloadDictionaryData() {
     showLoading(`Preparing download of ${fileCount} file${fileCount > 1 ? 's' : ''}...`);
     const formData = new FormData();
     formData.append('use_stored_dictionary', 'true');
+    if (currentDictionaryId) formData.append('dictionary_id', currentDictionaryId);
     formData.append('num_rows', numRows.value || '100');
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
@@ -1557,6 +1559,7 @@ async function processDictionaryFile(file) {
         }
 
         const data = await response.json();
+        currentDictionaryId = data.dictionary_id || null;
         if (data.status === 'choose_table') {
             showDictionaryTableChooser(data, file.name);
             return;
@@ -1629,6 +1632,7 @@ async function chooseDictionaryTable(table, fileName) {
     showLoading(`Loading table ${table}...`);
     const formData = new FormData();
     formData.append('table', table);
+    if (currentDictionaryId) formData.append('dictionary_id', currentDictionaryId);
     try {
         const response = await fetch(`${API_BASE}/dictionary/table`, {
             method: 'POST',
@@ -1638,6 +1642,7 @@ async function chooseDictionaryTable(table, fileName) {
             throw new Error(await responseErrorMessage(response));
         }
         const data = await response.json();
+        if (data.dictionary_id) currentDictionaryId = data.dictionary_id;
         showLoadedDictionary(data, fileName);
         showSuccess(`Table ${data.table || table} loaded`);
     } catch (error) {
@@ -1722,6 +1727,7 @@ async function generateFromDictionary() {
 
     const formData = new FormData();
     formData.append('use_stored_dictionary', 'true');
+    if (currentDictionaryId) formData.append('dictionary_id', currentDictionaryId);
     formData.append('num_rows', numRows.value || '100');
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
@@ -1762,6 +1768,7 @@ function showDictionaryOnlyMode() {
 
 function clearDataDictionary() {
     currentDictionary = null;
+    currentDictionaryId = null;
     pendingDictionaryTables = null;
 
     // Hide dictionary info and details

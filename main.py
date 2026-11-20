@@ -8,11 +8,12 @@ import json
 import io
 import time
 import secrets
+import threading
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,8 +41,9 @@ from src.utils.logger import logger
 
 # Initialize components
 data_loader = DataLoader()
-metadata_extractor = None  # Will be created with safety_mode per request
 cache_manager = CacheManager()
+# Used only for its stateless helpers (parsing, validation, prompt budget). Routes never
+# store an upload on it: one object is shared by every user of the process.
 data_dictionary = DataDictionary()
 # Rows of recent dictionary-only previews, so the download that follows sends the same rows.
 # Keyed by an unguessable id handed only to the browser that made the preview; a few
@@ -70,6 +72,217 @@ def _recall_preview(preview_id, num_rows):
     if not entry or time.time() - entry["at"] > _PREVIEW_KEEP_SECONDS or entry["num_rows"] != num_rows:
         return None
     return entry
+
+# Uploaded dictionaries, one entry per upload, keyed by an unguessable id returned only to
+# the client that uploaded it. A request can reach a dictionary only by sending its id, so
+# one user's upload is never read or used by another. A parsed catalog can be large, so at
+# most _DICTIONARY_KEEP_COUNT are kept (least recently used dropped first); an entry
+# expires 30 minutes after its last use.
+_dictionary_uploads: Dict[str, Dict[str, Any]] = {}
+_dictionary_uploads_lock = threading.Lock()
+_DICTIONARY_KEEP_SECONDS = _PREVIEW_KEEP_SECONDS
+_DICTIONARY_KEEP_COUNT = 10
+
+
+def _remember_dictionary(catalog, dictionary) -> str:
+    now = time.time()
+    with _dictionary_uploads_lock:
+        for key in [k for k, v in _dictionary_uploads.items() if now - v["at"] > _DICTIONARY_KEEP_SECONDS]:
+            _dictionary_uploads.pop(key, None)
+        while len(_dictionary_uploads) >= _DICTIONARY_KEEP_COUNT:
+            _dictionary_uploads.pop(min(_dictionary_uploads, key=lambda k: _dictionary_uploads[k]["at"]), None)
+        dictionary_id = secrets.token_urlsafe(24)
+        _dictionary_uploads[dictionary_id] = {"catalog": catalog, "dictionary": dictionary, "at": now}
+    return dictionary_id
+
+
+def _recall_dictionary(dictionary_id):
+    """The upload with this id, or None if absent, unknown or expired. A successful
+    recall restarts the 30 minutes, so a dictionary does not expire while in use."""
+    if not dictionary_id or not isinstance(dictionary_id, str):
+        return None
+    now = time.time()
+    with _dictionary_uploads_lock:
+        entry = _dictionary_uploads.get(dictionary_id)
+        if not entry:
+            return None
+        if now - entry["at"] > _DICTIONARY_KEEP_SECONDS:
+            _dictionary_uploads.pop(dictionary_id, None)
+            return None
+        entry["at"] = now
+        return entry
+
+
+# Limits for the form routes (/generate, /generate-sse, /generate-with-dictionary).
+MIN_NUM_ROWS, MAX_NUM_ROWS = 1, 100_000
+MIN_FILE_COUNT, MAX_FILE_COUNT = 1, 20
+# Client-supplied metadata (metadata_json). 1 MB is also the most the form parser
+# accepts for a text field (Starlette's max_part_size), so a larger cap would never apply.
+MAX_METADATA_JSON_BYTES = 1024 * 1024
+MAX_METADATA_COLUMNS = 2000
+MAX_COLUMN_NAME_CHARS = 200
+# Request body limit for every route outside /api/v1 (which has its own, see ApiV1Guard).
+MAX_UPLOAD_BYTES_ENV = "MOCKDATA_MAX_UPLOAD_BYTES"
+DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+BATCH_NOT_AVAILABLE = "Batch generation is not available in this release."
+
+
+def _check_generation_limits(num_rows: Optional[int], file_count: Optional[int]) -> None:
+    """400 when num_rows or file_count is outside the allowed range (None = not given)."""
+    if num_rows is not None and not MIN_NUM_ROWS <= num_rows <= MAX_NUM_ROWS:
+        raise HTTPException(status_code=400, detail=(
+            f"num_rows must be between {MIN_NUM_ROWS} and {MAX_NUM_ROWS} (got {num_rows})."))
+    if file_count is not None and not MIN_FILE_COUNT <= file_count <= MAX_FILE_COUNT:
+        raise HTTPException(status_code=400, detail=(
+            f"file_count must be between {MIN_FILE_COUNT} and {MAX_FILE_COUNT} (got {file_count})."))
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validated_client_metadata(raw: str) -> Dict[str, Any]:
+    """Parse and check a client-supplied ``metadata_json``; 400 if it is not usable.
+
+    The result is rebuilt from known keys only: ``generation_constraints`` (text that
+    would go into the AI prompt as instructions) and every other unknown top-level or
+    column key is dropped.
+    """
+    def bad(reason: str) -> HTTPException:
+        return HTTPException(status_code=400, detail=f"Invalid metadata_json: {reason}")
+
+    if len(raw.encode("utf-8", errors="replace")) > MAX_METADATA_JSON_BYTES:
+        raise bad(f"larger than the {MAX_METADATA_JSON_BYTES}-byte limit.")
+    try:
+        data = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise bad("not valid JSON.")
+    if not isinstance(data, dict):
+        raise bad("expected a JSON object.")
+
+    structure = data.get("structure")
+    if not isinstance(structure, dict):
+        raise bad("'structure' must be an object.")
+    columns = structure.get("columns")
+    if not isinstance(columns, list) or not columns:
+        raise bad("'structure.columns' must be a non-empty list.")
+    if len(columns) > MAX_METADATA_COLUMNS:
+        raise bad(f"more than {MAX_METADATA_COLUMNS} columns.")
+    clean_columns = []
+    for col in columns:
+        if not isinstance(col, dict):
+            raise bad("each entry of 'structure.columns' must be an object.")
+        name, dtype = col.get("name"), col.get("dtype")
+        if not isinstance(name, str) or not name or len(name) > MAX_COLUMN_NAME_CHARS:
+            raise bad(f"each column needs a 'name' of 1 to {MAX_COLUMN_NAME_CHARS} characters.")
+        if not isinstance(dtype, str) or not dtype or len(dtype) > MAX_COLUMN_NAME_CHARS:
+            raise bad(f"each column needs a 'dtype' of 1 to {MAX_COLUMN_NAME_CHARS} characters.")
+        clean = {"name": name, "dtype": dtype}
+        python_type = col.get("python_type")
+        if python_type is not None:
+            if not isinstance(python_type, str) or len(python_type) > MAX_COLUMN_NAME_CHARS:
+                raise bad(f"'python_type' must be text of at most {MAX_COLUMN_NAME_CHARS} characters.")
+            clean["python_type"] = python_type
+        if isinstance(col.get("nullable"), bool):
+            clean["nullable"] = col["nullable"]
+        for key in ("unique_count", "null_count"):
+            if _is_int(col.get(key)) and col[key] >= 0:
+                clean[key] = col[key]
+        clean_columns.append(clean)
+
+    shape = structure.get("shape")
+    if not isinstance(shape, dict):
+        raise bad("'structure.shape' must be an object.")
+    rows, column_count = shape.get("rows"), shape.get("columns")
+    if not _is_int(rows) or not MIN_NUM_ROWS <= rows <= MAX_NUM_ROWS:
+        raise bad(f"'structure.shape.rows' must be a whole number between {MIN_NUM_ROWS} and {MAX_NUM_ROWS}.")
+    if not _is_int(column_count) or not 1 <= column_count <= MAX_METADATA_COLUMNS:
+        raise bad(f"'structure.shape.columns' must be a whole number between 1 and {MAX_METADATA_COLUMNS}.")
+
+    statistics = data.get("statistics")
+    if not isinstance(statistics, dict) or not all(isinstance(v, dict) for v in statistics.values()):
+        raise bad("'statistics' must be an object of per-column objects.")
+
+    metadata = {
+        "structure": {"shape": {"rows": rows, "columns": column_count}, "columns": clean_columns},
+        "statistics": statistics,
+    }
+    for key in ("patterns", "correlations"):
+        if key in data and data[key] is not None:
+            if not isinstance(data[key], dict):
+                raise bad(f"'{key}' must be an object.")
+            metadata[key] = data[key]
+    return metadata
+
+
+def max_upload_bytes() -> int:
+    """Request body limit outside /api/v1, read per request so env changes apply."""
+    try:
+        value = int(os.environ.get(MAX_UPLOAD_BYTES_ENV, ""))
+    except ValueError:
+        return DEFAULT_MAX_UPLOAD_BYTES
+    return value if value > 0 else DEFAULT_MAX_UPLOAD_BYTES
+
+
+class RequestBodyLimit:
+    """Pure ASGI middleware: 413 for a request body over the limit, on every route
+    that ApiV1Guard does not cover.
+
+    Refuses on Content-Length when present; otherwise counts the bytes as the app
+    reads them (nothing is buffered here) and stops the read at the limit. Requests
+    without a body (health probes) and all responses, streamed ones included, pass
+    through untouched.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS")
+                or api_v1._is_v1(scope["path"])):
+            await self.app(scope, receive, send)
+            return
+
+        limit = max_upload_bytes()
+        too_large = JSONResponse(status_code=413, content={
+            "status": "error",
+            "error": f"Request body is larger than the {limit}-byte limit ({MAX_UPLOAD_BYTES_ENV}).",
+            "error_class": "RequestTooLarge"})
+        declared = dict(scope.get("headers") or []).get(b"content-length", b"")
+        if declared.isdigit() and int(declared) > limit:
+            await too_large(scope, receive, send)
+            return
+
+        total, over, started = 0, False, False
+
+        async def counting_receive():
+            nonlocal total, over
+            if over:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                total += len(message.get("body", b""))
+                if total > limit:
+                    over = True
+                    # End the app's read here; whatever it answers is replaced by the 413.
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def guarded_send(message):
+            nonlocal started
+            if over and not started:
+                return  # dropped: the 413 is sent below instead
+            started = True
+            await send(message)
+
+        try:
+            await self.app(scope, counting_receive, guarded_send)
+        except Exception:
+            if not (over and not started):
+                raise
+        if over and not started:
+            await too_large(scope, receive, send)
+
 
 # Initialize synthetic generator (OpenAI client will be added when API key is provided)
 synthetic_generator = None
@@ -152,6 +365,8 @@ app.add_middleware(_dcri_llm_middleware)
 # /api/v1 only: optional X-API-Key check and request size limit. Added before
 # CORS so CORS stays outermost and 401/413 answers still carry CORS headers.
 app.add_middleware(api_v1.ApiV1Guard)
+# Every other route: one request body size limit (MOCKDATA_MAX_UPLOAD_BYTES).
+app.add_middleware(RequestBodyLimit)
 
 app.add_middleware(
     CORSMiddleware,
@@ -214,7 +429,7 @@ def _read_dictionary_upload(upload: UploadFile) -> bytes:
 
 
 def _dictionary_loaded_response(filename: Optional[str], catalog, table_name: str,
-                                dictionary: Dict[str, Any]) -> Dict[str, Any]:
+                                dictionary: Dict[str, Any], dictionary_id: str) -> Dict[str, Any]:
     """Success body for a loaded dictionary (one table)."""
     try:
         _, budget = data_dictionary.fit_to_prompt_budget(dictionary)
@@ -224,6 +439,7 @@ def _dictionary_loaded_response(filename: Optional[str], catalog, table_name: st
     return {
         "status": "success",
         "filename": filename,
+        "dictionary_id": dictionary_id,
         "columns_defined": len(dictionary.get("columns", {})),
         "dictionary": dictionary,
         "dictionary_format": catalog.shape,
@@ -625,6 +841,8 @@ def generate_synthetic_data(
     synchronous LLM call never blocks the event loop (or /health).
     """
     try:
+        _check_generation_limits(num_rows, file_count)
+
         # Track overall timing
         all_timings = {}
         request_start = time.time()
@@ -643,7 +861,8 @@ def generate_synthetic_data(
             df = data_loader.load_from_bytes(content, file.filename)
             metadata = extractor.extract(df)
         elif metadata_json:
-            metadata = json.loads(metadata_json)
+            # Client-supplied: checked and rebuilt from known keys, never used verbatim.
+            metadata = _validated_client_metadata(metadata_json)
         else:
             raise HTTPException(status_code=400, detail="Either file or metadata_json must be provided")
 
@@ -886,12 +1105,20 @@ async def generate_with_sse(
     import asyncio
     from typing import AsyncGenerator
 
+    # Refused before the stream starts, so the client gets a real 400.
+    _check_generation_limits(num_rows, file_count)
+
     # Read file content before the generator to avoid closed file issues
     file_content = None
     file_name = None
     if file:
         file_content = await file.read()
         file_name = file.filename
+
+    # Client-supplied metadata is checked (never used verbatim) when it is the source.
+    client_metadata = None
+    if not edited_data and not file_content and metadata_json:
+        client_metadata = _validated_client_metadata(metadata_json)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -913,8 +1140,8 @@ async def generate_with_sse(
             elif file_content:
                 df = data_loader.load_from_bytes(file_content, file_name)
                 metadata = extractor.extract(df)
-            elif metadata_json:
-                metadata = json.loads(metadata_json)
+            elif client_metadata is not None:
+                metadata = client_metadata
             else:
                 yield f"data: {json.dumps({'error': 'No data provided'})}\n\n"
                 return
@@ -1080,6 +1307,9 @@ def upload_data_dictionary(
             resource name in a Bundle). Without it such a file answers
             ``status: "choose_table"`` with the table names; pick one with
             ``POST /dictionary/table`` (no re-upload needed).
+
+    The response carries ``dictionary_id``: send it with later requests to use this
+    upload. Without the id no other request can read or use it.
     """
     try:
         content = _read_dictionary_upload(file)
@@ -1088,11 +1318,12 @@ def upload_data_dictionary(
         catalog = data_dictionary.load_catalog(content, format or "auto", filename=file.filename or "")
 
         if catalog.is_multi_table and not (table or "").strip():
-            data_dictionary.catalog = catalog
-            data_dictionary.dictionary = {}  # nothing usable until a table is chosen
+            # Kept under its own id; nothing usable until a table is chosen
+            dictionary_id = _remember_dictionary(catalog, {})
             return JSONResponse(content={
                 "status": "choose_table",
                 "filename": file.filename,
+                "dictionary_id": dictionary_id,
                 "dictionary_format": catalog.shape,
                 "table_count": len(catalog.names),
                 "tables": catalog.names,
@@ -1102,13 +1333,12 @@ def upload_data_dictionary(
 
         table_name, parsed_dict = catalog.select(table)
 
-        # Store it for later use
-        data_dictionary.catalog = catalog
-        data_dictionary.dictionary = parsed_dict
+        # Keep it for this client's later requests (they send the id back)
+        dictionary_id = _remember_dictionary(catalog, parsed_dict)
 
         # Return parsed structure
         return JSONResponse(content=_dictionary_loaded_response(
-            file.filename, catalog, table_name, parsed_dict))
+            file.filename, catalog, table_name, parsed_dict, dictionary_id))
 
     except DictionaryError:
         raise
@@ -1117,29 +1347,37 @@ def upload_data_dictionary(
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/dictionary/table")
-def select_dictionary_table(table: str = Form(...)):
-    """Choose one table of the last uploaded multi-table dictionary (no re-upload)."""
-    catalog = data_dictionary.catalog
-    if catalog is None:
+def select_dictionary_table(table: str = Form(...), dictionary_id: Optional[str] = Form(None)):
+    """Choose one table of an uploaded multi-table dictionary (no re-upload).
+
+    ``dictionary_id`` is the id ``/dictionary/upload`` returned; absent, unknown or
+    expired answers the same 400 as when nothing has been uploaded.
+    """
+    entry = _recall_dictionary(dictionary_id)
+    if entry is None:
         raise NoDictionaryLoaded("No data dictionary has been uploaded yet; upload one first.")
+    catalog = entry["catalog"]
     table_name, parsed_dict = catalog.select(table)
-    data_dictionary.dictionary = parsed_dict
-    return JSONResponse(content=_dictionary_loaded_response(None, catalog, table_name, parsed_dict))
+    entry["dictionary"] = parsed_dict
+    return JSONResponse(content=_dictionary_loaded_response(
+        None, catalog, table_name, parsed_dict, dictionary_id))
 
 @app.post("/dictionary/validate")
 async def validate_with_dictionary(
     data_file: UploadFile = File(...),
     dictionary_file: Optional[UploadFile] = File(None),
     use_stored: bool = Form(True),
-    table: Optional[str] = Form(None)
+    table: Optional[str] = Form(None),
+    dictionary_id: Optional[str] = Form(None)
 ):
     """
     Validate data against a data dictionary.
 
     Args:
         data_file: Data file to validate
-        dictionary_file: Optional dictionary file (uses stored if not provided)
-        use_stored: Whether to use stored dictionary
+        dictionary_file: Optional dictionary file (used for this request only)
+        use_stored: Accepted for compatibility, no effect (an upload is used only by id)
+        dictionary_id: Id returned by /dictionary/upload, used when no file is sent
     """
     try:
         # Load the data
@@ -1151,10 +1389,14 @@ async def validate_with_dictionary(
             dict_content = _read_dictionary_upload(dictionary_file)
             dictionary = data_dictionary.parse_dictionary(
                 dict_content, filename=dictionary_file.filename or "", table=table)
-        elif use_stored and data_dictionary.dictionary:
-            dictionary = data_dictionary.dictionary
         else:
-            raise HTTPException(status_code=400, detail="No data dictionary provided or stored")
+            entry = _recall_dictionary(dictionary_id)
+            if entry is not None and (table or "").strip():
+                _, dictionary = entry["catalog"].select(table)
+            elif entry is not None and entry["dictionary"]:
+                dictionary = entry["dictionary"]
+            else:
+                raise HTTPException(status_code=400, detail="No data dictionary provided or stored")
 
         # Validate
         errors = data_dictionary.validate_data(df, dictionary)
@@ -1184,9 +1426,13 @@ def generate_with_dictionary(
     file_count: int = Form(1),
     preview_only: bool = Form(False),
     table: Optional[str] = Form(None),
-    preview_id: Optional[str] = Form(None)
+    preview_id: Optional[str] = Form(None),
+    dictionary_id: Optional[str] = Form(None),
+    safety_mode: str = Form("balanced")
 ):
     """
+    ``dictionary_id``: the id /dictionary/upload (or a preview made with an inline
+    ``dictionary_file``) returned; it is the only way to use an uploaded dictionary.
     ``preview_id``: the id a preview response returned. A download that sends it gets the
     rows that preview showed instead of a newly generated set (falls back to generating
     if the id is unknown or has expired).
@@ -1199,32 +1445,36 @@ def generate_with_dictionary(
     Args:
         dictionary_file: Optional dictionary file
         data_file: Optional data file for statistical reference
-        use_stored_dictionary: Use previously uploaded dictionary
+        use_stored_dictionary: Accepted for compatibility, no effect (an upload is used only by id)
         num_rows: Number of rows to generate
         output_format: Output format
         file_count: Number of files to generate
         preview_only: Return preview instead of download
         table: Which table to use when the dictionary defines several
+        safety_mode: Privacy level used when reading ``data_file``
     """
     try:
-        # Get dictionary
-        stored_catalog = data_dictionary.catalog
+        _check_generation_limits(num_rows, file_count)
+
+        # Get dictionary: an inline file (this request only) or this client's own upload
         if dictionary_file:
             dict_content = _read_dictionary_upload(dictionary_file)
             catalog = data_dictionary.load_catalog(
                 dict_content, filename=dictionary_file.filename or "")
             _, dictionary = catalog.select(table)  # several tables, no choice: 400 with names
-            data_dictionary.catalog = catalog
-            data_dictionary.dictionary = dictionary
-        elif use_stored_dictionary and table and stored_catalog is not None:
-            _, dictionary = stored_catalog.select(table)
-            data_dictionary.dictionary = dictionary
-        elif use_stored_dictionary and data_dictionary.dictionary:
-            dictionary = data_dictionary.dictionary
-        elif use_stored_dictionary and stored_catalog is not None and stored_catalog.is_multi_table:
-            stored_catalog.select(None)  # raises DictionaryTableRequired listing the tables
+            # Kept only when the id can be handed back (a preview), for the download that follows
+            dictionary_id = _remember_dictionary(catalog, dictionary) if preview_only else None
         else:
-            raise HTTPException(status_code=400, detail="No data dictionary provided")
+            entry = _recall_dictionary(dictionary_id)
+            if entry is None:
+                raise HTTPException(status_code=400, detail="No data dictionary provided")
+            if (table or "").strip():
+                _, dictionary = entry["catalog"].select(table)
+                entry["dictionary"] = dictionary
+            elif entry["dictionary"]:
+                dictionary = entry["dictionary"]
+            else:
+                _, dictionary = entry["catalog"].select(None)  # several tables: 400 with names
 
         # Only a bounded copy of the dictionary goes into the prompt.
         dictionary, dictionary_trimming = data_dictionary.fit_to_prompt_budget(dictionary)
@@ -1242,8 +1492,7 @@ def generate_with_dictionary(
         if data_file:
             data_content = data_file.file.read()
             df = data_loader.load_from_bytes(data_content, data_file.filename)
-            base_metadata = metadata_extractor.extract(df)
-            metadata = base_metadata
+            metadata = MetadataExtractor(safety_mode=safety_mode).extract(df)
 
         # Apply dictionary constraints to metadata
         metadata = data_dictionary.apply_to_metadata(metadata, dictionary)
@@ -1280,6 +1529,7 @@ def generate_with_dictionary(
                 "dictionary_applied": True,
                 "dictionary_trimming": dictionary_trimming,
                 "preview_id": new_preview_id,
+                "dictionary_id": dictionary_id,
                 "generation_info": generation_info
             })
 
@@ -1368,88 +1618,15 @@ def generate_with_dictionary(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate/batch")
-async def generate_batch(
-    files: list[UploadFile] = File(...),
-    match_threshold: float = Form(0.8),
-    background_tasks: BackgroundTasks = BackgroundTasks()
-):
-    """
-    Generate synthetic data for multiple files in batch.
-    
-    Args:
-        files: List of uploaded files
-        match_threshold: Statistical matching threshold
-        background_tasks: FastAPI background tasks
-    """
-    batch_id = f"batch_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    # Process files in background
-    background_tasks.add_task(process_batch, files, match_threshold, batch_id)
-    
-    return JSONResponse(content={
-        "status": "processing",
-        "batch_id": batch_id,
-        "file_count": len(files),
-        "message": f"Batch processing started. Check status at /batch/{batch_id}"
-    })
+async def generate_batch():
+    """Batch generation is not part of this release: always 501, nothing is read or written."""
+    raise HTTPException(status_code=501, detail=BATCH_NOT_AVAILABLE)
 
-def process_batch(files, match_threshold, batch_id):
-    """Process batch generation in background (sync: Starlette runs it in the threadpool)."""
-    results = []
-    
-    for file in files:
-        try:
-            content = file.file.read()
-            df = data_loader.load_from_bytes(content, file.filename)
-            metadata = metadata_extractor.extract(df)
-            
-            synthetic_df, _ = synthetic_generator.generate(
-                metadata=metadata,
-                match_threshold=match_threshold
-            )
-            
-            # Save result
-            output_path = Path(settings.local_storage_path) / batch_id / f"{file.filename}_synthetic.csv"
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            synthetic_df.to_csv(output_path, index=False)
-            
-            results.append({
-                "filename": file.filename,
-                "status": "success",
-                "output_path": str(output_path)
-            })
-            
-        except Exception as e:
-            results.append({
-                "filename": file.filename,
-                "status": "error",
-                "error": str(e)
-            })
-    
-    # Save batch results
-    results_path = Path(settings.local_storage_path) / batch_id / "results.json"
-    with open(results_path, 'w') as f:
-        json.dump(results, f, indent=2)
 
 @app.get("/batch/{batch_id}")
 async def get_batch_status(batch_id: str):
-    """Get status of batch processing."""
-    results_path = Path(settings.local_storage_path) / batch_id / "results.json"
-    
-    if not results_path.exists():
-        return JSONResponse(content={
-            "status": "processing",
-            "batch_id": batch_id
-        })
-    
-    with open(results_path, 'r') as f:
-        results = json.load(f)
-    
-    return JSONResponse(content={
-        "status": "completed",
-        "batch_id": batch_id,
-        "results": results
-    })
+    """Batch generation is not part of this release: always 501, nothing is read."""
+    raise HTTPException(status_code=501, detail=BATCH_NOT_AVAILABLE)
 
 @app.delete("/cache")
 async def clear_cache(older_than_days: Optional[int] = None):

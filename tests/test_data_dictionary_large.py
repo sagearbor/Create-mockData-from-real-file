@@ -426,6 +426,7 @@ def _isolated(monkeypatch, tmp_path):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(SyntheticDataGenerator, "_reasoning_effort_rejected", False)
     monkeypatch.setattr(main, "data_dictionary", DataDictionary())
+    monkeypatch.setattr(main, "_dictionary_uploads", {})
 
 
 @pytest.fixture
@@ -470,7 +471,7 @@ def test_dict_route_upload_unrecognised_is_400_uniform_shape():
     body = _assert_uniform_error(resp, 400, "UnrecognizedDictionary")
     assert "does not look like a data dictionary" in body["error"]
     assert "columns_defined" not in resp.text
-    assert main.data_dictionary.dictionary == {}
+    assert main._dictionary_uploads == {}  # a refused upload is not kept
 
 
 def test_dict_route_upload_bundle_asks_for_table_then_select():
@@ -481,22 +482,27 @@ def test_dict_route_upload_bundle_asks_for_table_then_select():
     assert body["tables"] == ["Gadget", "Widget"]
     assert body["dictionary_format"] == "fhir_bundle"
     assert "columns_defined" not in body
-    assert main.data_dictionary.dictionary == {}  # nothing chosen yet, nothing stored
+    dictionary_id = body["dictionary_id"]
+    assert main._dictionary_uploads[dictionary_id]["dictionary"] == {}  # nothing chosen yet
 
-    chosen = _post("/dictionary/table", data={"table": "gadget"})
+    chosen = _post("/dictionary/table", data={"table": "gadget", "dictionary_id": dictionary_id})
     assert chosen.status_code == 200, chosen.text
     out = chosen.json()
     assert out["status"] == "success" and out["table"] == "Gadget"
     assert out["columns_defined"] == len(GADGET_COLUMNS)
     assert list(out["dictionary"]["columns"]) == GADGET_COLUMNS
     assert out["prompt_budget"]["trimmed"] is False
-    assert list(main.data_dictionary.dictionary["columns"]) == GADGET_COLUMNS
+    assert out["dictionary_id"] == dictionary_id
+    assert list(main._dictionary_uploads[dictionary_id]["dictionary"]["columns"]) == GADGET_COLUMNS
+    # the shared helper object never holds an upload
+    assert main.data_dictionary.dictionary == {} and main.data_dictionary.catalog is None
 
 
 def test_dict_route_select_unknown_table_is_400_uniform_shape():
-    _post("/dictionary/upload", files=_json_file(BUNDLE))
-    body = _assert_uniform_error(_post("/dictionary/table", data={"table": "Nope"}),
-                                 400, "UnknownDictionaryTable")
+    dictionary_id = _post("/dictionary/upload", files=_json_file(BUNDLE)).json()["dictionary_id"]
+    body = _assert_uniform_error(
+        _post("/dictionary/table", data={"table": "Nope", "dictionary_id": dictionary_id}),
+        400, "UnknownDictionaryTable")
     assert "Gadget" in body["error"]
 
 
@@ -571,7 +577,8 @@ def test_dict_route_generate_stays_under_budget_and_reports_trim(monkeypatch, ll
     for prompt in _user_prompts(llm):
         assert len(prompt) <= 20000 + template_chars
     # the stored dictionary is the full one; only the copy sent to the model is trimmed
-    assert len(main.data_dictionary.dictionary["columns"]) == 3000
+    stored = main._dictionary_uploads[resp.json()["dictionary_id"]]["dictionary"]
+    assert len(stored["columns"]) == 3000
 
 
 def test_dict_route_generate_existing_shape_still_works(llm):
@@ -671,6 +678,8 @@ def test_dict_route_download_after_preview_sends_the_previewed_rows(monkeypatch,
     prev = _post("/generate-with-dictionary", data={**common, "preview_only": "true"}, files=_dict_file(BUNDLE))
     assert prev.status_code == 200, prev.text
     assert prev.json()["total_rows"] == total and len(prev.json()["preview"]) == main.PREVIEW_ROWS
+    # the download sends no file: it names the previewed dictionary by its id
+    common["dictionary_id"] = prev.json()["dictionary_id"]
     down = _post("/generate-with-dictionary",
                  data={**common, "preview_only": "false", "preview_id": prev.json()["preview_id"]})
     assert down.status_code == 200, down.text

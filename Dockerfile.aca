@@ -1,12 +1,16 @@
-FROM python:3.11-slim
+# Base image pinned by multi-arch index digest (3.11.18-slim-trixie, 2026-11-05). Refresh: docker buildx imagetools inspect python:3.11-slim  -> copy the top-level "Digest:".
+FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
 WORKDIR /app
-COPY requirements-aca.txt .
-RUN pip install --no-cache-dir -r requirements-aca.txt
+COPY requirements-aca.txt constraints-aca.txt ./
+# -c pins every indirect package to the versions that were tested (see constraints-aca.txt).
+RUN pip install --no-cache-dir -r requirements-aca.txt -c constraints-aca.txt
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 COPY main.py ./
 COPY src ./src
 COPY a2a_runtime ./a2a_runtime
-RUN mkdir -p data/cache data/local_storage logs && chown -R appuser:appuser /app
+# The application's own code stays owned by root: the service (and any script it runs)
+# can write only to its data and log folders.
+RUN mkdir -p data/cache data/local_storage logs && chown -R appuser:appuser data logs
 ENV ENVIRONMENT=production PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER appuser
 EXPOSE 8201

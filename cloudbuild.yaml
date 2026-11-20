@@ -1,3 +1,6 @@
+# REFERENCE ONLY — not the approved deployment route for this service. The
+# approved deployment is the organisation's guarded Container Apps procedure.
+#
 # cloudbuild.yaml — Google Cloud Build configuration for the Cloud Run image.
 #
 # Usage:

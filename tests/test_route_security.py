@@ -575,3 +575,60 @@ def test_batch_routes_answer_501_and_write_nothing(monkeypatch, gen, tmp_path):
     assert not storage.exists()
     assert list(tmp_path.rglob("*.csv")) == [] and list(tmp_path.rglob("results.json")) == []
     assert not hasattr(main, "process_batch")
+
+
+# --------------------------------------------------------------------------- #
+# Privacy mode: only the three modes, lower-cased; the page can choose it
+# --------------------------------------------------------------------------- #
+def test_privacy_mode_is_checked_and_normalised():
+    import pytest
+    from fastapi import HTTPException
+
+    assert main._privacy_mode_or_400("Strict ") == "strict"
+    assert main._privacy_mode_or_400(None) == "balanced"
+    with pytest.raises(HTTPException) as exc:
+        main._privacy_mode_or_400("open")
+    assert exc.value.status_code == 400 and "strict, balanced, permissive" in exc.value.detail
+
+
+def test_extractor_treats_an_unknown_mode_as_strict():
+    from src.core.metadata_extractor import MetadataExtractor
+
+    assert MetadataExtractor(safety_mode="STRICT").safety_mode == "strict"
+    assert MetadataExtractor(safety_mode="anything-else").safety_mode == "strict"
+    assert MetadataExtractor(safety_mode="permissive").safety_mode == "permissive"
+
+
+def test_page_offers_the_privacy_mode_and_sends_it():
+    from pathlib import Path
+
+    web = Path(main.__file__).parent / "src" / "web"
+    html = (web / "index.html").read_text()
+    js = (web / "static" / "js" / "app.js").read_text()
+    assert 'id="privacyMode"' in html
+    for value in ("strict", "balanced", "permissive"):
+        assert f'<option value="{value}"' in html
+    assert "formData.append('safety_mode', previewPrivacy)" in js
+    assert "Data never leaves your browser" not in html and "Safe to upload" not in html
+
+
+def test_cache_mode_off_tells_the_generator_not_to_use_the_cache(monkeypatch):
+    """Cache "Off" on the page: nothing is read from or written to the cache."""
+    import pandas as pd
+    from types import SimpleNamespace
+
+    seen = []
+
+    def generate(**kwargs):
+        seen.append(kwargs.get("use_cached"))
+        return pd.DataFrame({"a": [1, 2]}), {"method": "llm"}
+
+    monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(
+        generate=generate, _log_usage=lambda *a, **k: None, openai_client=object()))
+    files = {"file": ("d.csv", b"a\n1\n2\n", "text/csv")}
+    for mode, expected in (("off", False), ("structure_stats", True)):
+        seen.clear()
+        resp = _post("/generate", data={"output_format": "csv", "preview_only": "false",
+                                        "cache_mode": mode, "use_cache": "true"}, files=files)
+        assert resp.status_code == 200, resp.text
+        assert seen == [expected], (mode, seen)

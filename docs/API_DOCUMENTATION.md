@@ -43,6 +43,10 @@ curl -s "http://localhost:8201/api/v1/version"
 - `match_threshold` (float, optional): statistical matching threshold, 0-1 (default: 0.8)
 - `safety_mode` (string, optional): "strict", "balanced" or "permissive" (default: "balanced")
 - `use_cache` (boolean, optional): reuse a cached generation script (default: true)
+- `model` (string, optional): the AI model (deployment name) that writes the generation
+  code. It must be one of the names from `GET /api/models`; any other name is refused
+  with `400` `ModelNotAllowed` before anything is generated. Omit it (or send `null` or
+  `""`) for the server default.
 
 Unknown field names are rejected with `422`, so a typo is not silently ignored.
 
@@ -75,9 +79,13 @@ Leave the `X-API-Key` line out when the server has no key set.
   ],
   "shape": [3, 3],
   "columns": ["widget_id", "colour", "weight_g"],
-  "generation_info": {"method": "llm", "num_rows": 3}
+  "generation_info": {"method": "llm", "model": "gpt-5-nano", "num_rows": 3}
 }
 ```
+
+`generation_info.model` is the model that wrote the generation code. When
+`method` is `"cached"` it is the model that wrote the cached script, which is always
+the model the request asked for (see "Choosing the AI model").
 
 Generation calls an AI model and can take a minute or more: set the client timeout
 to several minutes.
@@ -99,6 +107,7 @@ Every failure on `/api/v1` has the same JSON shape:
 | Status | `error_class` | Meaning |
 |--------|---------------|---------|
 | `400` | `GenerationError` | The source data could not be read or used |
+| `400` | `ModelNotAllowed` | `model` is not on the server's list (`GET /api/models`); the message names the allowed models |
 | `401` | `InvalidApiKey` | `X-API-Key` missing or wrong (only when the server has a key set) |
 | `404` / `405` | `HTTPException` | No such `/api/v1` route, or wrong method |
 | `413` | `RequestTooLarge` | Body larger than the size limit |
@@ -114,6 +123,48 @@ curl -s -X POST "http://localhost:8201/api/v1/generate" -H "Content-Type: applic
 ```json
 {"status": "error", "error": "Invalid request: body: Value error, provide exactly one of csv_text or data_content", "error_class": "RequestValidationError"}
 ```
+
+## Choosing the AI model
+
+**Endpoint:** `GET /api/models`
+
+```bash
+curl -s "http://localhost:8201/api/models"
+```
+
+```json
+{
+  "default": "gpt-5-nano",
+  "models": [
+    {"name": "gpt-5-nano", "label": "gpt-5-nano", "note": "default"},
+    {"name": "gpt-5.4-nano", "label": "gpt-5.4-nano", "note": ""},
+    {"name": "gpt-5.4-mini", "label": "gpt-5.4-mini", "note": ""},
+    {"name": "gpt-5.5", "label": "gpt-5.5", "note": ""},
+    {"name": "gpt-5.6-luna", "label": "gpt-5.6-luna", "note": ""},
+    {"name": "gpt-5.6-terra", "label": "gpt-5.6-terra", "note": ""},
+    {"name": "gpt-5.6-sol", "label": "gpt-5.6-sol", "note": ""}
+  ]
+}
+```
+
+- The list holds only the models this server allows. `default` is the server's
+  configured deployment (`AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`); it is always allowed and
+  listed first.
+- The rest of the list comes from the environment variable `LLM_ALLOWED_MODELS`
+  (comma-separated deployment names). When it is unset the list above is used: each of
+  those seven names made one real generation through this app on 2026-11-20
+  (`docs/release-1.0/model-probe-2026-11-20.txt`). The list says which models can be
+  used, not which is better.
+- Every generation request takes an optional `model`: the form field `model` on
+  `/generate`, `/generate-sse` and `/generate-with-dictionary`, the JSON field `model` on
+  `/api/v1/generate`, and the `model` argument of the MCP tool and the A2A `generate`
+  operation. Empty or absent means the server default. Any name not on the list is
+  refused before anything is generated: `400` on the HTTP routes, an error result
+  (`error_class` `ModelNotAllowed`) from MCP and A2A.
+- The response says which model was used: `generation_info.model` in JSON responses,
+  and the header `X-Generation-Model` on file downloads.
+- A cached generation script is reused only for a request with the same model, the
+  same privacy level (`safety_mode`) and the same row count.
 
 ## Endpoints
 
@@ -241,6 +292,8 @@ Generate synthetic data based on uploaded file or metadata.
 - `output_format` (string, optional): Output format - "csv", "json", or "excel" (default: "csv")
 - `use_cache` (boolean, optional): Use cached generation scripts (default: true)
 - `safety_mode` (string, optional): Privacy level for categorical data - "strict", "balanced", or "permissive" (default: "balanced")
+- `model` (string, optional): AI model that writes the generation code, a name from
+  `GET /api/models` (default: the server default; any other name: `400`)
 
 **Request:**
 ```bash
@@ -318,7 +371,9 @@ curl -X DELETE "http://localhost:8201/cache?older_than_days=7"
 `POST /dictionary/upload` (form: `file`, optional `format`, optional `table`),
 `POST /dictionary/table` (form: `table`, `dictionary_id`), `POST /dictionary/validate` and
 `POST /generate-with-dictionary` (both take an optional `table` and `dictionary_id`;
-`/generate-with-dictionary` also takes `safety_mode` for an optional `data_file`).
+`/generate-with-dictionary` also takes `safety_mode` for an optional `data_file`, and
+`model`, see "Choosing the AI model"). A download that sends a `preview_id` gets that
+preview's rows only if it also sends the same `model` and `num_rows` as the preview.
 
 An uploaded dictionary belongs to the upload, not to the server: `/dictionary/upload`
 answers with a `dictionary_id` (in both the loaded and the `choose_table` response), and

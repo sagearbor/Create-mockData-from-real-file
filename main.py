@@ -27,7 +27,8 @@ from datetime import datetime
 from src.core.data_loader import DataLoader
 from src.core.metadata_extractor import MetadataExtractor
 from src.core.synthetic_generator import SyntheticDataGenerator, AIGenerationError, CodeExecutionError
-from src.core.cache_manager import CacheManager
+from src.core.cache_manager import CacheManager, cache_variant
+from src.core.models import ModelNotAllowed, model_catalog, resolve_model
 from src.core.data_dictionary import (
     DataDictionary,
     DictionaryError,
@@ -41,7 +42,9 @@ from src.utils.logger import logger
 
 # Initialize components
 data_loader = DataLoader()
-cache_manager = CacheManager()
+# A second object on the generator's cache folder, with its own index copy read at
+# start-up: it never writes that copy back (persist_removals=False).
+cache_manager = CacheManager(persist_removals=False)
 # Used only for its stateless helpers (parsing, validation, prompt budget). Routes never
 # store an upload on it: one object is shared by every user of the process.
 data_dictionary = DataDictionary()
@@ -56,20 +59,25 @@ _PREVIEW_KEEP_SECONDS = 1800
 _PREVIEW_KEEP_COUNT = 20
 
 
-def _remember_preview(df, info, num_rows) -> str:
+def _remember_preview(df, info, num_rows, model=None) -> str:
     now = time.time()
     for key in [k for k, v in _dictionary_previews.items() if now - v["at"] > _PREVIEW_KEEP_SECONDS]:
         _dictionary_previews.pop(key, None)
     while len(_dictionary_previews) >= _PREVIEW_KEEP_COUNT:
         _dictionary_previews.pop(min(_dictionary_previews, key=lambda k: _dictionary_previews[k]["at"]), None)
     preview_id = secrets.token_urlsafe(24)
-    _dictionary_previews[preview_id] = {"df": df, "info": info, "num_rows": num_rows, "at": now}
+    _dictionary_previews[preview_id] = {"df": df, "info": info, "num_rows": num_rows,
+                                        "model": model, "at": now}
     return preview_id
 
 
-def _recall_preview(preview_id, num_rows):
+def _recall_preview(preview_id, num_rows, model=None):
+    """The remembered preview, unless it is unknown, expired, or was made for another
+    row count or another model than this request asks for."""
     entry = _dictionary_previews.get(preview_id or "")
     if not entry or time.time() - entry["at"] > _PREVIEW_KEEP_SECONDS or entry["num_rows"] != num_rows:
+        return None
+    if entry.get("model") != model:
         return None
     return entry
 
@@ -137,6 +145,36 @@ def _check_generation_limits(num_rows: Optional[int], file_count: Optional[int])
             f"file_count must be between {MIN_FILE_COUNT} and {MAX_FILE_COUNT} (got {file_count})."))
 
 
+PRIVACY_MODES = ("strict", "balanced", "permissive")
+
+
+def _privacy_mode_or_400(safety_mode: Optional[str]) -> str:
+    """The privacy mode for this request, lower-cased; 400 for anything but the three modes."""
+    mode = (safety_mode or "balanced").strip().lower()
+    if mode not in PRIVACY_MODES:
+        raise HTTPException(status_code=400, detail=(
+            f"safety_mode must be one of {', '.join(PRIVACY_MODES)} (got {safety_mode!r})."))
+    return mode
+
+
+def _resolve_model_or_400(model: Optional[str]) -> str:
+    """The model for this request (empty/absent = server default); 400 naming the
+    allowed models for any other name. Called before any generation or model call."""
+    try:
+        return resolve_model(model)
+    except ModelNotAllowed as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _find_cached(metadata: Dict[str, Any], match_threshold: float, num_rows: Optional[int], model: str):
+    """This module's cache lookup: only a script written by the same model, from a
+    description in the same privacy mode, for the same row count (see cache_variant)."""
+    return cache_manager.find_similar_cached(
+        metadata, match_threshold,
+        num_rows=num_rows or metadata["structure"]["shape"]["rows"],
+        variant=cache_variant(metadata, model))
+
+
 def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -146,7 +184,9 @@ def _validated_client_metadata(raw: str) -> Dict[str, Any]:
 
     The result is rebuilt from known keys only: ``generation_constraints`` (text that
     would go into the AI prompt as instructions) and every other unknown top-level or
-    column key is dropped.
+    column key is dropped. That includes ``privacy_mode``: a client cannot claim one, so
+    its metadata gets the fixed "client" cache variant and never shares cached scripts
+    with descriptions this server extracted.
     """
     def bad(reason: str) -> HTTPException:
         return HTTPException(status_code=400, detail=f"Invalid metadata_json: {reason}")
@@ -352,7 +392,7 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI app with lifespan
 app = FastAPI(
     title="BYOD Synthetic Data Generator",
-    description="Generate privacy-safe synthetic data that preserves statistical properties",
+    description="Generate made-up data with the same structure and similar statistics as an uploaded file",
     version=APP_VERSION,
     lifespan=lifespan
 )
@@ -402,6 +442,9 @@ def _download_headers(filename: str, generation_info: Optional[Dict[str, Any]]) 
     method = (generation_info or {}).get("method")
     if method:
         headers["X-Generation-Method"] = str(method)
+    model = (generation_info or {}).get("model")
+    if model:
+        headers["X-Generation-Model"] = str(model)
     trimming = (generation_info or {}).get("dictionary_trimming") or {}
     if trimming.get("trimmed"):
         headers["X-Dictionary-Trimmed"] = (
@@ -570,6 +613,12 @@ async def readiness_check():
     ai = _ai_status()
     return JSONResponse(status_code=200 if ai["ai_ready"] else 503,
                         content={"status": "ready" if ai["ai_ready"] else "not_ready", **ai})
+
+@app.get("/api/models")
+async def list_models():
+    """AI models a generation request may choose: the server default and the allow-list."""
+    return model_catalog()
+
 
 @app.get("/api/cache-info")
 async def get_cache_info():
@@ -822,7 +871,8 @@ def generate_synthetic_data(
     cache_mode: str = Form("structure_stats"),  # off, structure, structure_stats
     file_count: int = Form(1),
     preview_only: bool = Form(False),
-    safety_mode: str = Form("balanced")
+    safety_mode: str = Form("balanced"),
+    model: Optional[str] = Form(None)
 ):
     """
     Generate synthetic data based on uploaded file or metadata.
@@ -836,19 +886,22 @@ def generate_synthetic_data(
         use_cache: Whether to use cached generation scripts
         file_count: Number of files to generate
         preview_only: If True, return preview data instead of file download
+        model: AI model to write the generation code (a name from GET /api/models;
+            empty = server default; any other name is refused with 400)
 
     Plain ``def`` on purpose: FastAPI runs it in the threadpool, so the slow,
     synchronous LLM call never blocks the event loop (or /health).
     """
     try:
         _check_generation_limits(num_rows, file_count)
+        model = _resolve_model_or_400(model)
 
         # Track overall timing
         all_timings = {}
         request_start = time.time()
 
         # Create metadata extractor with specified safety mode
-        extractor = MetadataExtractor(safety_mode=safety_mode)
+        extractor = MetadataExtractor(safety_mode=_privacy_mode_or_400(safety_mode))
 
         # Get metadata from edited data, file, or JSON
         metadata_start = time.time()
@@ -868,6 +921,9 @@ def generate_synthetic_data(
 
         all_timings['metadata_extraction'] = time.time() - metadata_start
         
+        # Cache "Off" on the page means off: nothing is read from or written to the cache.
+        use_cache = use_cache and cache_mode != "off"
+
         # Check cache based on cache_mode
         cached_result = None
         cache_start = time.time()
@@ -878,10 +934,10 @@ def generate_synthetic_data(
             cached_result = None
         elif cache_mode == "structure":
             # Use lower threshold for structure-only matching
-            cached_result = cache_manager.find_similar_cached(metadata, match_threshold=0.5)
+            cached_result = _find_cached(metadata, 0.5, num_rows, model)
         else:  # structure_stats (default)
             # Use provided threshold for full statistical matching
-            cached_result = cache_manager.find_similar_cached(metadata, match_threshold)
+            cached_result = _find_cached(metadata, match_threshold, num_rows, model)
 
         all_timings['cache_check'] = time.time() - cache_start
 
@@ -893,7 +949,8 @@ def generate_synthetic_data(
             if synthetic_df is not None:
                 logger.info("Used cached generation script for preview")
                 all_timings['code_execution'] = time.time() - code_start
-                generation_info = {"method": "cached", "cache_hit": True}
+                generation_info = {"method": "cached", "cache_hit": True,
+                                   "model": cached_result.get("model")}
                 # Log usage for cached generation
                 synthetic_generator._log_usage("cached", metadata, num_rows, all_timings)
             else:
@@ -901,7 +958,8 @@ def generate_synthetic_data(
                     metadata=metadata,
                     num_rows=num_rows,
                     match_threshold=match_threshold,
-                    use_cached=use_cache
+                    use_cached=use_cache,
+                    model=model
                 )
                 # Merge timings
                 if 'step_timings' in generation_info:
@@ -939,7 +997,8 @@ def generate_synthetic_data(
                             metadata=metadata,
                             num_rows=num_rows,
                             match_threshold=match_threshold,
-                            use_cached=use_cache
+                            use_cached=use_cache,
+                            model=model
                         )
                         synthetic_files.append((f"{base_name}_synthetic_{i+1:03d}", additional_df))
 
@@ -975,7 +1034,7 @@ def generate_synthetic_data(
                 synthetic_df = _run_cached_code(cached_result, num_rows or metadata["structure"]["shape"]["rows"])
                 if synthetic_df is not None:
                     logger.info(f"Used cached generation script for file {i+1}/{file_count}")
-                    zip_info = zip_info or {"method": "cached"}
+                    zip_info = zip_info or {"method": "cached", "model": cached_result.get("model")}
                 else:
                     cached_result = None  # failed once: do not try it again for later files
                     # Generate new synthetic data
@@ -983,7 +1042,8 @@ def generate_synthetic_data(
                         metadata=metadata,
                         num_rows=num_rows,
                         match_threshold=match_threshold,
-                        use_cached=use_cache
+                        use_cached=use_cache,
+                        model=model
                     )
 
                 # Store generated dataframe with filename
@@ -1023,6 +1083,7 @@ def generate_synthetic_data(
             generation_info = {
                 "method": "cached",
                 "cache_hit": True,
+                "model": cached_result.get("model"),
                 "all_timings": {
                     "metadata_extraction": all_timings.get('metadata_extraction', 0),
                     "cache_check": all_timings.get('cache_check', 0),
@@ -1038,7 +1099,8 @@ def generate_synthetic_data(
                 metadata=metadata,
                 num_rows=num_rows,
                 match_threshold=match_threshold,
-                use_cached=use_cache
+                use_cached=use_cache,
+                model=model
             )
 
             # Cache the result if generation was successful
@@ -1099,7 +1161,8 @@ async def generate_with_sse(
     cache_mode: str = Form("structure_stats"),
     file_count: int = Form(1),
     preview_only: bool = Form(False),
-    safety_mode: str = Form("balanced")
+    safety_mode: str = Form("balanced"),
+    model: Optional[str] = Form(None)
 ):
     """Generate synthetic data with Server-Sent Events for progress updates"""
     import asyncio
@@ -1107,6 +1170,7 @@ async def generate_with_sse(
 
     # Refused before the stream starts, so the client gets a real 400.
     _check_generation_limits(num_rows, file_count)
+    model = _resolve_model_or_400(model)
 
     # Read file content before the generator to avoid closed file issues
     file_content = None
@@ -1120,6 +1184,9 @@ async def generate_with_sse(
     if not edited_data and not file_content and metadata_json:
         client_metadata = _validated_client_metadata(metadata_json)
 
+    # Cache "Off" on the page means off: nothing is read from or written to the cache.
+    use_cache = use_cache and cache_mode != "off"
+
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             # Send initial event
@@ -1132,7 +1199,7 @@ async def generate_with_sse(
 
             # Extract metadata
             metadata_start = time.time()
-            extractor = MetadataExtractor(safety_mode=safety_mode)
+            extractor = MetadataExtractor(safety_mode=_privacy_mode_or_400(safety_mode))
 
             if edited_data:
                 df = pd.read_csv(io.StringIO(edited_data))
@@ -1158,9 +1225,9 @@ async def generate_with_sse(
             if cache_mode == "off" or not use_cache:
                 cached_result = None
             elif cache_mode == "structure":
-                cached_result = await run_in_threadpool(cache_manager.find_similar_cached, metadata, 0.5)
+                cached_result = await run_in_threadpool(_find_cached, metadata, 0.5, num_rows, model)
             else:
-                cached_result = await run_in_threadpool(cache_manager.find_similar_cached, metadata, match_threshold)
+                cached_result = await run_in_threadpool(_find_cached, metadata, match_threshold, num_rows, model)
 
             cache_time = time.time() - cache_start
             all_timings['cache_check'] = cache_time
@@ -1183,7 +1250,8 @@ async def generate_with_sse(
                 all_timings['code_execution'] = exec_time
                 yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': exec_time})}\n\n"
 
-                generation_info = {"method": "cached", "cache_hit": True, "all_timings": all_timings}
+                generation_info = {"method": "cached", "cache_hit": True, "all_timings": all_timings,
+                                   "model": cached_result.get("model")}
                 # Log usage for cached generation
                 synthetic_generator._log_usage("cached", metadata, num_rows, all_timings)
 
@@ -1200,6 +1268,7 @@ async def generate_with_sse(
                     num_rows=num_rows,
                     match_threshold=match_threshold,
                     use_cached=use_cache,
+                    model=model,
                 )
 
                 # Extract individual step timings from generation_info
@@ -1428,7 +1497,8 @@ def generate_with_dictionary(
     table: Optional[str] = Form(None),
     preview_id: Optional[str] = Form(None),
     dictionary_id: Optional[str] = Form(None),
-    safety_mode: str = Form("balanced")
+    safety_mode: str = Form("balanced"),
+    model: Optional[str] = Form(None)
 ):
     """
     ``dictionary_id``: the id /dictionary/upload (or a preview made with an inline
@@ -1452,9 +1522,12 @@ def generate_with_dictionary(
         preview_only: Return preview instead of download
         table: Which table to use when the dictionary defines several
         safety_mode: Privacy level used when reading ``data_file``
+        model: AI model to write the generation code (a name from GET /api/models;
+            empty = server default; any other name is refused with 400)
     """
     try:
         _check_generation_limits(num_rows, file_count)
+        model = _resolve_model_or_400(model)
 
         # Get dictionary: an inline file (this request only) or this client's own upload
         if dictionary_file:
@@ -1492,7 +1565,7 @@ def generate_with_dictionary(
         if data_file:
             data_content = data_file.file.read()
             df = data_loader.load_from_bytes(data_content, data_file.filename)
-            metadata = MetadataExtractor(safety_mode=safety_mode).extract(df)
+            metadata = MetadataExtractor(safety_mode=_privacy_mode_or_400(safety_mode)).extract(df)
 
         # Apply dictionary constraints to metadata
         metadata = data_dictionary.apply_to_metadata(metadata, dictionary)
@@ -1511,10 +1584,11 @@ def generate_with_dictionary(
             synthetic_df, generation_info = synthetic_generator.generate(
                 metadata=metadata,
                 num_rows=num_rows,
-                match_threshold=0.9
+                match_threshold=0.9,
+                model=model
             )
             generation_info["dictionary_trimming"] = dictionary_trimming
-            new_preview_id = _remember_preview(synthetic_df, generation_info, num_rows)
+            new_preview_id = _remember_preview(synthetic_df, generation_info, num_rows, model)
 
             preview_rows = min(PREVIEW_ROWS, len(synthetic_df))
             preview_df = synthetic_df.head(preview_rows)
@@ -1534,12 +1608,13 @@ def generate_with_dictionary(
             })
 
         # Generate actual files
-        last = _recall_preview(preview_id, num_rows)
+        last = _recall_preview(preview_id, num_rows, model)
 
         def _generate(index):
             if last and index == 0:
                 return last["df"], dict(last["info"])
-            return synthetic_generator.generate(metadata=metadata, num_rows=num_rows, match_threshold=0.9)
+            return synthetic_generator.generate(
+                metadata=metadata, num_rows=num_rows, match_threshold=0.9, model=model)
 
         if file_count > 1:
             synthetic_files = []

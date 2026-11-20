@@ -50,6 +50,51 @@ const matchThreshold = document.getElementById('matchThreshold');
 const thresholdValue = document.getElementById('thresholdValue');
 const outputFormat = document.getElementById('outputFormat');
 const useCache = document.getElementById('useCache');
+const modelSelect = document.getElementById('modelSelect');
+const privacyMode = document.getElementById('privacyMode');
+// Model sent with the last preview request; the download that follows sends the same
+// one, even if the select was changed in between. '' = server default.
+let previewModel = '';
+let previewPrivacy = '';
+
+// Fill the model choice from the server's allow-list. Names are server data: they are
+// set with textContent, never as HTML. If the call fails the select keeps its single
+// "Server default" option (empty value) and generation works as before.
+async function loadModelChoices() {
+    if (!modelSelect) return;
+    try {
+        const response = await fetch(`${API_BASE}/api/models`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!data || !Array.isArray(data.models) || data.models.length === 0) return;
+        const options = [];
+        for (const model of data.models) {
+            if (!model || typeof model.name !== 'string' || !model.name) continue;
+            const option = document.createElement('option');
+            option.value = model.name;
+            const label = typeof model.label === 'string' && model.label ? model.label : model.name;
+            option.textContent = model.note ? `${label} (${model.note})` : label;
+            options.push(option);
+        }
+        if (options.length === 0) return;
+        modelSelect.replaceChildren(...options);
+        if (typeof data.default === 'string') modelSelect.value = data.default;
+    } catch (error) {
+        console.warn('Could not load the model list; using the server default.');
+    }
+}
+
+// Add the model to a generation request. A preview sends the current choice and
+// remembers it; a download sends what its preview used.
+function appendModel(formData, isPreview) {
+    if (isPreview) {
+        previewModel = modelSelect ? modelSelect.value : '';
+        previewPrivacy = privacyMode ? privacyMode.value : '';
+    }
+    if (previewModel) formData.append('model', previewModel);
+    // Same privacy mode for the download as for the preview it follows.
+    if (previewPrivacy) formData.append('safety_mode', previewPrivacy);
+}
 
 // Initialize event listeners
 function init() {
@@ -149,6 +194,8 @@ function init() {
     }
     if (extractMetadataBtn) extractMetadataBtn.addEventListener('click', extractMetadata);
     if (resetBtn) resetBtn.addEventListener('click', reset);
+
+    loadModelChoices();
 
     // Demo dropdown handler
     const demoDropdown = document.getElementById('demoDataset');
@@ -306,6 +353,7 @@ async function generateSyntheticData() {
 
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'true');  // Request preview mode
+    appendModel(formData, true);
     
     console.log('FormData being sent:');
     for (let [key, value] of formData.entries()) {
@@ -1143,6 +1191,19 @@ function displayGenerationBadges(generationInfo, dictionaryApplied) {
             badgesContainer.appendChild(methodBadge);
         }
 
+        // Which AI model wrote the generation code (createBadge sets it with textContent)
+        if (typeof generationInfo.model === 'string' && generationInfo.model) {
+            const modelTitle = generationInfo.method === 'cached'
+                ? 'AI model that wrote the cached generation code'
+                : 'AI model that wrote the generation code';
+            const modelBadge = createBadge(`🧠 ${generationInfo.model}`, 'badge-model', modelTitle);
+            // The name as written (badges are upper-cased by default), in a neutral colour.
+            modelBadge.style.textTransform = 'none';
+            modelBadge.style.background = '#475569';
+            modelBadge.style.color = 'white';
+            badgesContainer.appendChild(modelBadge);
+        }
+
         // Add processing time badge if timings are available
         if (generationInfo.all_timings && generationInfo.all_timings.total) {
             const totalTime = generationInfo.all_timings.total;
@@ -1400,6 +1461,7 @@ async function downloadDictionaryData() {
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');
+    appendModel(formData, false);  // same model as the preview
     if (currentSyntheticData?.preview_id) {
         formData.append('preview_id', currentSyntheticData.preview_id);
     }
@@ -1460,6 +1522,7 @@ async function downloadGeneratedData(preview = false) {
 
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'false');  // Request actual download
+    appendModel(formData, false);  // same model as the preview
 
     try {
         const response = await fetch(`${API_BASE}/generate`, {
@@ -1732,6 +1795,7 @@ async function generateFromDictionary() {
     formData.append('output_format', outputFormat.value);
     formData.append('file_count', fileCount);
     formData.append('preview_only', 'true');
+    appendModel(formData, true);
 
     try {
         const response = await fetch(`${API_BASE}/generate-with-dictionary`, {

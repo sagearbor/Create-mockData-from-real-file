@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core import generation_service
+from src.core.models import ModelNotAllowed, resolve_model
 from src.core.synthetic_generator import AIGenerationError
 from src.utils.config import APP_VERSION
 from src.utils.logger import logger
@@ -70,6 +71,12 @@ class GenerateRequest(BaseModel):
         default="balanced", description="Privacy level for categorical values.")
     use_cache: bool = Field(
         default=True, description="Reuse a cached generation script for similar data.")
+    # A plain string on purpose: the allow-list is server configuration, checked in
+    # the route so a refused name gets the 400 ModelNotAllowed error, not a 422.
+    model: Optional[str] = Field(
+        default=None,
+        description="AI model (deployment name) that writes the generation code. Must be "
+                    "one of the names from GET /api/models. Omit for the server default.")
 
     @model_validator(mode="after")
     def _exactly_one_source(self):
@@ -195,7 +202,7 @@ class ApiV1Guard:
 _ERROR_RESPONSES = {
     code: {"model": ErrorResponse, "description": text}
     for code, text in {
-        400: "The source data could not be read or used",
+        400: "The source data could not be read or used, or the model is not allowed",
         401: "Missing or invalid API key",
         413: "Request body too large",
         422: "Request validation failed",
@@ -222,6 +229,12 @@ def generate_json(req: GenerateRequest):
     Plain ``def`` on purpose: FastAPI runs it in the threadpool, so the slow,
     synchronous LLM call never blocks the event loop (or /health).
     """
+    # Before anything is decoded or any model is called.
+    try:
+        model = resolve_model(req.model)
+    except ModelNotAllowed as exc:
+        return _error(400, str(exc), "ModelNotAllowed")
+
     if req.csv_text:
         data_content = base64.b64encode(req.csv_text.encode("utf-8")).decode("ascii")
         file_name = "input.csv"
@@ -238,6 +251,7 @@ def generate_json(req: GenerateRequest):
             "output_format": "json",
             "safety_mode": req.safety_mode,
             "use_cache": req.use_cache,
+            "model": model,
         }, raise_ai_errors=True)
 
         if result.get("status") != "success":

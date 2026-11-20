@@ -64,7 +64,10 @@ class MockDataAgent:
           :func:`generation_service.extract_metadata`.
 
         All remaining keys in *payload* are forwarded verbatim to the
-        selected function.
+        selected function.  For ``"generate"`` that includes the optional
+        ``model`` (AI deployment name): it must be on the server's allow-list,
+        any other name returns an error dict, and omitting it uses the server
+        default.
 
         Args:
             payload: A plain dict decoded from the A2A envelope.  Must contain
@@ -118,10 +121,11 @@ def build_card(internal_only: bool = False) -> dict:
         _AGENT_ID,
         name="BYOD Mock Data Generator",
         description=(
-            "Generates privacy-safe synthetic data that preserves the "
-            "statistical structure of a real source file. Supports CSV and "
-            "JSON output. Accepts base64-encoded file content so that raw "
-            "sensitive data never leaves the caller."
+            "Generates made-up data with the same structure and similar "
+            "statistics as a source file. Supports CSV and JSON output. The "
+            "file is sent to this service as base64 text and analysed here; "
+            "rows are not sent to the AI model. Not approved for real study "
+            "data or patient identifiers."
         ),
         version=_AGENT_VERSION,
         internal_only=internal_only,

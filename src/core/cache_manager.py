@@ -1,6 +1,7 @@
 """Caching and hashing functionality for synthetic data generation."""
 
 import hashlib
+import hmac
 import json
 import pickle
 from pathlib import Path
@@ -12,17 +13,47 @@ from src.utils.logger import logger
 from src.utils.config import settings
 
 
+# Variant used for a description that carries no privacy mode of the server's own
+# (client-supplied metadata, dictionary-only requests): it never shares entries with
+# descriptions the server extracted from a file.
+UNSTAMPED_PRIVACY_MODE = "client"
+
+
+def cache_variant(metadata: Dict[str, Any], model: Optional[str]) -> str:
+    """What a cached script was written by and from: the model and the privacy mode
+    of the description (``MetadataExtractor.extract`` stamps ``privacy_mode``).
+
+    A script is only reused for a request with the same variant: another model may
+    write different code, and a script written from a "permissive" description can
+    embed real category labels that a "strict" request must not receive.
+    """
+    mode = metadata.get("privacy_mode") if isinstance(metadata, dict) else None
+    if not isinstance(mode, str) or not mode:
+        return f"{model or ''}|{UNSTAMPED_PRIVACY_MODE}"
+    # The stamped text exactly as the extractor used it (it compares modes exactly, so
+    # "Strict" is not "strict"), prefixed so no stamped value can equal the unstamped one.
+    return f"{model or ''}|server:{mode}"
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 class CacheManager:
     """Manage caching of generation scripts and metadata."""
     
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Optional[Path] = None, persist_removals: bool = True):
         """
         Initialize the CacheManager.
         
         Args:
             cache_dir: Directory for cache storage
+            persist_removals: When a lookup drops an entry (script altered or missing),
+                also delete its files and save the index. False for a second object
+                on the same folder, whose older index copy must not be written back.
         """
         self.logger = logger
+        self.persist_removals = persist_removals
         self.cache_dir = Path(cache_dir or settings.local_cache_path)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
@@ -31,7 +62,12 @@ class CacheManager:
         self.cache_index = self._load_cache_index()
         
     def _load_cache_index(self) -> Dict[str, Any]:
-        """Load the cache index, creating an empty one if it does not exist."""
+        """Load the cache index, creating an empty one if it does not exist.
+
+        Entries read here (their variant and script hash included) are only as
+        trustworthy as the index file itself: the hash check in find_similar_cached
+        catches a script altered after it was cached, not an altered index file.
+        """
         if self.index_file.exists():
             try:
                 with open(self.index_file, 'r') as f:
@@ -162,7 +198,8 @@ class CacheManager:
         self, 
         metadata: Dict[str, Any], 
         match_threshold: float = 0.8,
-        num_rows: Optional[int] = None
+        num_rows: Optional[int] = None,
+        variant: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Find similar cached generation script based on metadata.
@@ -173,54 +210,85 @@ class CacheManager:
             num_rows: Rows wanted. A script writes a fixed number of rows, so entries
                 recorded for a different count are skipped (entries with no recorded
                 count are still offered; the caller checks the result's length)
+            variant: ``cache_variant(metadata, model)`` of this request. Only entries
+                recorded with the same variant are offered. An entry with no variant
+                recorded never matches, and a lookup with no variant matches nothing.
             
         Returns:
-            Cached entry if found, None otherwise
+            Cached entry if found (with the ``model`` that wrote it), None otherwise
         """
-        # First, try exact format match
         format_hash = self.generate_format_hash(metadata)
-        if format_hash in self.cache_index:
-            exact_matches = [
-                e for e in self.cache_index[format_hash]
-                if num_rows is None or e.get("num_rows") in (None, num_rows)
-            ]
-            
+        candidates = [
+            e for e in self.cache_index.get(format_hash, [])
+            if variant and e.get("variant") == variant
+            and (num_rows is None or e.get("num_rows") in (None, num_rows))
+        ]
+
+        if candidates:
+            ordered: List[Tuple[str, Dict[str, Any]]] = []
+
             if match_threshold >= 0.95:
                 # Try full hash for exact match
                 full_hash = self.generate_full_hash(metadata)
-                for entry in exact_matches:
-                    if entry.get("full_hash") == full_hash:
-                        self.logger.info(f"Found exact cache match: {full_hash}")
-                        return self._load_cached_entry(entry["cache_file"])
-            
-            # Calculate similarity for format matches
+                ordered.extend(
+                    (f"exact cache match: {full_hash}", e)
+                    for e in candidates if e.get("full_hash") == full_hash)
+
+            # Calculate similarity for format matches, best first
             current_embedding = self.generate_metadata_embedding(metadata)
-            
-            best_match = None
-            best_similarity = 0
-            
-            for entry in exact_matches:
-                if "embedding_file" in entry:
-                    cached_embedding = self._load_embedding(entry["embedding_file"])
+            similar = []
+            for entry in candidates:
+                if entry.get("embedding_file"):
+                    try:
+                        cached_embedding = self._load_embedding(entry["embedding_file"])
+                    except (OSError, ValueError):
+                        continue
                     similarity = self._calculate_similarity(current_embedding, cached_embedding)
-                    
-                    if similarity >= match_threshold and similarity > best_similarity:
-                        best_similarity = similarity
-                        best_match = entry
-            
-            if best_match:
-                self.logger.info(f"Found similar cache match with similarity: {best_similarity:.2f}")
-                return self._load_cached_entry(best_match["cache_file"])
-        
+                    if similarity >= match_threshold:
+                        similar.append((similarity, entry))
+            similar.sort(key=lambda pair: pair[0], reverse=True)
+            ordered.extend((f"similar cache match with similarity: {sim:.2f}", e) for sim, e in similar)
+
+            for description, entry in ordered:
+                loaded = self._load_verified(entry)
+                if loaded is not None:
+                    self.logger.info(f"Found {description}")
+                    return loaded
+
         self.logger.info("No suitable cache match found")
         return None
+
+    def _load_verified(self, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Load an entry's script only if it is still the text that was cached.
+
+        The cache folder is writable by the service user, so a script file could be
+        altered after it was cached. The SHA-256 recorded in the index entry is checked
+        here; a missing hash, a missing or unreadable file, or a mismatch drops the
+        entry and counts as a miss.
+        """
+        cache_file = entry.get("cache_file") or ""
+        try:
+            loaded = self._load_cached_entry(cache_file)
+            intact = bool(entry.get("code_sha256")) and hmac.compare_digest(
+                _sha256(loaded["generation_code"]), str(entry["code_sha256"]))
+        except (OSError, ValueError):
+            loaded, intact = None, False
+        if not intact:
+            self.logger.warning("Cached script is missing or was changed after it was cached; dropping it")
+            self.remove_entry(cache_file, save=self.persist_removals)
+            return None
+        loaded["model"] = entry.get("model")
+        loaded["variant"] = entry.get("variant")
+        return loaded
     
     def cache_generation(
         self, 
         metadata: Dict[str, Any], 
         generation_code: str,
         synthetic_data: Any = None,
-        num_rows: Optional[int] = None
+        num_rows: Optional[int] = None,
+        variant: Optional[str] = None,
+        model: Optional[str] = None
     ) -> str:
         """
         Cache a generation script with its metadata.
@@ -229,6 +297,10 @@ class CacheManager:
             metadata: Metadata dictionary
             generation_code: Python code for generation
             synthetic_data: Optional synthetic data to cache
+            num_rows: Row count the script writes
+            variant: ``cache_variant(metadata, model)``; an entry cached without one
+                is never served
+            model: The model that wrote the script (reported on a cache hit)
             
         Returns:
             Cache key
@@ -243,7 +315,8 @@ class CacheManager:
         
         # Save generation code
         code_file = self.cache_dir / f"{cache_key}_code.py"
-        with open(code_file, 'w') as f:
+        # newline='' on write and read: the text read back is exactly the text hashed.
+        with open(code_file, 'w', newline='') as f:
             f.write(generation_code)
         
         # Save metadata
@@ -275,6 +348,10 @@ class CacheManager:
             "data_file": str(data_file) if data_file else None,
             "timestamp": timestamp,
             "num_rows": num_rows,
+            "variant": variant,
+            "model": model,
+            # Checked when the script is loaded for reuse (see _load_verified).
+            "code_sha256": _sha256(generation_code),
             "version": settings.generator_version
         })
         
@@ -314,7 +391,7 @@ class CacheManager:
         cache_file = Path(cache_file)
         
         # Load generation code
-        with open(cache_file, 'r') as f:
+        with open(cache_file, 'r', newline='') as f:
             generation_code = f.read()
         
         # Load metadata if exists

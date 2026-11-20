@@ -152,11 +152,11 @@ class TestCacheManager:
         """Test finding exact cache match."""
         generation_code = "def generate(): pass"
         
-        # Cache the generation
-        cache_manager.cache_generation(sample_metadata, generation_code)
+        # Cache the generation (a lookup only offers entries with the same variant)
+        cache_manager.cache_generation(sample_metadata, generation_code, variant="m|balanced")
         
         # Find with high threshold (exact match)
-        result = cache_manager.find_similar_cached(sample_metadata, match_threshold=0.95)
+        result = cache_manager.find_similar_cached(sample_metadata, match_threshold=0.95, variant="m|balanced")
         
         assert result is not None
         assert result["generation_code"] == generation_code
@@ -171,14 +171,14 @@ class TestCacheManager:
         generation_code = "def generate(): pass"
         
         # Cache the generation
-        cache_manager.cache_generation(sample_metadata, generation_code)
+        cache_manager.cache_generation(sample_metadata, generation_code, variant="m|balanced")
         
         # Modify metadata slightly
         modified_metadata = sample_metadata.copy()
         modified_metadata["statistics"]["id"]["mean"] = 51  # Small change
         
         # Find with lower threshold
-        result = cache_manager.find_similar_cached(modified_metadata, match_threshold=0.7)
+        result = cache_manager.find_similar_cached(modified_metadata, match_threshold=0.7, variant="m|balanced")
         
         # Should find similar match if format is same
         if cache_manager.generate_format_hash(sample_metadata) == cache_manager.generate_format_hash(modified_metadata):

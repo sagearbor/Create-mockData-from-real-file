@@ -767,6 +767,12 @@ def _real_cache_generator(completions, tmp_path):
     return gen
 
 
+def _variant(meta):
+    from src.core.cache_manager import cache_variant
+    from src.core.models import default_model
+    return cache_variant(meta, default_model())
+
+
 def _cached_codes(gen):
     return [open(e["cache_file"]).read() for entries in gen.cache_manager.cache_index.values() for e in entries]
 
@@ -787,7 +793,8 @@ def test_cached_code_that_fails_is_dropped_and_replaced(tmp_path):
     seq = _Sequence(_df_code(["a", "b"]))
     gen = _real_cache_generator(seq, tmp_path)
     meta = _dict_only_metadata(["a", "b"])
-    gen.cache_manager.cache_generation(meta, "raise SystemExit(1)\n")  # a poisoned entry
+    # a poisoned entry, cached under the variant this request will look up
+    gen.cache_manager.cache_generation(meta, "raise SystemExit(1)\n", variant=_variant(meta))
     df, info = gen.generate(metadata=meta, num_rows=3)
     assert list(df.columns) == ["a", "b"] and info["method"] == "llm" and len(seq.calls) == 1
     codes = _cached_codes(gen)
@@ -854,7 +861,7 @@ def test_cached_code_for_another_row_count_is_not_reused(tmp_path):
 
     # an old entry with no recorded count is caught by the length check
     legacy = _real_cache_generator(_Sequence(rows(5)), tmp_path / "legacy")
-    legacy.cache_manager.cache_generation(meta, rows(3))
+    legacy.cache_manager.cache_generation(meta, rows(3), variant=_variant(meta))
     assert len(legacy.generate(metadata=meta, num_rows=5)[0]) == 5
 
 

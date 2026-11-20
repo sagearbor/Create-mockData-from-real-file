@@ -51,7 +51,7 @@ class FakeGenerator:
     def __init__(self):
         self.calls = []
 
-    def generate(self, metadata, num_rows=None, match_threshold=0.8, use_cached=True):
+    def generate(self, metadata, num_rows=None, match_threshold=0.8, use_cached=True, model=None):
         self.calls.append(num_rows)
         names = ([c["name"] for c in metadata.get("structure", {}).get("columns", [])]
                  or list(metadata.get("expected_columns") or []))
@@ -83,9 +83,6 @@ def fake(monkeypatch):
     monkeypatch.setattr(generation_service, "_get_generator", lambda: gen)
     monkeypatch.setattr(main, "synthetic_generator", gen)
     monkeypatch.setattr(main.cache_manager, "find_similar_cached", lambda *a, **k: None)
-    # /generate-with-dictionary keeps the uploaded dictionary on this object: put it back after.
-    monkeypatch.setattr(main.data_dictionary, "catalog", main.data_dictionary.catalog)
-    monkeypatch.setattr(main.data_dictionary, "dictionary", main.data_dictionary.dictionary)
     return gen
 
 

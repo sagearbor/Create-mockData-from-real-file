@@ -17,7 +17,8 @@ from datetime import datetime
 
 from src.utils.logger import logger
 from src.utils.config import settings
-from src.core.cache_manager import CacheManager
+from src.core.cache_manager import CacheManager, cache_variant
+from src.core.models import default_model
 from src.core import code_gate
 
 # HARD RULE: reasoning models (gpt-5.x, o-series) spend thinking tokens out of the
@@ -282,7 +283,8 @@ class SyntheticDataGenerator:
         metadata: Dict[str, Any],
         num_rows: Optional[int] = None,
         match_threshold: float = 0.8,
-        use_cached: bool = True
+        use_cached: bool = True,
+        model: Optional[str] = None
     ) -> tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Generate synthetic data based on metadata.
@@ -292,10 +294,19 @@ class SyntheticDataGenerator:
             num_rows: Number of rows to generate (defaults to original)
             match_threshold: How closely to match statistical properties (0-1)
             use_cached: Whether to use cached generation scripts
+            model: Deployment to ask for the code (None = the server default). Not
+                checked against the allow-list here: callers that take the name from
+                a request resolve it first (src/core/models.py). Passed down as an
+                argument, never written to settings: requests run concurrently.
 
         Returns:
-            Tuple of (Generated synthetic DataFrame, generation_info dict)
+            Tuple of (Generated synthetic DataFrame, generation_info dict);
+            ``generation_info["model"]`` is the model that wrote the code that ran
+            (for a cache hit: the model recorded with the cached script)
         """
+        model = model or default_model()
+        # A cached script is reused only for the same model and privacy mode.
+        variant = cache_variant(metadata, model)
         self.logger.info(f"Starting synthetic data generation with match_threshold={match_threshold}")
 
         # Track timing for each step
@@ -313,7 +324,7 @@ class SyntheticDataGenerator:
             cache_start = time.time()
             try:
                 cached_entry = self.cache_manager.find_similar_cached(
-                    metadata, match_threshold=0.95, num_rows=num_rows)
+                    metadata, match_threshold=0.95, num_rows=num_rows, variant=variant)
                 cache_check_time = time.time() - cache_start
                 step_timings['cache_check'] = cache_check_time
 
@@ -337,7 +348,7 @@ class SyntheticDataGenerator:
             code_gen_start = time.time()
             # Raises AIGenerationError on any AI failure: there is no template fallback.
             generation_code, generation_method, llm_response_time = self._generate_code_with_llm(
-                metadata, num_rows, match_threshold, operation="generate_code")
+                metadata, num_rows, match_threshold, operation="generate_code", model=model)
             # Only track llm_response time (code_generation is redundant as it's the same)
             if llm_response_time:
                 step_timings['llm_response'] = llm_response_time
@@ -362,7 +373,7 @@ class SyntheticDataGenerator:
                     # script, just not for this request: leave it cached, write new code.
                     self.logger.info("Cached code makes a different number of rows; generating new code")
                     generation_code, generation_method, _ = self._generate_code_with_llm(
-                        metadata, num_rows, match_threshold, operation="generate_code")
+                        metadata, num_rows, match_threshold, operation="generate_code", model=model)
                     continue
                 break
             except CodeExecutionError as failure:
@@ -378,7 +389,7 @@ class SyntheticDataGenerator:
                 retried_after_failure = True
                 generation_code, generation_method, _ = self._generate_code_with_llm(
                     metadata, num_rows, match_threshold, operation="regenerate_code",
-                    failed_error=failure.sandbox_stderr)
+                    failed_error=failure.sandbox_stderr, model=model)
         step_timings['code_execution'] = time.time() - exec_start
         
         # Validate the generated data
@@ -392,6 +403,7 @@ class SyntheticDataGenerator:
         # Create generation info with timing
         generation_info = {
             "method": generation_method,
+            "model": ((cached_entry or {}).get("model") or model) if generation_method == 'cached' else model,
             "num_rows": num_rows,
             "match_threshold": match_threshold,
             "use_cached": use_cached,
@@ -405,7 +417,7 @@ class SyntheticDataGenerator:
         if validation_passed:
             self.logger.info(f"Successfully generated synthetic data with shape {synthetic_df.shape}")
             if generation_method == 'llm' and use_cached:
-                self._remember_code(metadata, generation_code, num_rows)
+                self._remember_code(metadata, generation_code, num_rows, model)
             return synthetic_df, generation_info
         else:
             self.logger.warning("Validation failed, regenerating with stricter parameters")
@@ -413,24 +425,30 @@ class SyntheticDataGenerator:
             # first result (it ran) and say its columns differ, rather than return nothing.
             try:
                 generation_code, generation_method, _ = self._generate_code_with_llm(
-                    metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code")
+                    metadata, num_rows, min(match_threshold + 0.1, 1.0), operation="regenerate_code",
+                    model=model)
                 second_df = self._execute_generation_code(generation_code)
             except AIGenerationError as e:
                 self.logger.warning(f"Regeneration failed ({type(e).__name__}); keeping the first result")
                 generation_info["structure_mismatch"] = True
                 return synthetic_df, generation_info
             generation_info["method"] = generation_method
+            generation_info["model"] = model
             generation_info["regenerated"] = True
             if not self._validate_synthetic_data(second_df, metadata):
                 generation_info["structure_mismatch"] = True
             elif use_cached:
-                self._remember_code(metadata, generation_code, num_rows)
+                self._remember_code(metadata, generation_code, num_rows, model)
             return second_df, generation_info
 
-    def _remember_code(self, metadata: Dict[str, Any], code: str, num_rows: Optional[int] = None) -> None:
+    def _remember_code(self, metadata: Dict[str, Any], code: str, num_rows: Optional[int] = None,
+                       model: Optional[str] = None) -> None:
         """Cache code only once it has run and produced the expected columns."""
+        model = model or default_model()
         try:
-            self.cache_manager.cache_generation(metadata, code, num_rows=num_rows)
+            self.cache_manager.cache_generation(
+                metadata, code, num_rows=num_rows,
+                variant=cache_variant(metadata, model), model=model)
             self.logger.info("Cached generation code for future use")
         except Exception as e:
             self.logger.warning(f"Failed to cache: {type(e).__name__}")
@@ -453,6 +471,7 @@ class SyntheticDataGenerator:
         match_threshold: float,
         operation: str = "generate_code",
         failed_error: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Tuple[str, str, float]:
         """
         Generate Python code using LLM based on metadata.
@@ -464,6 +483,7 @@ class SyntheticDataGenerator:
             operation: Stable telemetry name for this call (dcri_llm ``operation``)
             failed_error: End of the error output from a previous attempt's code, so the
                 model can avoid the same mistake
+            model: Deployment name for this call (None = the server default)
 
         Returns:
             Tuple of (code, ``"llm"``, LLM seconds).
@@ -472,7 +492,7 @@ class SyntheticDataGenerator:
             AINotConfiguredError: no Azure OpenAI client.
             AIGenerationError: the call failed or returned unusable output.
         """
-        model = settings.azure_openai_chat_deployment
+        model = model or default_model()
         if not self.openai_client:
             err = AINotConfiguredError("Azure OpenAI is not configured on this server")
             self._log_ai_failure(err, operation, model)

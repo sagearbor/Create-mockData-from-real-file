@@ -2,6 +2,8 @@
 
 For each deployment name given, makes ONE real generation through the app's own
 generator (same prompt, same sandbox, cache off) and reports whether rows came back.
+The name is passed as ``model=`` (the allow-list is not applied here: this is how a
+name earns its place on it).
 A model is only offered to users if it passes here.
 
     AZURE_OPENAI_ENDPOINT=... python tools/release/probe_models.py gpt-5-nano gpt-5.5 ...
@@ -47,13 +49,12 @@ def main(models):
         sys.exit("AI client could not be built (set AZURE_OPENAI_ENDPOINT; az login)")
     failures = 0
     for model in models:
-        settings.azure_openai_chat_deployment = model
         gen = SyntheticDataGenerator(openai_client=client)
         gen.cache_manager = CacheManager(cache_dir=Path(tempfile.mkdtemp(prefix="probe-cache-")))
         started = time.time()
         row = {"model": model, "ok": False}
         try:
-            df, info = gen.generate(metadata=METADATA, num_rows=20, use_cached=False)
+            df, info = gen.generate(metadata=METADATA, num_rows=20, use_cached=False, model=model)
             row.update(ok=len(df) == 20 and list(df.columns) == [c["name"] for c in METADATA["structure"]["columns"]],
                        rows=len(df), columns=list(df.columns),
                        corrected=bool(info.get("retried_after_failure")),

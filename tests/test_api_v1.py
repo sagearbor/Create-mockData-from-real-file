@@ -62,7 +62,7 @@ class FakeGenerator:
         self.block = block
         self.entered, self.release, self.exited = threading.Event(), threading.Event(), threading.Event()
 
-    def generate(self, metadata, num_rows=None, match_threshold=0.8, use_cached=True):
+    def generate(self, metadata, num_rows=None, match_threshold=0.8, use_cached=True, model=None):
         self.calls.append({"num_rows": num_rows, "match_threshold": match_threshold,
                            "use_cached": use_cached})
         self.entered.set()

@@ -102,7 +102,9 @@ class MetadataExtractor:
         """
         self.logger = logger
         self.clinical_reference = ClinicalReferenceLibrary() if use_clinical_reference else None
-        self.safety_mode = safety_mode
+        # Anything that is not one of the three modes is treated as the most private one.
+        mode = str(safety_mode or "").strip().lower()
+        self.safety_mode = mode if mode in ("strict", "balanced", "permissive") else "strict"
         
     def extract(self, df: pd.DataFrame, sample_size: int = 1000) -> Dict[str, Any]:
         """
@@ -130,6 +132,10 @@ class MetadataExtractor:
         # Enhance with clinical context if available
         if self.clinical_reference:
             metadata = self.clinical_reference.enhance_metadata_with_clinical_context(metadata)
+
+        # The privacy mode travels with the description: a generation script cached
+        # from it is only reused for requests in the same mode (cache_manager.cache_variant).
+        metadata["privacy_mode"] = self.safety_mode
 
         self.logger.info("Metadata extraction complete")
         return metadata

@@ -118,7 +118,8 @@
             letter-spacing: -0.02em;
         }
 
-        .info-block p {
+        .info-block p,
+        .info-block .info-text {
             margin-bottom: 1rem;
             color: #475569;
             font-size: 1rem;
@@ -297,7 +298,7 @@
     <div class="container">
         <header>
             <h1>About BYOD Synthetic Data Generator</h1>
-            <p class="tagline">Privacy-First Synthetic Data Generation</p>
+            <p class="tagline">Made-up data with the same structure as your file</p>
         </header>
 
         <button class="toggle-all" onclick="toggleAllAccordions()">
@@ -306,58 +307,129 @@
 
         <main>
             <section class="info-block">
-                <h2>🛡️ How We Protect Your Data</h2>
+                <h2>🛡️ What happens to your data</h2>
                 <p>
-                    Your data is processed <span class="accordion-word" onclick="toggleAccordion(this)">locally</span>
-                    <span class="accordion-content">
-                        Data files are loaded into memory on the server, never saved to disk. The files exist only
-                        during processing and are immediately garbage collected after use. No permanent storage occurs.
-                    </span>
-                    and only <span class="accordion-word" onclick="toggleAccordion(this)">statistical metadata</span>
-                    <span class="accordion-content">
-                        We extract only aggregate statistics like mean, min, max, standard deviation, and data types.
-                        No actual data values are sent to the AI. For example, from patient names we only extract
-                        "string column, average length 15 characters, 95% unique values" - never the actual names.
-                    </span>
-                    is sent to the AI model. The LLM <span class="accordion-word" onclick="toggleAccordion(this)">NEVER sees your actual data</span>
-                    <span class="accordion-content">
-                        The Azure OpenAI model receives only:
-                        <ul>
-                            <li>Column names and types</li>
-                            <li>Statistical distributions</li>
-                            <li>Correlations between columns</li>
-                            <li>Pattern descriptions</li>
-                        </ul>
-                        It generates Python code based on these statistics, which then runs locally to create synthetic data.
-                    </span>.
+                    Your file is sent to this server and analysed there. It does not stay in your browser.
+                    Rows are not sent to the AI model. The model receives a description of the file: column
+                    names, data types, counts and summary statistics.
                 </p>
+                <p>
+                    For text columns the model receives lengths and formats, plus the labels of repeated
+                    categories (such as M / F) in Balanced and Permissive modes. In Strict mode it receives no
+                    text values. Other text values, such as IDs, emails, phone numbers and free text, are
+                    replaced with placeholders. Column names are always sent as they are.
+                </p>
+                <p>
+                    For number columns, the real smallest and largest values are sent in Balanced and
+                    Permissive modes, unless the column has fewer than 20 values or a name that looks like an
+                    identifier. For date columns, the range is widened to whole months or years.
+                </p>
+                <p>
+                    <strong>Do not upload real study data or patient identifiers.</strong> This release has not
+                    been approved for them. No compliance assessment has been done.
+                </p>
+                <p>
+                    This site has no sign-in. Anyone who can reach it on the organisation network (VPN) can use it.
+                </p>
+                <!-- A div, not a p: the lists inside these click-to-expand notes would end a p early. -->
+                <div class="info-text">
+                    More detail:
+                    <span class="accordion-word" onclick="toggleAccordion(this)">what the AI model receives</span>
+                    <span class="accordion-content">
+                        The model is an Azure OpenAI model hosted by the organisation. It receives:
+                        <ul>
+                            <li><strong>Column names:</strong> always, exactly as they are in the file.</li>
+                            <li><strong>For every column:</strong> the data type and the number of values, empty
+                                values and distinct values.</li>
+                            <li><strong>Number columns:</strong> the average, the spread and similar summary
+                                numbers. In Balanced and Permissive modes, for a column with 20 or more values,
+                                this includes the real smallest, largest, middle and quartile values. In Strict
+                                mode, and for a column with fewer than 20 values, the numbers are rounded and the
+                                range is widened. A column whose name looks like an identifier (for example
+                                patient_id, mrn or zip) sends no smallest, largest, middle or quartile value.</li>
+                            <li><strong>Date columns:</strong> the range, widened to whole months. It is widened
+                                to whole years for a column named like a date of birth, in Strict mode, and for a
+                                column with fewer than 20 values. The exact earliest and latest dates are not
+                                sent. The most common hour and weekday are sent.</li>
+                            <li><strong>Text columns:</strong> lengths, whether the values look like emails, web
+                                addresses, phone numbers or dates, and how often the most common values occur.
+                                The values themselves are replaced with placeholders such as value_0, with one
+                                exception. A value is sent as it is when it is a short label (30 characters or
+                                fewer) that occurs at least 5 times, in a column with 20 or more values, few
+                                distinct values (up to 10 in Balanced mode, up to 50 in Permissive mode), a name
+                                that does not look like an identifier, and no value that looks like an email,
+                                phone number, date or long number. Strict mode sends no text value.</li>
+                            <li><strong>This rule cannot tell a category from a name.</strong> A person's name
+                                that occurs 5 or more times in a column with an ordinary name is treated as a
+                                category label and is sent in Balanced and Permissive modes.</li>
+                            <li><strong>Shared beginnings and endings:</strong> outside Strict mode, for a column
+                                with 20 or more values, a beginning or ending of up to 6 characters with no
+                                digits that many values share (for example the letters in front of an ID
+                                number) can be sent.</li>
+                            <li><strong>ID-shaped columns:</strong> the shape, for example
+                                "MRN-&lt;7 digits&gt;". A real ID is never given as an example.</li>
+                            <li><strong>Relationships:</strong> how strongly columns move together.</li>
+                            <li><strong>A data dictionary, if you upload one:</strong> its column names, types,
+                                descriptions, allowed values, ranges and patterns, cut to a size limit.</li>
+                        </ul>
+                    </span>,
+                    <span class="accordion-word" onclick="toggleAccordion(this)">what is stored on the server</span>
+                    <span class="accordion-content">
+                        <ul>
+                            <li>The description sent to the model and the Python script the model wrote are
+                                saved in a cache on the server's disk, so a later request with similar data can
+                                reuse the script. They stay there until the cache is cleared. A request
+                                sent with <code class="api-inline">use_cache</code> set to false does not
+                                read or write the cache.</li>
+                            <li>Column names from cached descriptions are listed on the Usage Dashboard, which
+                                every user of this site can open.</li>
+                            <li>The uploaded file is not written to the cache. While a request is being
+                                processed the file is held in memory, and the web framework may also keep it in
+                                a temporary file on disk.</li>
+                            <li>An uploaded data dictionary, and a preview made from one, are kept in the
+                                server's memory for up to 30 minutes after their last use.</li>
+                            <li>A usage log records the time, the number of rows and columns, and how long each
+                                step took.</li>
+                        </ul>
+                    </span>
+                    and
+                    <span class="accordion-word" onclick="toggleAccordion(this)">how the script is run</span>
+                    <span class="accordion-content">
+                        The script the model writes is checked before it runs. It may use only data libraries
+                        and is refused if it asks for files, the network or other processes. It then runs as a
+                        separate process, with a time limit, on the same server as this application. This is a
+                        check, not full isolation. If the AI model is not available, generation stops with an
+                        error message. There is no other generator behind it.
+                    </span>.
+                </div>
             </section>
 
             <section class="info-block">
                 <h2>📊 Two Ways to Generate Data</h2>
-                <p>
-                    <strong>1. From Real Data:</strong> Upload your <span class="accordion-word" onclick="toggleAccordion(this)">data file</span>
+                <div class="info-text">
+                    <strong>1. From a data file:</strong> Upload your <span class="accordion-word" onclick="toggleAccordion(this)">data file</span>
                     <span class="accordion-content">
                         Supported formats: CSV, JSON, Excel (.xlsx, .xls), Parquet, TSV.
-                        The system automatically detects the format and extracts the structure.
+                        The format is taken from the file name.
                         <span class="nested-accordion">
-                            Files are processed using <span class="accordion-word" onclick="toggleAccordion(this)">pandas</span>
+                            Files are read with <span class="accordion-word" onclick="toggleAccordion(this)">pandas</span>
                             <span class="accordion-content">
-                                We use pandas DataFrames to analyze your data efficiently. This allows us to:
+                                The server loads the file into a pandas table to:
                                 <ul>
-                                    <li>Handle large files (though streaming for 1GB+ files is planned)</li>
-                                    <li>Detect data types automatically</li>
-                                    <li>Calculate statistics in a single pass</li>
-                                    <li>Identify patterns and correlations</li>
+                                    <li>Detect data types</li>
+                                    <li>Calculate statistics</li>
+                                    <li>Describe patterns and relationships between columns</li>
                                 </ul>
-                            </span>
-                            for maximum compatibility.
+                                The whole file is read into memory. An upload can be at most 50 MB unless the
+                                server was configured with a different limit.
+                            </span>.
                         </span>
-                    </span>
-                    to extract patterns and generate similar synthetic data.
-                </p>
-                <p>
-                    <strong>2. From Data Dictionary:</strong> Define your structure with a <span class="accordion-word" onclick="toggleAccordion(this)">data dictionary</span>
+                    </span>.
+                    The server builds a description of it and the AI model writes a script that makes
+                    similar, made-up data.
+                </div>
+                <div class="info-text">
+                    <strong>2. From a data dictionary:</strong> Define your structure with a <span class="accordion-word" onclick="toggleAccordion(this)">data dictionary</span>
                     <span class="accordion-content">
                         Upload a dictionary file (JSON, YAML, CSV, Excel, PDF) that defines:
                         <ul>
@@ -381,69 +453,57 @@
   }
 }
                         </div>
-                        No real data file needed - generates purely from specifications!
+                        No data file is needed. The content of the dictionary is sent to the AI model.
                     </span>
-                    without needing any real data.
-                </p>
-                <p>
-                    <strong>Bonus:</strong> Combine both approaches by uploading data AND a dictionary for
-                    <span class="accordion-word" onclick="toggleAccordion(this)">constraint enforcement</span>
+                    without a data file.
+                </div>
+                <div class="info-text">
+                    <strong>Both together:</strong> Upload a data file and a dictionary for
+                    <span class="accordion-word" onclick="toggleAccordion(this)">dictionary constraints</span>
                     <span class="accordion-content">
                         When you provide both:
                         <ol>
-                            <li>Statistical patterns are extracted from your real data</li>
-                            <li>Dictionary constraints override these statistics</li>
-                            <li>Result: Realistic patterns with enforced business rules</li>
+                            <li>The description is built from your data file</li>
+                            <li>The dictionary constraints are added to it</li>
+                            <li>The AI model is told that the dictionary constraints take priority</li>
                         </ol>
-                        Example: Your data shows ages 18-95, but dictionary specifies max_value: 65.
-                        Generated data will follow the distribution pattern but cap at 65.
+                        Example: your data shows ages 18-95, but the dictionary specifies max_value: 65.
+                        The model is told to keep ages at or below 65.
                     </span>.
-                </p>
+                </div>
             </section>
 
             <section class="info-block">
                 <h2>🔬 Advanced Features</h2>
-                <p>
+                <div class="info-text">
                     The system includes <span class="accordion-word" onclick="toggleAccordion(this)">domain detection</span>
                     <span class="accordion-content">
-                        Automatically recognizes:
+                        The server recognises:
                         <ul>
-                            <li><strong>Date columns:</strong> Fields with 'date', 'time', 'created', 'updated' generate proper dates</li>
-                            <li><strong>Medical data:</strong> Medication names, lab tests, diagnoses use clinical reference library</li>
-                            <li><strong>Email/Phone:</strong> Patterns detected and appropriate formats generated</li>
-                            <li><strong>IDs:</strong> Sequential or UUID patterns maintained</li>
+                            <li><strong>Date columns:</strong> Fields with 'date', 'time', 'created', 'updated' in the name are generated as dates</li>
+                            <li><strong>Medical columns:</strong> Medication, lab test and diagnosis columns are matched to the clinical reference library</li>
+                            <li><strong>Email/Phone:</strong> The format is detected and described to the model</li>
+                            <li><strong>IDs:</strong> Described by shape (letters, then a number of digits)</li>
                         </ul>
-                    </span>
-                    for intelligent data generation, a <span class="accordion-word" onclick="toggleAccordion(this)">clinical reference library</span>
+                    </span>,
+                    a <span class="accordion-word" onclick="toggleAccordion(this)">clinical reference library</span>
                     <span class="accordion-content">
-                        Built-in database of:
+                        A built-in list, not taken from any uploaded file, of:
                         <ul>
-                            <li>100+ common medications (Metformin, Lisinopril, etc.)</li>
-                            <li>50+ lab tests (CBC, Glucose, Hemoglobin A1c)</li>
-                            <li>30+ diagnoses (Hypertension, Diabetes, etc.)</li>
+                            <li>About 70 common medications (Metformin, Lisinopril, etc.)</li>
+                            <li>About 60 lab tests (CBC, Glucose, Hemoglobin A1c)</li>
+                            <li>About 50 diagnoses (Hypertension, Diabetes, etc.)</li>
                             <li>Medical units (mg, mL, mg/dL, mmol/L)</li>
                         </ul>
-                        When medical columns are detected, realistic clinical values are used instead of random strings.
+                        When a medical column is detected, values from this list are suggested to the model.
                     </span>
-                    for healthcare data, and <span class="accordion-word" onclick="toggleAccordion(this)">smart caching</span>
+                    for healthcare data, and a <span class="accordion-word" onclick="toggleAccordion(this)">script cache</span>
                     <span class="accordion-content">
-                        The system caches:
-                        <span class="nested-accordion">
-                            <span class="accordion-word" onclick="toggleAccordion(this)">Generation scripts</span>
-                            <span class="accordion-content">
-                                Python code generated by the LLM is cached with metadata signatures.
-                                Similar data structures reuse the same generation script, saving API calls and ensuring consistency.
-                            </span>
-                            for similar data structures, reducing API costs and improving speed.
-                            Future plans include <span class="accordion-word" onclick="toggleAccordion(this)">vector similarity search</span>
-                            <span class="accordion-content">
-                                Using Azure AI Search, we'll embed metadata and find the most similar previously processed files,
-                                allowing intelligent parameter suggestions and pattern reuse across your organization.
-                            </span>.
-                        </span>
-                    </span>
-                    to optimize performance.
-                </p>
+                        The Python script written by the AI model is saved on the server's disk together with
+                        the description it was written for. A later request with a similar description and the
+                        same number of rows reuses the script, which avoids a call to the AI model.
+                    </span>.
+                </div>
             </section>
 
             <section class="info-block" id="use-it-from-code">
@@ -628,8 +688,9 @@ df.to_csv("synthetic.csv", index=False)</code></pre>
                             <tr data-field="format"><td><code>format</code></td><td>csv, tsv, json, excel or parquet</td><td>csv</td><td>Format of <code>data_content</code>. Ignored for <code>csv_text</code>.</td></tr>
                             <tr data-field="num_rows"><td><code>num_rows</code></td><td>whole number, 1 to 100,000</td><td>source row count</td><td>Rows to generate. Leave out to match the source.</td></tr>
                             <tr data-field="match_threshold"><td><code>match_threshold</code></td><td>number, 0 to 1</td><td>0.8</td><td>How closely the statistics must match the source.</td></tr>
-                            <tr data-field="safety_mode"><td><code>safety_mode</code></td><td>strict, balanced or permissive</td><td>balanced</td><td>Privacy level for categorical values.</td></tr>
+                            <tr data-field="safety_mode"><td><code>safety_mode</code></td><td>strict, balanced or permissive</td><td>balanced</td><td>How much of the text values the AI model may see. Strict sends none.</td></tr>
                             <tr data-field="use_cache"><td><code>use_cache</code></td><td>true or false</td><td>true</td><td>Reuse a cached generation script for similar data.</td></tr>
+                            <tr data-field="model"><td><code>model</code></td><td>text, optional</td><td>server default</td><td>Name of an allowed AI model. See <code>GET /api/models</code>. A name not on the list is refused.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -668,6 +729,7 @@ df.to_csv("synthetic.csv", index=False)</code></pre>
                         </thead>
                         <tbody>
                             <tr><td>400</td><td><code>GenerationError</code></td><td>The source data could not be read or used.</td></tr>
+                            <tr><td>400</td><td><code>ModelNotAllowed</code></td><td>The <code>model</code> name is not on the server's list. The message lists the allowed names.</td></tr>
                             <tr><td>401</td><td><code>InvalidApiKey</code></td><td>The server requires a key and <code>X-API-Key</code> is missing or wrong.</td></tr>
                             <tr><td>413</td><td><code>RequestTooLarge</code></td><td>The request body is over the size limit.</td></tr>
                             <tr><td>422</td><td><code>RequestValidationError</code></td><td>A field is missing, unknown or out of range.</td></tr>
@@ -684,6 +746,14 @@ df.to_csv("synthetic.csv", index=False)</code></pre>
                         <button type="button" class="copy-btn" aria-live="polite">Copy</button>
                     </div>
 <pre class="code-example api-code"><code>curl "https://YOUR-SITE/api/v1/version" -H "X-API-Key: $MOCKDATA_API_KEY"</code></pre>
+                </div>
+
+                <div class="api-block" data-block="curl-models" data-lang="curl">
+                    <div class="api-block-head">
+                        <span class="api-block-title">curl &middot; list the allowed AI models &middot; GET /api/models</span>
+                        <button type="button" class="copy-btn" aria-live="polite">Copy</button>
+                    </div>
+<pre class="code-example api-code"><code>curl "https://YOUR-SITE/api/models"</code></pre>
                 </div>
 
                 <h3 class="api-subhead">Interactive API reference</h3>
@@ -738,68 +808,65 @@ df.to_csv("synthetic.csv", index=False)</code></pre>
                         Output formats supported:
                         <ul>
                             <li><strong>CSV:</strong> Standard comma-separated values</li>
-                            <li><strong>JSON:</strong> Array of objects or nested structure</li>
-                            <li><strong>Excel:</strong> .xlsx files with proper formatting</li>
-                            <li><strong>Parquet:</strong> Columnar format for big data (coming soon)</li>
+                            <li><strong>JSON:</strong> Array of objects, one per row</li>
+                            <li><strong>Excel:</strong> One .xlsx file</li>
                         </ul>
-                        Multi-file generation creates a ZIP archive automatically.
+                        Asking for more than one file returns a ZIP archive.
                     </span>
                     and integrate with your <span class="accordion-word" onclick="toggleAccordion(this)">CI/CD pipelines</span>
                     <span class="accordion-content">
-                        Perfect for:
+                        For example:
                         <ul>
                             <li>Generating test data in development pipelines</li>
                             <li>Creating fixtures for unit tests</li>
                             <li>Populating staging databases</li>
-                            <li>Load testing with realistic data</li>
+                            <li>Load testing</li>
                         </ul>
-                        Can be deployed as Azure Function for serverless operation.
+                        Batch generation is switched off in this release.
                     </span>.
                 </div>
             </section>
 
             <div class="highlight-box">
-                <h3>🎯 Perfect For:</h3>
+                <h3>🎯 Who it is for:</h3>
                 <ul style="list-style: none; padding: 0;">
-                    <li>✅ Healthcare organizations needing HIPAA-compliant test data</li>
-                    <li>✅ Financial institutions requiring PCI-compliant mock data</li>
-                    <li>✅ Development teams needing realistic test datasets</li>
-                    <li>✅ Data scientists creating training data</li>
-                    <li>✅ QA teams validating edge cases</li>
+                    <li>Teams that need realistic test data without copying real records</li>
+                    <li>Developers who need test datasets</li>
+                    <li>QA teams testing edge cases</li>
                 </ul>
+                <p>Not approved in this release for real study data or patient identifiers.</p>
             </div>
 
             <section class="info-block">
                 <h2>📈 Architecture</h2>
                 <div class="mermaid" style="min-height: 400px;">
                     graph TB
-                        subgraph Upload["1. Upload - Your Files"]
+                        subgraph Upload["1. Upload to the server"]
                             A[Your Data File] --> B[Data Loader]
                             A2[Data Dictionary<br/>✓ IMPLEMENTED]:::implemented --> DD[Dictionary Parser]
                             DD --> DC[Apply Constraints]
                         end
 
-                        subgraph Analysis["2. Analysis - Local Only"]
+                        subgraph Analysis["2. Analysis on the server"]
                             B --> C[Metadata Extractor]
-                            C --> D[Extract Statistics<br/>NO actual values]
+                            C --> D[Summary statistics<br/>text values masked]
                             C --> D2[Clinical Reference<br/>Library ✓]:::implemented
                             D2 --> D3[Domain Detection<br/>✓ Date columns]:::implemented
                             DC --> D
                         end
 
-                        subgraph CodeGen["3. Code Generation - Privacy Safe"]
+                        subgraph CodeGen["3. Code generation"]
                             D --> E{Check Cache}
                             E -->|Found| F[Reuse Code]
-                            E -->|New| G[Send Stats + Constraints<br/>to LLM]
+                            E -->|New| G[Send description + constraints<br/>to the AI model]
                             G --> H[LLM Generates<br/>Python Code]
-                            E -.->|Future| V[Vector Similarity<br/>PLANNED]:::pending
                         end
 
-                        subgraph CreateData["4. Create Synthetic Data"]
-                            F --> I[Run Code Locally]
+                        subgraph CreateData["4. Create made-up data"]
+                            F --> I[Screen the script<br/>then run it on the server]
                             H --> I
                             I --> J[Generate Data]
-                            J --> P[Preview First 10 Rows]:::implemented
+                            J --> P[Preview up to 50 rows]:::implemented
                             P --> K[Download Files<br/>ZIP Multi-file ✓]:::implemented
                         end
 

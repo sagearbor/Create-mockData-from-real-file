@@ -4,34 +4,39 @@ The script only needs to build a table with pandas and numpy. Anything else it
 asks for (files, the network, processes, the interpreter's own internals) is
 refused here, before the script is started.
 
-This is a screen, not isolation: it narrows what a script can do by reading its
-syntax tree, and a script that passes still runs with the application's user.
-Real isolation (a separate worker with no network, no cloud identity and no view
-of the application) is tracked separately and this module does not replace it.
+This is a screen, not isolation. It narrows what a script can do by reading its
+syntax tree; it cannot follow values computed at run time, and a script that
+passes still runs with the application's user. Real isolation (a separate worker
+with no network, no cloud identity and no view of the application) is tracked
+separately and this module does not replace it.
 
 What is refused:
 
-* importing anything outside ``ALLOWED_IMPORTS``;
+* a script that does not parse, or is too deep or too large to check (fail closed);
+* importing any module that is not listed, by full dotted path, in
+  ``ALLOWED_MODULES``;
 * the names in ``FORBIDDEN_NAMES`` (``open``, ``eval``, ``exec``, ``getattr``, ...);
-* any attribute whose name starts with two underscores, and the attribute names
-  in ``FORBIDDEN_ATTRIBUTES`` (file readers and writers of pandas/numpy, ``eval``
-  and ``query``, and doors to other modules such as ``.os`` or ``.io``);
-* text constants that contain a double-underscore name (used to reach
-  internals through string formatting or name lookups).
+* any attribute whose name starts with an underscore;
+* any ``read_*`` attribute, and any ``to_*`` attribute not in ``ALLOWED_TO_METHODS``;
+* the attribute names in ``FORBIDDEN_ATTRIBUTES`` (other readers and writers,
+  ``eval`` and ``query``, lookups by name, and doors to other modules such as
+  ``.os`` or ``.io``);
+* ``.format`` / ``.format_map`` on anything but a text literal, and text
+  literals that contain a double-underscore name (both are ways to reach
+  internals through string formatting).
 """
 
 from __future__ import annotations
 
 import ast
 import re
-from typing import List, Optional
+from typing import List
 
-# Top-level modules a generation script may import.
-ALLOWED_IMPORTS = frozenset({
-    "pandas", "numpy", "random", "datetime", "math", "string", "re", "uuid",
-    "itertools", "collections", "decimal", "fractions", "statistics", "typing",
-    "time", "calendar", "json", "functools", "secrets", "textwrap", "enum",
-    "dataclasses", "copy", "bisect", "heapq", "numbers", "zoneinfo", "dateutil",
+# Modules a generation script may import, by full dotted path.
+ALLOWED_MODULES = frozenset({
+    "pandas", "numpy", "numpy.random", "random", "datetime", "math", "string", "re",
+    "uuid", "itertools", "collections", "decimal", "fractions", "statistics", "typing",
+    "time", "calendar", "json", "secrets", "dateutil", "dateutil.relativedelta",
     "faker", "__future__",
 })
 
@@ -45,21 +50,23 @@ FORBIDDEN_NAMES = frozenset({
 # Double-underscore names a script may legitimately use as plain names.
 ALLOWED_DUNDER_NAMES = frozenset({"__name__"})
 
+# ``to_*`` methods that convert in memory and take no file target.
+ALLOWED_TO_METHODS = frozenset({
+    "to_datetime", "to_numeric", "to_timedelta", "to_dict", "to_list", "to_numpy",
+    "to_frame", "to_series", "to_period", "to_timestamp", "to_pydatetime",
+    "to_pytimedelta", "to_julian_date", "to_flat_index", "to_records",
+})
+
 FORBIDDEN_ATTRIBUTES = frozenset({
-    # pandas / numpy readers and writers
-    "read_csv", "read_excel", "read_json", "read_pickle", "read_parquet", "read_html",
-    "read_sql", "read_sql_query", "read_sql_table", "read_table", "read_fwf", "read_xml",
-    "read_feather", "read_hdf", "read_clipboard", "read_sas", "read_spss", "read_stata",
-    "read_orc", "read_gbq",
-    "to_pickle", "to_csv", "to_excel", "to_parquet", "to_hdf", "to_feather", "to_sql",
-    "to_clipboard", "to_stata", "to_orc", "to_xml", "to_html", "to_latex", "to_markdown",
-    "to_gbq",
+    # readers and writers not caught by the read_* / to_* rules
     "load", "save", "savez", "savez_compressed", "savetxt", "loadtxt", "genfromtxt",
     "fromfile", "tofile", "memmap", "DataSource", "fromregex", "dump",
+    "ExcelFile", "ExcelWriter", "HDFStore", "api",
     # text evaluated as code
     "eval", "query",
-    # lookups by name
-    "attrgetter", "methodcaller",
+    # lookups by name, and formatters that can walk attributes
+    "attrgetter", "methodcaller", "Formatter", "get_field", "format_field", "vformat",
+    "get_type_hints", "ForwardRef",
     # doors to other modules
     "os", "sys", "subprocess", "builtins", "importlib", "io", "pathlib", "shutil",
     "socket", "ctypes", "ctypeslib", "pickle", "marshal", "shelve", "tempfile", "glob",
@@ -67,7 +74,9 @@ FORBIDDEN_ATTRIBUTES = frozenset({
     "core", "environ", "getenv", "system", "popen",
 })
 
+_FORMAT_METHODS = frozenset({"format", "format_map"})
 _DUNDER_IN_TEXT = re.compile(r"__[A-Za-z]\w*__")
+MAX_SCRIPT_CHARS = 200_000
 
 
 class CodeRejected(ValueError):
@@ -82,16 +91,30 @@ def _line(node: ast.AST) -> str:
     return f"line {getattr(node, 'lineno', '?')}"
 
 
-def find_problems(code: str, max_problems: int = 10) -> Optional[List[str]]:
-    """Return the reasons the script is refused, or an empty list if it may run.
+def _attribute_problem(name: str) -> str:
+    """Why this attribute (or imported name) is refused, or '' if it is allowed."""
+    if name.startswith("_"):
+        return f"'{name}' (names starting with an underscore) is not allowed"
+    if name.startswith("read_") or (name.startswith("to_") and name not in ALLOWED_TO_METHODS):
+        return f"'.{name}' (reading or writing files) is not allowed"
+    if name in FORBIDDEN_ATTRIBUTES:
+        return f"'.{name}' is not allowed"
+    return ""
 
-    Returns ``None`` when the text does not parse: the caller lets the normal
-    run report the syntax error (nothing executes in a file that does not parse).
+
+def find_problems(code: str, max_problems: int = 10) -> List[str]:
+    """Return the reasons the script is refused; an empty list means it may run.
+
+    The reasons quote only the script's own text (names and line numbers).
     """
+    if len(code) > MAX_SCRIPT_CHARS:
+        return [f"the script is too long to check ({len(code)} characters)"]
     try:
         tree = ast.parse(code)
-    except (SyntaxError, ValueError, RecursionError):
-        return None
+    except SyntaxError as err:
+        return [f"line {err.lineno or '?'}: the script does not parse ({err.msg})"]
+    except (ValueError, RecursionError, MemoryError) as err:
+        return [f"the script could not be checked ({type(err).__name__})"]
 
     problems: List[str] = []
 
@@ -102,26 +125,33 @@ def find_problems(code: str, max_problems: int = 10) -> Optional[List[str]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                root = alias.name.split(".")[0]
-                if root not in ALLOWED_IMPORTS:
-                    add(f"{_line(node)}: import of '{root}' is not allowed")
+                if alias.name not in ALLOWED_MODULES:
+                    add(f"{_line(node)}: import of '{alias.name}' is not allowed")
         elif isinstance(node, ast.ImportFrom):
-            root = (node.module or "").split(".")[0]
-            if node.level or root not in ALLOWED_IMPORTS:
+            if node.level or (node.module or "") not in ALLOWED_MODULES:
                 add(f"{_line(node)}: import from '{node.module or '.'}' is not allowed")
             for alias in node.names:
-                if alias.name in FORBIDDEN_ATTRIBUTES or alias.name.startswith("__"):
-                    add(f"{_line(node)}: importing '{alias.name}' is not allowed")
+                full = f"{node.module}.{alias.name}"
+                if alias.name == "*":
+                    add(f"{_line(node)}: 'import *' is not allowed")
+                elif full in ALLOWED_MODULES:
+                    continue  # e.g. `from numpy import random`
+                else:
+                    why = _attribute_problem(alias.name)
+                    if why:
+                        add(f"{_line(node)}: importing {why}")
         elif isinstance(node, ast.Name):
             if node.id in FORBIDDEN_NAMES:
                 add(f"{_line(node)}: use of '{node.id}' is not allowed")
             elif node.id.startswith("__") and node.id not in ALLOWED_DUNDER_NAMES:
                 add(f"{_line(node)}: use of '{node.id}' is not allowed")
         elif isinstance(node, ast.Attribute):
-            if node.attr.startswith("__"):
-                add(f"{_line(node)}: attribute '{node.attr}' is not allowed")
-            elif node.attr in FORBIDDEN_ATTRIBUTES:
-                add(f"{_line(node)}: '.{node.attr}' is not allowed")
+            why = _attribute_problem(node.attr)
+            if why:
+                add(f"{_line(node)}: {why}")
+            elif node.attr in _FORMAT_METHODS and not (
+                    isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                add(f"{_line(node)}: '.{node.attr}' is only allowed on a text literal")
         elif isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
             text = node.value if isinstance(node.value, str) else node.value.decode("latin-1")
             if text != "__main__" and _DUNDER_IN_TEXT.search(text):

@@ -34,7 +34,7 @@ def test_ordinary_generation_script_passes():
 
 
 @pytest.mark.parametrize("snippet, word", [
-    ("import os\nresult = os.listdir('.')", "os"),
+    ("import os\nresult = os.listdir('.')", "'os'"),
     ("import subprocess", "subprocess"),
     ("import socket", "socket"),
     ("from pathlib import Path", "pathlib"),
@@ -75,9 +75,51 @@ def test_reasons_name_the_line_and_quote_only_the_script():
     assert problems == ["line 2: import of 'os' is not allowed"]
 
 
-def test_text_that_does_not_parse_is_left_to_the_runner():
-    assert code_gate.find_problems("def f(:\n") is None
-    code_gate.check("def f(:\n")  # no exception: nothing runs in a file that does not parse
+def test_text_that_cannot_be_checked_is_refused():
+    assert "does not parse" in code_gate.find_problems("def f(:\n")[0]
+    with pytest.raises(code_gate.CodeRejected):
+        code_gate.check("def f(:\n")
+    assert "too long" in code_gate.find_problems("x = 1\n" * 100_000)[0]
+    deep = "x = " + "(" * 5000 + "1" + ")" * 5000
+    assert code_gate.find_problems(deep)  # too deep to parse: refused, never passed
+
+
+@pytest.mark.parametrize("snippet, word", [
+    ("import pandas.io.common", "pandas.io.common"),
+    ("from pandas import io", "io"),
+    ("from pandas.io import common", "pandas.io"),
+    ("from numpy import *", "import *"),
+    ("from string import Formatter", "Formatter"),
+    ("import string\nstring.Formatter().get_field('a', (), {})", "Formatter"),
+    ("from typing import get_type_hints", "get_type_hints"),
+    ("import typing\ntyping.ForwardRef('x')", "ForwardRef"),
+    ("import typing\ntyping._eval_type", "underscore"),
+    ("import functools", "functools"),
+    ("import dataclasses", "dataclasses"),
+    ("import copy", "copy"),
+    ("import pandas as pd\npd.DataFrame().to_json('/app/x')", "to_json"),
+    ("import pandas as pd\npd.DataFrame().to_string('/app/x')", "to_string"),
+    ("import pandas as pd\npd.ExcelWriter('/app/x')", "ExcelWriter"),
+    ("import pandas as pd\npd.HDFStore('/app/x')", "HDFStore"),
+    ("import pandas as pd\npd.api.types", "api"),
+    ("import pandas as pd\npd.read_anything_new('x')", "read_anything_new"),
+    ("fmt = '{0._' + '_class_' + '_}'\nfmt.format(1)", "text literal"),
+    ("x = 1\nx._private", "underscore"),
+])
+def test_review_follow_up_cases_are_refused(snippet, word):
+    problems = code_gate.find_problems(snippet)
+    assert problems and any(word in p for p in problems), (snippet, problems)
+
+
+def test_in_memory_conversions_and_literal_format_are_allowed():
+    ok = (
+        "import pandas as pd\nimport numpy as np\nfrom numpy import random as npr\n"
+        "import numpy.random\nfrom datetime import datetime, timedelta\nfrom typing import List, Dict\n"
+        "d = pd.to_datetime(['2024-01-01'])\nn = pd.to_numeric(['1'])\n"
+        "df = pd.DataFrame({'a': [1]})\nx = df.to_dict('records')\ny = df['a'].to_numpy().tolist()\n"
+        "label = 'ID-{:04d}'.format(7)\nlabel2 = f'ID-{7:04d}'\nresult = df\n"
+    )
+    assert code_gate.find_problems(ok) == []
 
 
 def test_main_guard_and_ordinary_text_are_allowed():

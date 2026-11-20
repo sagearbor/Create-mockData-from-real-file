@@ -270,6 +270,14 @@ function processFile(file) {
     if (fileStatsEl) fileStatsEl.textContent = `Size: ${formatFileSize(file.size)} | Type: ${file.type || 'Unknown'}`;
     if (fileInfoEl) fileInfoEl.style.display = 'block';
 
+    // Say which file is loaded, in the upload area itself (text only: a file name is not HTML).
+    if (uploadArea) {
+        const lines = uploadArea.querySelectorAll('p');
+        if (lines[0]) lines[0].textContent = `Loaded: ${file.name}`;
+        if (lines[1]) lines[1].textContent = formatFileSize(file.size);
+        uploadArea.classList.add('file-loaded');
+    }
+
     // Update sections - keep config visible and open
     if (configSection) {
         configSection.style.display = 'block';
@@ -1026,7 +1034,7 @@ function reset() {
     currentFile = null;
     currentMetadata = null;
     fileInput.value = '';
-    fileInfo.style.display = 'none';
+    if (fileInfo) fileInfo.style.display = 'none';
 
     // Reset upload area to original state
     const uploadArea = document.getElementById('uploadArea');
@@ -1065,6 +1073,14 @@ function reset() {
     // Hide experimental features since no data is loaded
     const experimentalSection = document.getElementById('experimentalSection');
     if (experimentalSection) experimentalSection.style.display = 'none';
+
+    // Nothing from the previous file stays on screen or in memory.
+    for (const id of ['previewSection', 'dataEditorSection']) {
+        const section = document.getElementById(id);
+        if (section) section.style.display = 'none';
+    }
+    window.currentEditedData = null;
+    currentSyntheticData = null;
 }
 
 // Helper function to convert data to CSV (if not defined in data-editor.js)
@@ -1534,14 +1550,22 @@ async function downloadGeneratedData(preview = false) {
             throw new Error(await responseErrorMessage(response));
         }
 
-        const contentType = response.headers.get('content-type');
-        const blob = await response.blob();
-
+        const contentType = response.headers.get('content-type') || '';
+        let blob;
         let filename;
-        if (contentType && contentType.includes('application/zip')) {
+        if (contentType.includes('application/zip')) {
+            blob = await response.blob();
             filename = `synthetic_data_${new Date().toISOString().slice(0,10)}.zip`;
+        } else if (contentType.includes('application/json')) {
+            // The server wraps JSON rows in a status object; the saved file holds the rows only.
+            const payload = await response.json();
+            const rows = Array.isArray(payload) ? payload : (payload.data || []);
+            blob = new Blob([JSON.stringify(rows, null, 2)], {type: 'application/json'});
+            filename = 'synthetic_data.json';
         } else {
-            filename = `synthetic_data.${outputFormat.value}`;
+            blob = await response.blob();
+            const ext = outputFormat.value === 'excel' ? 'xlsx' : outputFormat.value;
+            filename = `synthetic_data.${ext}`;
         }
 
         downloadFile(blob, filename);

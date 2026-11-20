@@ -632,3 +632,74 @@ def test_cache_mode_off_tells_the_generator_not_to_use_the_cache(monkeypatch):
                                         "cache_mode": mode, "use_cache": "true"}, files=files)
         assert resp.status_code == 200, resp.text
         assert seen == [expected], (mode, seen)
+
+
+# --------------------------------------------------------------------------- #
+# Defects found by the browser tests (ADP-44)
+# --------------------------------------------------------------------------- #
+def test_public_error_never_passes_on_quoted_text():
+    import pandas as pd
+    from fastapi import HTTPException
+
+    assert main._public_error(UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte")) == main._UNREADABLE_FILE
+    assert main._public_error(pd.errors.EmptyDataError("No columns to parse from file")) == main._UNREADABLE_FILE
+    assert main._public_error(ValueError("could not convert string to float: 'SECRET-CELL'")) == \
+        "The request could not be processed (ValueError)."
+    assert main._public_error(ValueError("Unsupported file format")) == "Unsupported file format"
+    assert main._public_error(HTTPException(status_code=400, detail="plain reason")) == "plain reason"
+
+
+def test_metadata_route_does_not_echo_internal_error_text():
+    resp = _post("/metadata", files={"file": ("d.csv", bytes([0x80, 0x81, 0xFE, 0xFF]) * 64, "text/csv")})
+    assert resp.status_code == 400
+    assert "codec" not in resp.text and "0x80" not in resp.text
+
+
+def test_sse_route_defaults_to_the_files_row_count_and_checks_privacy_before_streaming(monkeypatch):
+    import inspect
+    import pandas as pd
+    from types import SimpleNamespace
+
+    assert inspect.signature(main.generate_with_sse).parameters["num_rows"].default.default is None
+    seen = []
+
+    def generate(**kwargs):
+        seen.append(kwargs.get("num_rows"))
+        return pd.DataFrame({"a": [1, 2, 3]}), {"method": "llm"}
+
+    monkeypatch.setattr(main, "synthetic_generator", SimpleNamespace(
+        generate=generate, _log_usage=lambda *a, **k: None, openai_client=object()))
+    files = {"file": ("d.csv", b"a\n1\n2\n3\n", "text/csv")}
+    ok = _post("/generate-sse", data={"preview_only": "true"}, files=files)
+    assert ok.status_code == 200 and seen == [None]          # None = the file's own count
+    bad = _post("/generate-sse", data={"safety_mode": "open"}, files=files)
+    assert bad.status_code == 400 and len(seen) == 1
+    empty = _post("/generate-sse", files={"file": ("d.csv", b"", "text/csv")})
+    assert "The uploaded file is empty." in empty.text and len(seen) == 1
+
+
+def test_file_longer_than_the_row_limit_needs_an_explicit_row_count():
+    import pytest
+    from fastapi import HTTPException
+
+    meta = {"structure": {"shape": {"rows": main.MAX_NUM_ROWS + 1, "columns": 2}}}
+    with pytest.raises(HTTPException) as exc:
+        main._rows_for_request(None, meta)
+    assert exc.value.status_code == 400
+    main._rows_for_request(50, meta)                                           # explicit count: fine
+    main._rows_for_request(None, {"structure": {"shape": {"rows": 40}}})       # small file: fine
+
+
+def test_routes_dashboard_and_generator_share_one_cache_object():
+    source = __import__("inspect").getsource(main.initialize_openai_client)
+    assert "synthetic_generator.cache_manager = cache_manager" in source
+
+
+def test_page_saves_json_rows_and_xlsx_and_resets_cleanly():
+    from pathlib import Path
+
+    js = (Path(main.__file__).parent / "src" / "web" / "static" / "js" / "app.js").read_text()
+    assert "outputFormat.value === 'excel' ? 'xlsx'" in js
+    assert "payload.data || []" in js
+    assert "if (fileInfo) fileInfo.style.display = 'none';" in js
+    assert "'Using Fallback'" not in (Path(main.__file__)).read_text()

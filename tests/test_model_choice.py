@@ -536,7 +536,7 @@ def test_second_cache_object_does_not_write_its_index_copy_back(tmp_path):
     assert owner.find_similar_cached(meta, 0.95, num_rows=3, variant=variant) is None
     assert json.loads((folder / "cache_index.json").read_text()) == {}
     assert not Path(entry["cache_file"]).exists()
-    assert main.cache_manager.persist_removals is False
+    assert main.cache_manager.persist_removals is True  # main shares the one cache object now
 
 
 @pytest.mark.parametrize("threshold", [0.0, 0.95])

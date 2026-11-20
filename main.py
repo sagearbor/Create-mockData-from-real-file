@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 import json
+import re
 import io
 import time
 import secrets
@@ -44,7 +45,7 @@ from src.utils.logger import logger
 data_loader = DataLoader()
 # A second object on the generator's cache folder, with its own index copy read at
 # start-up: it never writes that copy back (persist_removals=False).
-cache_manager = CacheManager(persist_removals=False)
+cache_manager = CacheManager()
 # Used only for its stateless helpers (parsing, validation, prompt budget). Routes never
 # store an upload on it: one object is shared by every user of the process.
 data_dictionary = DataDictionary()
@@ -146,6 +147,36 @@ def _check_generation_limits(num_rows: Optional[int], file_count: Optional[int])
 
 
 PRIVACY_MODES = ("strict", "balanced", "permissive")
+
+_UNREADABLE_FILE = "The file could not be read as a table. Check that it is a CSV, TSV, JSON or Excel file."
+
+
+def _public_error(exc: Exception) -> str:
+    """What a caller is told when a request fails unexpectedly.
+
+    Python and pandas put offending values in quotes, so a message is passed on only
+    when it quotes nothing; otherwise the caller gets a plain sentence and the error's
+    type. Raw internal text and cell values never reach the page."""
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    if isinstance(exc, (UnicodeDecodeError, pd.errors.ParserError, pd.errors.EmptyDataError)):
+        return _UNREADABLE_FILE
+    message = str(exc).strip()
+    if message and len(message) <= 200 and not re.search(r"[\'\"`]", message):
+        return message
+    return f"The request could not be processed ({type(exc).__name__})."
+
+
+def _rows_for_request(num_rows: Optional[int], metadata: Dict[str, Any]) -> None:
+    """With no row count given, the uploaded file's own count is used: it must be in range too."""
+    if num_rows is None:
+        try:
+            file_rows = int(metadata["structure"]["shape"]["rows"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if file_rows > MAX_NUM_ROWS:
+            raise HTTPException(status_code=400, detail=(
+                f"The file has {file_rows} rows. Set Rows to a number up to {MAX_NUM_ROWS}."))
 
 
 def _privacy_mode_or_400(safety_mode: Optional[str]) -> str:
@@ -361,6 +392,9 @@ def initialize_openai_client():
     logger.info(f"Chat deployment: {settings.azure_openai_chat_deployment}")
     client = build_llm_client()
     synthetic_generator = SyntheticDataGenerator(openai_client=client)
+    # One cache object for the routes, the dashboard and the generator: two objects each
+    # kept their own copy of the index, so the dashboard and "Cache Hit" lagged behind.
+    synthetic_generator.cache_manager = cache_manager
     return client is not None
 
 @asynccontextmanager
@@ -680,7 +714,7 @@ async def get_cache_info():
         }
     except Exception as e:
         logger.error(f"Error getting cache info: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_public_error(e))
 
 @app.delete("/api/cache/clear")
 async def clear_cache(older_than_days: Optional[int] = None):
@@ -702,7 +736,7 @@ async def clear_cache(older_than_days: Optional[int] = None):
         return {"status": "success", "message": message}
     except Exception as e:
         logger.error(f"Error clearing cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_public_error(e))
 
 @app.get("/api/usage-logs")
 async def get_usage_logs(start: str = None, end: str = None):
@@ -825,7 +859,7 @@ async def upload_file(
         
     except Exception as e:
         logger.error(f"Error processing upload: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=_public_error(e))
 
 @app.post("/metadata")
 async def extract_metadata(file: UploadFile = File(...)):
@@ -857,7 +891,7 @@ async def extract_metadata(file: UploadFile = File(...)):
         
     except Exception as e:
         logger.error(f"Error extracting metadata: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=_public_error(e))
 
 @app.post("/generate")
 def generate_synthetic_data(
@@ -1146,7 +1180,7 @@ def generate_synthetic_data(
         raise
     except Exception as e:
         logger.error(f"Error generating synthetic data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_public_error(e))
 
 
 @app.post("/generate-sse")
@@ -1154,7 +1188,7 @@ async def generate_with_sse(
     file: Optional[UploadFile] = File(None),
     edited_data: Optional[str] = Form(None),
     metadata_json: Optional[str] = Form(None),
-    num_rows: Optional[int] = Form(100),
+    num_rows: Optional[int] = Form(None),  # None = as many rows as the uploaded file
     match_threshold: float = Form(0.8),
     output_format: str = Form("csv"),
     use_cache: bool = Form(True),
@@ -1186,6 +1220,8 @@ async def generate_with_sse(
 
     # Cache "Off" on the page means off: nothing is read from or written to the cache.
     use_cache = use_cache and cache_mode != "off"
+    # Checked before the stream starts, so a bad value is a real 400.
+    privacy_mode = _privacy_mode_or_400(safety_mode)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -1199,7 +1235,7 @@ async def generate_with_sse(
 
             # Extract metadata
             metadata_start = time.time()
-            extractor = MetadataExtractor(safety_mode=_privacy_mode_or_400(safety_mode))
+            extractor = MetadataExtractor(safety_mode=privacy_mode)
 
             if edited_data:
                 df = pd.read_csv(io.StringIO(edited_data))
@@ -1209,9 +1245,13 @@ async def generate_with_sse(
                 metadata = extractor.extract(df)
             elif client_metadata is not None:
                 metadata = client_metadata
+            elif file_name:
+                yield f"data: {json.dumps({'error': 'The uploaded file is empty.', 'http_status': 400})}\n\n"
+                return
             else:
                 yield f"data: {json.dumps({'error': 'No data provided'})}\n\n"
                 return
+            _rows_for_request(num_rows, metadata)
 
             metadata_time = time.time() - metadata_start
             all_timings['metadata_extraction'] = metadata_time
@@ -1285,9 +1325,9 @@ async def generate_with_sse(
                         yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
                         yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': step_timings.get('code_execution', 0)})}\n\n"
                     else:
-                        # Fallback mode - report actual execution time
+                        # No model call was needed: the generator reused a cached script.
                         yield f"data: {json.dumps({'step': 'prepare-llm', 'status': 'skipped'})}\n\n"
-                        yield f"data: {json.dumps({'step': 'generate-code', 'status': 'skipped', 'text': 'Using Fallback'})}\n\n"
+                        yield f"data: {json.dumps({'step': 'generate-code', 'status': 'skipped', 'text': 'Using Cached Code'})}\n\n"
                         yield f"data: {json.dumps({'step': 'execute-code', 'status': 'active'})}\n\n"
                         yield f"data: {json.dumps({'step': 'execute-code', 'status': 'completed', 'duration': step_timings.get('code_execution', 0)})}\n\n"
                 else:
@@ -1346,8 +1386,12 @@ async def generate_with_sse(
             # Already logged as a structured ai_generation_failed line.
             yield f"data: {json.dumps({'error': e.user_message, 'error_class': e.error_class, 'http_status': e.http_status})}\n\n"
         except Exception as e:
-            logger.error(f"SSE generation error: {e}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            # Type only: the message can quote a value from the uploaded file.
+            logger.error(f"SSE generation error: {type(e).__name__}")
+            payload = {'error': _public_error(e)}
+            if isinstance(e, HTTPException):
+                payload['http_status'] = e.status_code
+            yield f"data: {json.dumps(payload)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -1413,7 +1457,7 @@ def upload_data_dictionary(
         raise
     except Exception as e:
         logger.error(f"Error parsing data dictionary: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=_public_error(e))
 
 @app.post("/dictionary/table")
 def select_dictionary_table(table: str = Form(...), dictionary_id: Optional[str] = Form(None)):
@@ -1483,7 +1527,7 @@ async def validate_with_dictionary(
         raise
     except Exception as e:
         logger.error(f"Error validating data: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=_public_error(e))
 
 @app.post("/generate-with-dictionary")
 def generate_with_dictionary(
@@ -1690,7 +1734,7 @@ def generate_with_dictionary(
         raise
     except Exception as e:
         logger.error(f"Error generating with dictionary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_public_error(e))
 
 @app.post("/generate/batch")
 async def generate_batch():
@@ -1719,7 +1763,7 @@ async def clear_cache(older_than_days: Optional[int] = None):
         })
     except Exception as e:
         logger.error(f"Error clearing cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=_public_error(e))
 
 
 # ---------------------------------------------------------------------------

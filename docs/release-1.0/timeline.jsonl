@@ -10,3 +10,9 @@
 {"ts":"2026-11-20T14:27:37-0500","event":"stop","slug":"security-review","what":"Own review complete and saved"}
 {"ts":"2026-11-20T14:29:00-0500","event":"start","slug":"security-tickets","what":"File merged findings in Jira"}
 {"ts":"2026-11-20T14:29:24-0500","event":"stop","slug":"security-tickets","what":"13 security tickets filed"}
+{"ts":"2026-11-20T14:32:27-0500","event":"start","slug":"sec-01","what":"Screen generated code before it runs"}
+{"ts":"2026-11-20T14:34:26-0500","event":"start","slug":"sdlc-docs","what":"Fill SDLC documents (agent)"}
+{"ts":"2026-11-20T14:39:31-0500","event":"stop","slug":"about-api","what":"About page committed"}
+{"ts":"2026-11-20T14:42:59-0500","event":"stop","slug":"sec-01","what":"Runner and routes committed"}
+{"ts":"2026-11-20T14:46:43-0500","event":"start","slug":"model-choice","what":"Model choice feature, cache keyed by model and privacy mode"}
+{"ts":"2026-11-20T14:54:22-0500","event":"stop","slug":"sdlc-docs","what":"Seven SDLC pages filled as drafts"}
